@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1791063114229,
+      "tag": "0000_third_doorman",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791074371620,
+      "tag": "0001_add_categories",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791076196888,
+      "tag": "0002_add_products",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791107413727,
+      "tag": "0003_stock_movements_and_simple_forms",
+      "breakpoints": true
+    }
+  ]
+}
