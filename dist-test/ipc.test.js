@@ -26701,11 +26701,10 @@ function invoke(channel, ...args) {
 }
 function expectFailure(channel, ...args) {
   const result = invoke(channel, ...args);
-  assert2.equal(result.success, false);
   assert2.equal(
     result.success,
     false,
-    "the handler must never resolve an unexpected error as a success"
+    `${channel} must answer with an explicit business error, not a thrown error`
   );
   return result.success ? "" : result.error;
 }
@@ -26742,13 +26741,17 @@ describe3("canaux IPC du stock", () => {
     const listed = invoke("stock:list");
     assert2.equal(listed.success, true);
     assert2.equal(listed.success ? listed.data.length : -1, 3);
-    const initialized = invoke("stock:initialize", transformableProduct.id, {
-      productId: transformableProduct.id,
-      quantities: [
-        { form: "CARTON", quantity: 10 },
-        { form: "SEAU", quantity: 3 }
-      ]
-    });
+    const initialized = invoke(
+      "stock:initialize",
+      transformableProduct.id,
+      {
+        productId: transformableProduct.id,
+        quantities: [
+          { form: "CARTON", quantity: 10 },
+          { form: "SEAU", quantity: 3 }
+        ]
+      }
+    );
     assert2.equal(initialized.success, true);
     assert2.deepEqual(
       initialized.success ? initialized.data.map((level) => [level.form, level.quantity]) : [],

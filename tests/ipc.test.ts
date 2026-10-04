@@ -73,13 +73,17 @@ describe('canaux IPC du stock', () => {
     assert.equal(listed.success, true)
     assert.equal(listed.success ? listed.data.length : -1, 3)
 
-    const initialized = invoke<{ quantity: number }[]>('stock:initialize', transformableProduct.id, {
-      productId: transformableProduct.id,
-      quantities: [
-        { form: 'CARTON', quantity: 10 },
-        { form: 'SEAU', quantity: 3 },
-      ],
-    })
+    const initialized = invoke<{ form: string; quantity: number }[]>(
+      'stock:initialize',
+      transformableProduct.id,
+      {
+        productId: transformableProduct.id,
+        quantities: [
+          { form: 'CARTON', quantity: 10 },
+          { form: 'SEAU', quantity: 3 },
+        ],
+      },
+    )
 
     assert.equal(initialized.success, true)
     assert.deepEqual(
