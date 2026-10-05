@@ -29,4 +29,7 @@ export const categoryService = {
   delete: async (id: number): Promise<void> => {
     unwrap(await window.api.categories.delete(id))
   },
+  isNameAvailable: async (name: string, excludeId?: number): Promise<boolean> => {
+    return unwrap(await window.api.categories.isNameAvailable(name, excludeId))
+  },
 }

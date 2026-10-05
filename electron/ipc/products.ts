@@ -3,6 +3,7 @@ import {
   PRODUCT_ERRORS,
   createProduct,
   getProductById,
+  isNameAvailable,
   listProducts,
   ProductError,
   setProductActive,
@@ -73,6 +74,17 @@ export function registerProductIpcHandlers(): void {
     (_event, id: number, isActive: boolean): ProductResult<Product> => {
       try {
         return toSuccess(setProductActive(id, isActive))
+      } catch (error) {
+        return toFailure(error, PRODUCT_ERRORS.unexpected)
+      }
+    },
+  )
+
+  ipcMain.handle(
+    'products:is-name-available',
+    (_event, name: string, excludeId?: number): ProductResult<boolean> => {
+      try {
+        return toSuccess(isNameAvailable(name, excludeId))
       } catch (error) {
         return toFailure(error, PRODUCT_ERRORS.unexpected)
       }

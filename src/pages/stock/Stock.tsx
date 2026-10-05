@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { Category, StockAdjustInput, StockFormInput, StockFormLevel, StockMovement } from '@/types'
-import { categoryService, stockService } from '@/services'
+import type { StockAdjustInput, StockFormInput, StockFormLevel, StockMovement } from '@/types'
+import { stockService } from '@/services'
 import ConfirmDialog from '../categories/ConfirmDialog'
 import StockAdjustForm from './StockAdjustForm'
 import StockHistory from './StockHistory'
 import StockInitializeForm from './StockInitializeForm'
-import { formatQuantityForForm, STOCK_MESSAGES } from './schemas/stock.schema'
-
-type LevelState = 'NOT_INITIALIZED' | 'RUPTURE' | 'NORMAL'
+import {
+  formatQuantityForForm,
+  formatRowForms,
+  formatRowQuantities,
+  getEmptyForms,
+  getStockLevelState,
+  STOCK_MESSAGES,
+} from './schemas/stock.schema'
+import type { StockLevelState } from './schemas/stock.schema'
 
 interface ProductTarget {
   productId: number
@@ -17,35 +23,23 @@ interface ProductTarget {
   levels: StockFormLevel[]
 }
 
-function getLevelState(level: StockFormLevel): LevelState {
-  if (!level.isInitialized) {
-    return 'NOT_INITIALIZED'
-  }
-
-  return level.quantity > 0 ? 'NORMAL' : 'RUPTURE'
-}
-
-const LEVEL_STATE_LABELS: Record<LevelState, string> = {
-  NOT_INITIALIZED: 'Non initialisé',
+const LEVEL_STATE_LABELS: Record<StockLevelState, string> = {
   RUPTURE: 'Rupture',
   NORMAL: 'Normal',
 }
 
-const LEVEL_STATE_CLASSES: Record<LevelState, string> = {
-  NOT_INITIALIZED: 'bg-amber-100 text-amber-800',
+const LEVEL_STATE_CLASSES: Record<StockLevelState, string> = {
   RUPTURE: 'bg-red-100 text-red-700',
   NORMAL: 'bg-green-100 text-green-700',
 }
 
 function Stock() {
   const [levels, setLevels] = useState<StockFormLevel[]>([])
-  const [categories, setCategories] = useState<Category[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [categoriesError, setCategoriesError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [categoryId, setCategoryId] = useState('')
+  const [categorySearch, setCategorySearch] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [initializing, setInitializing] = useState<ProductTarget | null>(null)
@@ -61,20 +55,6 @@ function Stock() {
   const [isHistoryLoading, setIsHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState<string | null>(null)
 
-  const loadCategories = useCallback(async () => {
-    setCategoriesError(null)
-
-    try {
-      setCategories(await categoryService.list())
-    } catch {
-      setCategoriesError(STOCK_MESSAGES.unexpected)
-    }
-  }, [])
-
-  useEffect(() => {
-    loadCategories()
-  }, [loadCategories])
-
   const loadStocks = useCallback(async () => {
     setIsLoading(true)
     setLoadError(null)
@@ -83,7 +63,7 @@ function Stock() {
       setLevels(
         await stockService.list({
           search: search.trim() || undefined,
-          categoryId: categoryId ? Number(categoryId) : undefined,
+          categorySearch: categorySearch.trim() || undefined,
         }),
       )
     } catch {
@@ -91,7 +71,7 @@ function Stock() {
     } finally {
       setIsLoading(false)
     }
-  }, [search, categoryId])
+  }, [search, categorySearch])
 
   useEffect(() => {
     const timer = setTimeout(loadStocks, 200)
@@ -236,12 +216,6 @@ function Stock() {
         <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{actionError}</p>
       )}
 
-      {categoriesError && (
-        <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">
-          {categoriesError}
-        </p>
-      )}
-
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <label htmlFor="stock-search" className="block text-sm font-medium text-gray-700">
@@ -258,22 +232,20 @@ function Stock() {
         </div>
 
         <div>
-          <label htmlFor="stock-category" className="block text-sm font-medium text-gray-700">
+          <label
+            htmlFor="stock-category-search"
+            className="block text-sm font-medium text-gray-700"
+          >
             Catégorie
           </label>
-          <select
-            id="stock-category"
-            value={categoryId}
-            onChange={(event) => setCategoryId(event.target.value)}
+          <input
+            id="stock-category-search"
+            type="search"
+            value={categorySearch}
+            onChange={(event) => setCategorySearch(event.target.value)}
+            placeholder="Nom de la catégorie"
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-          >
-            <option value="">Toutes les catégories</option>
-            {categories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-              </option>
-            ))}
-          </select>
+          />
         </div>
       </div>
 
@@ -354,7 +326,7 @@ function Stock() {
               </tr>
             )}
 
-            {!isLoading && !loadError && levels.length === 0 && (
+            {!isLoading && !loadError && targets.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-6 py-6 text-center text-sm text-gray-500">
                   Aucun produit pour le moment.
@@ -364,79 +336,92 @@ function Stock() {
 
             {!isLoading &&
               !loadError &&
-              targets.map((target) =>
-                target.levels.map((level, index) => {
-                  const state = getLevelState(level)
+              targets.map((target) => {
+                const state = getStockLevelState(target)
+                // A product without any movement has a stock of 0: its initial
+                // stock can still be declared, exactly once.
+                const canInitialize = target.levels.every((level) => !level.hasMovements)
+                const isActive = target.levels.every((level) => level.isProductActive)
+                const legacyForms = target.levels
+                  .filter((level) => level.isLegacyForm)
+                  .map((level) => level.form)
+                const emptyForms = getEmptyForms(target)
 
-                  return (
-                    <tr key={`${level.productId}-${level.form}`} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 text-sm font-medium text-gray-900">
-                        {index === 0 ? target.productName : ''}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-600">
-                        {level.form}
-                        {level.isLegacyForm && (
-                          <span className="ml-2 text-xs text-gray-500">(forme historique)</span>
-                        )}
-                        {!level.isProductActive && (
-                          <span className="ml-2 text-xs text-gray-500">(produit inactif)</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-right text-sm font-medium text-gray-900">
-                        {level.isInitialized ? level.quantity : '—'}
-                      </td>
-                      <td className="px-6 py-4 text-sm">
-                        <span
-                          className={`rounded-full px-2 py-1 text-xs font-medium ${LEVEL_STATE_CLASSES[state]}`}
-                        >
-                          {LEVEL_STATE_LABELS[state]}
+                return (
+                  <tr key={target.productId} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 text-sm font-medium text-gray-900">
+                      {target.productName}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-600">
+                      {formatRowForms(target)}
+                      {legacyForms.length > 0 && (
+                        <span className="block text-xs text-gray-500">
+                          dont {legacyForms.join(', ')} : forme historique
                         </span>
-                      </td>
-                      <td className="px-6 py-4 text-right text-sm">
-                        <div className="flex justify-end gap-3">
-                          {!level.isInitialized && (
-                            <button
-                              type="button"
-                              onClick={() => openInitializeForm(target)}
-                              disabled={!level.isProductActive}
-                              title={
-                                level.isProductActive
-                                  ? undefined
-                                  : 'Réactivez le produit pour initialiser son stock'
-                              }
-                              className="font-medium text-blue-600 hover:text-blue-800 disabled:cursor-not-allowed disabled:text-gray-400"
-                            >
-                              Initialiser
-                            </button>
-                          )}
-                          {level.isInitialized && !level.isLegacyForm && (
-                            <button
-                              type="button"
-                              onClick={() => openAdjustForm(target)}
-                              disabled={!level.isProductActive}
-                              title={
-                                level.isProductActive
-                                  ? undefined
-                                  : 'Réactivez le produit pour ajuster son stock'
-                              }
-                              className="font-medium text-indigo-600 hover:text-indigo-800 disabled:cursor-not-allowed disabled:text-gray-400"
-                            >
-                              Ajuster
-                            </button>
-                          )}
+                      )}
+                      {!isActive && (
+                        <span className="block text-xs text-gray-500">
+                          produit inactif
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm font-medium text-gray-900">
+                      {formatRowQuantities(target)}
+                      {state === 'NORMAL' && emptyForms.length > 0 && (
+                        <span className="block text-xs font-normal text-amber-600">
+                          sans stock : {emptyForms.join(', ')}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-sm">
+                      <span
+                        className={`rounded-full px-2 py-1 text-xs font-medium ${LEVEL_STATE_CLASSES[state]}`}
+                      >
+                        {LEVEL_STATE_LABELS[state]}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-right text-sm">
+                      <div className="flex justify-end gap-3">
+                        {canInitialize && (
                           <button
                             type="button"
-                            onClick={() => openHistory(target)}
-                            className="font-medium text-gray-600 hover:text-gray-800"
+                            onClick={() => openInitializeForm(target)}
+                            disabled={!isActive}
+                            title={
+                              isActive
+                                ? undefined
+                                : 'Réactivez le produit pour initialiser son stock'
+                            }
+                            className="font-medium text-blue-600 hover:text-blue-800 disabled:cursor-not-allowed disabled:text-gray-400"
                           >
-                            Historique
+                            Initialiser
                           </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                }),
-              )}
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => openAdjustForm(target)}
+                          disabled={!isActive}
+                          title={
+                            isActive
+                              ? undefined
+                              : 'Réactivez le produit pour ajuster son stock'
+                          }
+                          className="font-medium text-indigo-600 hover:text-indigo-800 disabled:cursor-not-allowed disabled:text-gray-400"
+                        >
+                          Ajuster
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openHistory(target)}
+                          className="font-medium text-gray-600 hover:text-gray-800"
+                        >
+                          Historique
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
           </tbody>
         </table>
       </div>

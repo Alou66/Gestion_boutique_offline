@@ -5,6 +5,7 @@ import {
   createCategory,
   deleteCategory,
   getCategoryById,
+  isNameAvailable,
   listCategories,
   updateCategory,
 } from '../services/categoryService'
@@ -75,6 +76,17 @@ export function registerCategoryIpcHandlers(): void {
     (_event, id: number): CategoryResult<null> => {
       try {
         return toSuccess(deleteCategory(id))
+      } catch (error) {
+        return toFailure(error, CATEGORY_ERRORS.unexpected)
+      }
+    },
+  )
+
+  ipcMain.handle(
+    'categories:is-name-available',
+    (_event, name: string, excludeId?: number): CategoryResult<boolean> => {
+      try {
+        return toSuccess(isNameAvailable(name, excludeId))
       } catch (error) {
         return toFailure(error, CATEGORY_ERRORS.unexpected)
       }

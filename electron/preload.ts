@@ -21,6 +21,8 @@ const api: ElectronAPI = {
     create: (input) => ipcRenderer.invoke('categories:create', input),
     update: (id, input) => ipcRenderer.invoke('categories:update', id, input),
     delete: (id) => ipcRenderer.invoke('categories:delete', id),
+    isNameAvailable: (name, excludeId) =>
+      ipcRenderer.invoke('categories:is-name-available', name, excludeId),
   },
   products: {
     list: (filters) => ipcRenderer.invoke('products:list', filters),
@@ -28,6 +30,8 @@ const api: ElectronAPI = {
     create: (input) => ipcRenderer.invoke('products:create', input),
     update: (id, input) => ipcRenderer.invoke('products:update', id, input),
     setActive: (id, isActive) => ipcRenderer.invoke('products:set-active', id, isActive),
+    isNameAvailable: (name, excludeId) =>
+      ipcRenderer.invoke('products:is-name-available', name, excludeId),
   },
   stock: {
     list: (filters) => ipcRenderer.invoke('stock:list', filters),
@@ -36,6 +40,33 @@ const api: ElectronAPI = {
     initialize: (productId, input) => ipcRenderer.invoke('stock:initialize', productId, input),
     adjust: (productId, input) => ipcRenderer.invoke('stock:adjust', productId, input),
     movements: (productId) => ipcRenderer.invoke('stock:movements', productId),
+  },
+  supplies: {
+    list: (filters) => ipcRenderer.invoke('supplies:list', filters),
+    get: (id) => ipcRenderer.invoke('supplies:get', id),
+    getByReference: (reference) =>
+      ipcRenderer.invoke('supplies:get-by-reference', reference),
+    create: (input) => ipcRenderer.invoke('supplies:create', input),
+  },
+  transformations: {
+    listProducts: () => ipcRenderer.invoke('transformations:list-products'),
+    list: (filters) => ipcRenderer.invoke('transformations:list', filters),
+    get: (id) => ipcRenderer.invoke('transformations:get', id),
+    getByReference: (reference) =>
+      ipcRenderer.invoke('transformations:get-by-reference', reference),
+    create: (input) => ipcRenderer.invoke('transformations:create', input),
+  },
+  clients: {
+    list: (filters) => ipcRenderer.invoke('clients:list', filters),
+    get: (id) => ipcRenderer.invoke('clients:get', id),
+    create: (input) => ipcRenderer.invoke('clients:create', input),
+    update: (id, input) => ipcRenderer.invoke('clients:update', id, input),
+    setActive: (id, isActive) => ipcRenderer.invoke('clients:set-active', id, isActive),
+    isNameAvailable: (name, excludeClientId) =>
+      ipcRenderer.invoke('clients:is-name-available', name, excludeClientId),
+    isPhoneAvailable: (phone, excludeClientId) =>
+      ipcRenderer.invoke('clients:is-phone-available', phone, excludeClientId),
+    ensureSystem: () => ipcRenderer.invoke('clients:ensure-system'),
   },
 }
 

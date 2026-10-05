@@ -30,4 +30,7 @@ export const productService = {
   setActive: async (id: number, isActive: boolean): Promise<Product> => {
     return unwrap(await window.api.products.setActive(id, isActive))
   },
+  isNameAvailable: async (name: string, excludeId?: number): Promise<boolean> => {
+    return unwrap(await window.api.products.isNameAvailable(name, excludeId))
+  },
 }

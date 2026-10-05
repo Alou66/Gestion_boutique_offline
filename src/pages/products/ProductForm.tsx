@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { productService } from '@/services'
 import type { Category, Product, ProductInput } from '@/types'
 import {
   hasIdenticalForms,
@@ -8,6 +9,7 @@ import {
   PRODUCT_FORM_MAX_LENGTH,
   PRODUCT_MESSAGES,
   PRODUCT_NAME_MAX_LENGTH,
+  PRODUCT_NAME_MIN_LENGTH,
   PRODUCT_PRICE_MAX,
   pluralizeFormLabel,
   productFormSchema,
@@ -25,6 +27,11 @@ interface ProductFormProps {
   onSubmit: (input: ProductInput) => void
   onCancel: () => void
 }
+
+const DEBOUNCE_MS = 400
+
+// Server-side duplicate error message (from PRODUCT_ERRORS in electron/services/productService.ts)
+const SERVER_DUPLICATE_NAME = 'Ce produit existe déjà.'
 
 function ProductForm({
   title,
@@ -65,6 +72,38 @@ function ProductForm({
   )
   const [fieldErrors, setFieldErrors] = useState<ProductFormErrors>({})
   const [formError, setFormError] = useState<string | null>(null)
+  const [nameAvailability, setNameAvailability] = useState<'idle' | 'checking' | 'available' | 'taken' | 'error'>('idle')
+
+  const nameDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const checkNameAvailability = useCallback(async (value: string, excludeId?: number) => {
+    if (!value || value.trim().length < PRODUCT_NAME_MIN_LENGTH) {
+      setNameAvailability('idle')
+      return
+    }
+
+    setNameAvailability('checking')
+
+    try {
+      const available = await productService.isNameAvailable(value.trim(), excludeId)
+      setNameAvailability(available ? 'available' : 'taken')
+    } catch {
+      setNameAvailability('error')
+    }
+  }, [])
+
+  const handleNameChange = (value: string) => {
+    setName(value)
+    setFieldErrors((prev) => ({ ...prev, name: undefined }))
+
+    if (nameDebounceRef.current) {
+      clearTimeout(nameDebounceRef.current)
+    }
+
+    nameDebounceRef.current = setTimeout(() => {
+      checkNameAvailability(value, initialProduct?.id)
+    }, DEBOUNCE_MS)
+  }
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -105,6 +144,13 @@ function ProductForm({
       return
     }
 
+    // The check above is only a warning for the shopkeeper: the main process
+    // still refuses the duplicate on its own.
+    if (nameAvailability === 'taken') {
+      setFieldErrors({ name: PRODUCT_MESSAGES.nameTaken })
+      return
+    }
+
     setFieldErrors({})
     onSubmit(toProductInput(parsed.data))
   }
@@ -123,9 +169,56 @@ function ProductForm({
     }
   }
 
-  const displayedError = formError ?? error
+  const displayedError = formError ?? (error !== SERVER_DUPLICATE_NAME ? error : null)
   const primaryFormLabel = primaryForm.trim() ? normalizeFormLabel(primaryForm) : ''
   const secondaryFormLabel = secondaryForm.trim() ? normalizeFormLabel(secondaryForm) : ''
+
+  const nameStatusIcon = () => {
+    switch (nameAvailability) {
+      case 'checking':
+        return <span className="text-blue-600">⟳</span>
+      case 'available':
+        return <span className="text-green-600">✓</span>
+      case 'taken':
+        return <span className="text-amber-600">⚠</span>
+      case 'error':
+        return <span className="text-gray-500">?</span>
+      default:
+        return null
+    }
+  }
+
+  const nameStatusText = () => {
+    switch (nameAvailability) {
+      case 'checking':
+        return <span className="text-blue-600">{PRODUCT_MESSAGES.checking}</span>
+      case 'available':
+        return <span className="text-green-600">{PRODUCT_MESSAGES.nameAvailable}</span>
+      case 'taken':
+        return <span className="text-amber-600">{PRODUCT_MESSAGES.nameTaken}</span>
+      case 'error':
+        return <span className="text-gray-500">{PRODUCT_MESSAGES.checkFailed}</span>
+      default:
+        return null
+    }
+  }
+
+  const isSubmitDisabled =
+    isSubmitting || nameAvailability === 'taken' || nameAvailability === 'checking'
+
+  useEffect(() => {
+    return () => {
+      if (nameDebounceRef.current) clearTimeout(nameDebounceRef.current)
+    }
+  }, [])
+
+  // Convert server-side duplicate errors to field errors
+  useEffect(() => {
+    if (error !== SERVER_DUPLICATE_NAME) return
+
+    setNameAvailability('taken')
+    setFieldErrors((prev) => ({ ...prev, name: PRODUCT_MESSAGES.nameTaken }))
+  }, [error])
 
   return (
     <form
@@ -138,17 +231,21 @@ function ProductForm({
         <label htmlFor="product-name" className="block text-sm font-medium text-gray-700">
           Nom
         </label>
-        <input
-          id="product-name"
-          name="name"
-          type="text"
-          maxLength={PRODUCT_NAME_MAX_LENGTH}
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          style={{ textTransform: 'uppercase' }}
-          disabled={isSubmitting}
-          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
-        />
+        <div className="mt-1 flex items-center gap-2">
+          <input
+            id="product-name"
+            name="name"
+            type="text"
+            maxLength={PRODUCT_NAME_MAX_LENGTH}
+            value={name}
+            onChange={(event) => handleNameChange(event.target.value)}
+            style={{ textTransform: 'uppercase' }}
+            disabled={isSubmitting}
+            className="flex-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+          />
+          {nameStatusIcon()}
+        </div>
+        {nameStatusText() && <p className="mt-1 text-sm">{nameStatusText()}</p>}
         {fieldErrors.name && <p className="mt-1 text-sm text-red-600">{fieldErrors.name}</p>}
       </div>
 
@@ -361,7 +458,7 @@ function ProductForm({
         </button>
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={isSubmitDisabled}
           className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isSubmitting ? 'Enregistrement…' : submitLabel}

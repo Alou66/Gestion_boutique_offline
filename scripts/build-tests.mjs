@@ -36,7 +36,11 @@ await build({
   format: 'esm',
   target: 'node22',
   external: ['better-sqlite3'],
-  alias: { electron: path.join(testsDir, 'stubs', 'electron.ts') },
+  alias: {
+    electron: path.join(testsDir, 'stubs', 'electron.ts'),
+    // Same alias as vite.config.ts, so the renderer modules can be tested.
+    '@': path.join(root, 'src'),
+  },
   logLevel: 'warning',
 })
 

@@ -66,7 +66,7 @@ describe('module Stock', () => {
 
       assert.equal(levels.length, 1)
       assert.deepEqual(
-        levels.map((level) => [level.form, level.quantity, level.isInitialized]),
+        levels.map((level) => [level.form, level.quantity, level.hasMovements]),
         [['SAC', 20, true]],
       )
       assert.equal(movementCount(), 1)
@@ -172,6 +172,33 @@ describe('module Stock', () => {
 
       assert.equal(movementCount(), 2)
       assert.equal(balanceOf(transformableProduct.id, 'CARTON'), 10)
+    })
+
+    it('refuse une initialisation dès que le produit a déjà des mouvements', () => {
+      // A reception or an adjustment opens the history: the initial stock can no
+      // longer be declared, the movements are not touched.
+      adjustStock(transformableProduct.id, {
+        productId: transformableProduct.id,
+        form: 'CARTON',
+        direction: 'IN',
+        quantity: 5,
+        reason: 'Entrée avant initialisation',
+      })
+
+      expectStockError('alreadyHasMovements', () =>
+        initializeStock(transformableProduct.id, {
+          productId: transformableProduct.id,
+          quantities: [
+            { form: 'CARTON', quantity: 50 },
+            { form: 'SEAU', quantity: 50 },
+          ],
+        }),
+      )
+
+      assert.equal(movementCount(), 1)
+      assert.equal(balanceOf(transformableProduct.id, 'CARTON'), 5)
+      assert.equal(balanceOf(transformableProduct.id, 'SEAU'), 0)
+      assert.equal(isStockInitialized(transformableProduct.id), false)
     })
 
     it('verrouille la quantité initiale : seul un ajustement peut la corriger', () => {
@@ -302,13 +329,25 @@ describe('module Stock', () => {
       ])
     })
 
-    it('expose un produit non initialisé avec un stock à zéro', () => {
+    it('expose un produit sans mouvement avec un stock logique à zéro', () => {
       const lines = listStocks()
 
       assert.equal(lines.length, 3)
+      // No artificial STOCK_INITIAL: a product without any movement is simply
+      // displayed with a quantity of 0.
       assert.equal(
-        lines.every((line) => line.quantity === 0 && !line.isInitialized),
+        lines.every((line) => line.quantity === 0 && !line.hasMovements),
         true,
+      )
+      assert.equal(movementCount(), 0)
+      assert.equal(isStockInitialized(simpleProduct.id), false)
+      assert.equal(isStockInitialized(transformableProduct.id), false)
+      assert.deepEqual(
+        getProductStock(transformableProduct.id).map((level) => [level.form, level.quantity]),
+        [
+          ['CARTON', 0],
+          ['SEAU', 0],
+        ],
       )
     })
 
@@ -506,17 +545,33 @@ describe('module Stock', () => {
       assert.equal(movementCount(), 4)
     })
 
-    it('refuse un ajustement sur un produit non initialisé', () => {
-      expectStockError('notInitialized', () =>
+    it('ajuste un produit sans mouvement : son stock vaut zéro', () => {
+      const result = adjustStock(simpleProduct.id, {
+        productId: simpleProduct.id,
+        form: 'SAC',
+        direction: 'IN',
+        quantity: 5,
+        reason: 'Entrée tardive',
+      })
+
+      assert.equal(result.stock.quantity, 5)
+      assert.equal(result.stock.hasMovements, true)
+      assert.equal(movementCount(), 3)
+      assert.equal(isStockInitialized(simpleProduct.id), false)
+    })
+
+    it('refuse une sortie sur un produit sans mouvement, jamais de stock négatif', () => {
+      expectStockError('insufficientStock', () =>
         adjustStock(simpleProduct.id, {
           productId: simpleProduct.id,
           form: 'SAC',
-          direction: 'IN',
-          quantity: 5,
-          reason: 'Entrée tardive',
+          direction: 'OUT',
+          quantity: 1,
+          reason: 'Sortie impossible',
         }),
       )
 
+      assert.equal(balanceOf(simpleProduct.id, 'SAC'), 0)
       assert.equal(movementCount(), 2)
     })
   })

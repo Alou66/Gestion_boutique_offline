@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { PasswordInput } from '@/components'
 import { useAuth } from '@/hooks/useAuth'
 import { PASSWORD_MIN_LENGTH, setupSchema } from './schemas/setup.schema'
 import type { SetupFormData } from './schemas/setup.schema'
@@ -161,47 +162,28 @@ function Setup() {
               />
             </div>
 
-            <div>
-              <label
-                htmlFor="password"
-                className="block text-sm font-medium text-gray-700"
-              >
-                Mot de passe
-              </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="new-password"
-                value={form.password}
-                onChange={update('password')}
-                className={inputClass}
-                required
-              />
-              <p className="mt-1 text-xs text-gray-500">
-                {PASSWORD_MIN_LENGTH} caractères minimum, avec au moins une lettre
-                et un chiffre.
-              </p>
-            </div>
+            <PasswordInput
+              id="password"
+              name="password"
+              label="Mot de passe"
+              value={form.password}
+              onChange={update('password')}
+              autoComplete="new-password"
+              required
+              className={inputClass}
+              hint={`${PASSWORD_MIN_LENGTH} caractères minimum, avec au moins une lettre et un chiffre.`}
+            />
 
-            <div>
-              <label
-                htmlFor="passwordConfirmation"
-                className="block text-sm font-medium text-gray-700"
-              >
-                Confirmer le mot de passe
-              </label>
-              <input
-                id="passwordConfirmation"
-                name="passwordConfirmation"
-                type="password"
-                autoComplete="new-password"
-                value={form.passwordConfirmation}
-                onChange={update('passwordConfirmation')}
-                className={inputClass}
-                required
-              />
-            </div>
+            <PasswordInput
+              id="passwordConfirmation"
+              name="passwordConfirmation"
+              label="Confirmer le mot de passe"
+              value={form.passwordConfirmation}
+              onChange={update('passwordConfirmation')}
+              autoComplete="new-password"
+              required
+              className={inputClass}
+            />
           </fieldset>
 
           <button

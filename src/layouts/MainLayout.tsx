@@ -10,8 +10,11 @@ interface MainLayoutProps {
 const NAV_LINKS = [
   { to: '/dashboard', label: 'Tableau de bord' },
   { to: '/categories', label: 'Catégories' },
+  { to: '/clients', label: 'Clients' },
   { to: '/products', label: 'Produits' },
   { to: '/stock', label: 'Stock' },
+  { to: '/approvisionnements', label: 'Approvisionnements' },
+  { to: '/transformations', label: 'Transformations' },
 ]
 
 function MainLayout({ children }: MainLayoutProps) {

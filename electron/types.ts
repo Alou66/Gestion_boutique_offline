@@ -83,6 +83,8 @@ export interface CategoryAPI {
   create: (input: CategoryInput) => Promise<CategoryResult<Category>>
   update: (id: number, input: CategoryUpdateInput) => Promise<CategoryResult<Category>>
   delete: (id: number) => Promise<CategoryResult<null>>
+  /** excludeId ignores the category being edited: its own name stays available. */
+  isNameAvailable: (name: string, excludeId?: number) => Promise<CategoryResult<boolean>>
 }
 
 export interface Product {
@@ -110,16 +112,22 @@ export interface Product {
 
 /**
  * Stock is never stored on `products`: it is always the sum of the movements of
- * `stock_movements`. Only the movement types already implemented are declared
- * here (STOCK_INITIAL, AJUSTEMENT); APPROVISIONNEMENT, TRANSFORMATION and VENTE
- * will be added by their own modules.
+ * `stock_movements`. TRANSFORMATION is the transfer between the two forms of a
+ * transformable product (OUT on the source form, IN on the destination form);
+ * VENTE will be added by its own module.
  */
-export type StockMovementType = 'STOCK_INITIAL' | 'AJUSTEMENT'
+export type StockMovementType =
+  | 'STOCK_INITIAL'
+  | 'AJUSTEMENT'
+  | 'APPROVISIONNEMENT'
+  | 'TRANSFORMATION'
 
 /**
  * Sense of a movement. `quantity` is always a positive integer: the direction
- * carries the sign, so a STOCK_INITIAL is always IN and an AJUSTEMENT is
- * explicitly IN (entrée) or OUT (sortie).
+ * carries the sign, so a STOCK_INITIAL is always IN, an APPROVISIONNEMENT is
+ * always IN and an AJUSTEMENT is explicitly IN (entrée) or OUT (sortie). A
+ * TRANSFORMATION is the only type that exists in both directions on the same
+ * product: it is OUT on the source form and IN on the destination form.
  */
 export type StockDirection = 'IN' | 'OUT'
 
@@ -133,7 +141,10 @@ export interface StockMovement {
   quantity: number
   /** Signed quantity derived from `direction`, for display only. */
   signedQuantity: number
-  /** NULL for STOCK_INITIAL, mandatory for AJUSTEMENT. */
+  /**
+   * NULL for STOCK_INITIAL, APPROVISIONNEMENT and TRANSFORMATION, mandatory for
+   * AJUSTEMENT.
+   */
   reason: string | null
   createdAt: Date
 }
@@ -174,8 +185,12 @@ export interface StockFormLevel {
   categoryName: string
   form: string
   quantity: number
-  /** True once a STOCK_INITIAL exists for the product. */
-  isInitialized: boolean
+  /**
+   * True once the product has at least one movement in its history. A product
+   * without any movement has a logical stock of 0, it is never "uninitialized":
+   * this flag only says whether an initial stock can still be declared.
+   */
+  hasMovements: boolean
   isProductActive: boolean
   /**
    * True when the form only exists in the movement history (the product forms
@@ -242,6 +257,172 @@ export interface ProductAPI {
   create: (input: ProductInput) => Promise<ProductResult<Product>>
   update: (id: number, input: ProductUpdateInput) => Promise<ProductResult<Product>>
   setActive: (id: number, isActive: boolean) => Promise<ProductResult<Product>>
+  /** excludeId ignores the product being edited: its own name stays available. */
+  isNameAvailable: (name: string, excludeId?: number) => Promise<ProductResult<boolean>>
+}
+
+/** One line typed by the shopkeeper: the amounts are recomputed by the service. */
+export interface SupplyItemInput {
+  productId: number
+  /** Must be one of the forms of the product (SAC, CARTON, SEAU…). */
+  form: string
+  /** Strictly positive whole number of received units of that form. */
+  quantity: number
+  /** Real purchase price of one unit on this document, in whole FCFA. */
+  purchaseUnitPrice: number
+}
+
+export interface SupplyCreateInput {
+  /** Reception date as `YYYY-MM-DD`, defaults to today. */
+  date?: string | null
+  /** Optional free text: there is no supplier table in this version. */
+  supplierName?: string | null
+  items: SupplyItemInput[]
+}
+
+/** One row of the supply list: the header only, with its number of lines. */
+export interface Supply {
+  id: number
+  reference: string
+  supplierName: string | null
+  date: Date
+  /** Sum of the line totals, never typed by the shopkeeper. */
+  totalAmount: number
+  itemCount: number
+  createdAt: Date
+}
+
+/** One received line, joined with the product name for display. */
+export interface SupplyItem {
+  id: number
+  supplyId: number
+  productId: number
+  productName: string
+  form: string
+  quantity: number
+  purchaseUnitPrice: number
+  /** quantity * purchaseUnitPrice, recomputed by the service. */
+  lineTotal: number
+}
+
+/** A validated supply and its lines: a supply is always validated and immutable. */
+export interface SupplyDetail extends Supply {
+  items: SupplyItem[]
+}
+
+export interface SupplyFilters {
+  /** Case-insensitive partial match on the reference (APP-000001…). */
+  search?: string
+  /** Case-insensitive partial match on the free text supplier. */
+  supplierSearch?: string
+}
+
+export type SupplyResult<T> =
+  | { success: true; data: T }
+  | { success: false; error: string }
+
+export interface SupplyAPI {
+  list: (filters?: SupplyFilters) => Promise<SupplyResult<Supply[]>>
+  get: (id: number) => Promise<SupplyResult<SupplyDetail>>
+  getByReference: (reference: string) => Promise<SupplyResult<SupplyDetail>>
+  create: (input: SupplyCreateInput) => Promise<SupplyResult<SupplyDetail>>
+}
+
+/** Payload of a transformation, as built by the renderer form. */
+export interface TransformationCreateInput {
+  productId: number
+  /** Must be one of the two forms of the transformable product. */
+  sourceForm: string
+  /** Strictly positive whole number of source units, never fractional. */
+  sourceQuantity: number
+  /** Transformation date as `YYYY-MM-DD`, defaults to today. */
+  date?: string | null
+}
+
+/**
+ * A validated transformation document: the two forms and the two exact
+ * quantities, both recomputed by the service from the conversion of the product.
+ */
+export interface Transformation {
+  id: number
+  reference: string
+  productId: number
+  productName: string
+  sourceForm: string
+  sourceQuantity: number
+  destinationForm: string
+  destinationQuantity: number
+  date: Date
+  createdAt: Date
+}
+
+/** A validated transformation and the stock it produced, for the detail view. */
+export interface TransformationDetail extends Transformation {
+  /** Balance of each form, read back from `stock_movements` after the write. */
+  stockAfter: StockFormLevel[]
+}
+
+export interface TransformationFilters {
+  /** Case-insensitive partial match on the reference (TRF-000001…). */
+  search?: string
+  /** Case-insensitive partial match on the product name. */
+  productSearch?: string
+}
+
+export type TransformationResult<T> =
+  | { success: true; data: T }
+  | { success: false; error: string }
+
+export interface TransformationAPI {
+  listProducts: () => Promise<TransformationResult<Product[]>>
+  list: (filters?: TransformationFilters) => Promise<TransformationResult<Transformation[]>>
+  get: (id: number) => Promise<TransformationResult<TransformationDetail>>
+  getByReference: (reference: string) => Promise<TransformationResult<TransformationDetail>>
+  create: (
+    input: TransformationCreateInput,
+  ) => Promise<TransformationResult<TransformationDetail>>
+}
+
+export interface Client {
+  id: number
+  name: string
+  phone: string
+  address: string | null
+  isActive: boolean
+  isSystem: boolean
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface ClientInput {
+  name: string
+  phone: string
+  address?: string | null
+}
+
+export type ClientUpdateInput = ClientInput
+
+export interface ClientFilters {
+  /** Case-insensitive partial match on the client name. */
+  search?: string
+  /** Case-insensitive partial match on the phone number. */
+  phoneSearch?: string
+  isActive?: boolean | null
+}
+
+export type ClientResult<T> =
+  | { success: true; data: T }
+  | { success: false; error: string }
+
+export interface ClientAPI {
+  list: (filters?: ClientFilters) => Promise<ClientResult<Client[]>>
+  get: (id: number) => Promise<ClientResult<Client | null>>
+  create: (input: ClientInput) => Promise<ClientResult<Client>>
+  update: (id: number, input: ClientUpdateInput) => Promise<ClientResult<Client>>
+  setActive: (id: number, isActive: boolean) => Promise<ClientResult<Client>>
+  isNameAvailable: (name: string, excludeClientId?: number) => Promise<ClientResult<boolean>>
+  isPhoneAvailable: (phone: string, excludeClientId?: number) => Promise<ClientResult<boolean>>
+  ensureSystem: () => Promise<ClientResult<Client>>
 }
 
 export interface ElectronAPI {
@@ -251,4 +432,7 @@ export interface ElectronAPI {
   categories: CategoryAPI
   products: ProductAPI
   stock: StockAPI
+  supplies: SupplyAPI
+  transformations: TransformationAPI
+  clients: ClientAPI
 }

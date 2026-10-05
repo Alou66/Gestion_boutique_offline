@@ -1,4 +1,4 @@
-import { and, asc, eq, ne } from 'drizzle-orm'
+import { and, asc, eq, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { categories } from '../database/schema'
 import { getDb } from '../database/client'
@@ -49,12 +49,13 @@ export const categoryIdSchema = z
   .positive()
 
 /**
- * Single source of truth for name normalization: trim + upper case.
- * Applied in the main process before any write, so the database only ever
- * stores normalized names and uniqueness comparisons are done on that form.
+ * Single source of truth for name normalization: trim + collapse inner blanks +
+ * upper case, exactly like the clients. "  boissons " and "BOISSONS" are the
+ * same name. Applied in the main process before any write, so the database only
+ * ever stores normalized names and uniqueness comparisons are done on that form.
  */
 export function normalizeCategoryName(rawName: string): string {
-  return rawName.trim().toUpperCase()
+  return rawName.trim().replace(/\s+/g, ' ').toUpperCase()
 }
 
 function toErrorCode(error: z.ZodError, fallback: CategoryErrorCode): CategoryErrorCode {
@@ -92,20 +93,27 @@ function toCategory(row: typeof categories.$inferSelect): Category {
   }
 }
 
-function findByName(name: string) {
-  return getDb().select().from(categories).where(eq(categories.name, name)).get()
+/**
+ * Row id of the category already using this name, ignoring `excludeId`.
+ * The comparison is case insensitive because the name is normalized before any
+ * comparison, on write and on check.
+ */
+function findByName(name: string, excludeId?: number) {
+  const conditions = [sql`lower(${categories.name}) = ${name.toLowerCase()}`]
+
+  if (excludeId) {
+    conditions.push(ne(categories.id, excludeId))
+  }
+
+  return getDb()
+    .select({ id: categories.id })
+    .from(categories)
+    .where(and(...conditions))
+    .get()
 }
 
 function assertNameIsAvailable(name: string, excludeId?: number): void {
-  const duplicate = excludeId
-    ? getDb()
-        .select({ id: categories.id })
-        .from(categories)
-        .where(and(eq(categories.name, name), ne(categories.id, excludeId)))
-        .get()
-    : findByName(name)
-
-  if (duplicate) {
+  if (findByName(name, excludeId)) {
     throw new CategoryError('duplicate')
   }
 }
@@ -205,4 +213,18 @@ export function deleteCategory(id: number): null {
   }
 
   return null
+}
+
+/**
+ * Real-time uniqueness check used by the form while the shopkeeper types.
+ * The name is normalized first (" boissons " -> "BOISSONS") and `excludeId`
+ * lets an edited category keep its own name. Too short names answer false
+ * without any query: the renderer simply shows nothing in that case.
+ */
+export function isNameAvailable(name: string, excludeId?: number): boolean {
+  if (!name || name.trim().length < CATEGORY_NAME_MIN_LENGTH) {
+    return false
+  }
+
+  return !findByName(normalizeCategoryName(name.trim()), excludeId)
 }

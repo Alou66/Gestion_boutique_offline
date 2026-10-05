@@ -27,6 +27,10 @@ export const PRODUCT_MESSAGES = {
     'Le prix de vente secondaire doit être un entier supérieur ou égal à 0.',
   secondarySalePriceTooHigh:
     'Le prix de vente secondaire ne peut pas dépasser 1 000 000 000 FCFA.',
+  checking: 'Vérification…',
+  nameAvailable: '✓ Nom disponible',
+  nameTaken: '⚠ Ce produit existe déjà.',
+  checkFailed: 'Impossible de vérifier la disponibilité',
   unexpected: 'Une erreur inattendue est survenue.',
 } as const
 

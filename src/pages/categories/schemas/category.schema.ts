@@ -7,6 +7,10 @@ export const CATEGORY_MESSAGES = {
   nameRequired: 'Le nom de la catégorie est obligatoire.',
   nameTooShort: `Le nom de la catégorie doit contenir au moins ${CATEGORY_NAME_MIN_LENGTH} caractères.`,
   nameTooLong: `Le nom de la catégorie ne peut pas dépasser ${CATEGORY_NAME_MAX_LENGTH} caractères.`,
+  checking: 'Vérification…',
+  nameAvailable: '✓ Nom disponible',
+  nameTaken: '⚠ Cette catégorie existe déjà.',
+  checkFailed: 'Impossible de vérifier la disponibilité',
   unexpected: 'Une erreur inattendue est survenue.',
 } as const
 

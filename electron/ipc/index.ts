@@ -6,8 +6,11 @@ import {
 } from '../services/databaseService'
 import { registerAuthIpcHandlers } from './auth'
 import { registerCategoryIpcHandlers } from './categories'
+import { registerClientIpcHandlers } from './clients'
 import { registerProductIpcHandlers } from './products'
 import { registerStockIpcHandlers } from './stock'
+import { registerSupplyIpcHandlers } from './supplies'
+import { registerTransformationIpcHandlers } from './transformations'
 import type { SettingsInput } from '../types'
 
 export function registerIpcHandlers(): void {
@@ -31,4 +34,7 @@ export function registerIpcHandlers(): void {
   registerCategoryIpcHandlers()
   registerProductIpcHandlers()
   registerStockIpcHandlers()
+  registerSupplyIpcHandlers()
+  registerTransformationIpcHandlers()
+  registerClientIpcHandlers()
 }

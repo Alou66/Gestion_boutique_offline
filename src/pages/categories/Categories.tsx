@@ -118,7 +118,7 @@ function Categories() {
           key={editing ? editing.id : 'new'}
           title={editing ? 'Modifier la catégorie' : 'Nouvelle catégorie'}
           submitLabel="Enregistrer"
-          initialName={editing?.name ?? ''}
+          initialCategory={editing}
           isSubmitting={isSubmitting}
           error={formError}
           onSubmit={handleSubmit}

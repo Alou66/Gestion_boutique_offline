@@ -355,22 +355,27 @@ function assertCategoryExists(categoryId: number): void {
   }
 }
 
-function assertNameIsAvailable(name: string, excludeId?: number): void {
-  // Mirrors the `products_name_unique` index (lower(name)) so a duplicate is
-  // reported as a business error before SQLite rejects the write.
+/**
+ * Row id of the product already using this name, ignoring `excludeId`.
+ * Mirrors the `products_name_unique` index (lower(name)) so a duplicate is
+ * reported as a business error before SQLite rejects the write.
+ */
+function findByName(name: string, excludeId?: number) {
   const conditions = [sql`lower(${products.name}) = lower(${name})`]
 
   if (excludeId) {
     conditions.push(ne(products.id, excludeId))
   }
 
-  const duplicate = getDb()
+  return getDb()
     .select({ id: products.id })
     .from(products)
     .where(and(...conditions))
     .get()
+}
 
-  if (duplicate) {
+function assertNameIsAvailable(name: string, excludeId?: number): void {
+  if (findByName(name, excludeId)) {
     throw new ProductError('duplicate')
   }
 }
@@ -567,4 +572,18 @@ export function isCategoryUsedByProducts(categoryId: number): boolean {
     .get()
 
   return Boolean(usage)
+}
+
+/**
+ * Real-time uniqueness check used by the form while the shopkeeper types.
+ * The name is normalized first ("riz  parfumé" -> "RIZ PARFUMÉ") and
+ * `excludeId` lets an edited product keep its own name. Too short names answer
+ * false without any query: the renderer simply shows nothing in that case.
+ */
+export function isNameAvailable(name: string, excludeId?: number): boolean {
+  if (!name || name.trim().length < PRODUCT_NAME_MIN_LENGTH) {
+    return false
+  }
+
+  return !findByName(normalizeProductName(name.trim()), excludeId)
 }

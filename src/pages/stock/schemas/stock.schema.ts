@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { StockDirection } from '@/types'
+import type { StockDirection, StockFormLevel } from '@/types'
 import { normalizeFormLabel, pluralizeFormLabel } from '../../products/schemas/product.schema'
 
 export const STOCK_QUANTITY_MAX = 1_000_000
@@ -20,8 +20,8 @@ export const STOCK_MESSAGES = {
   positiveQuantityRequired:
     'Au moins une forme doit être initialisée avec une quantité supérieure à 0.',
   alreadyInitialized: 'Le stock de ce produit est déjà initialisé.',
-  notInitialized:
-    "Le stock de ce produit doit être initialisé avant de pouvoir être ajusté.",
+  alreadyHasMovements:
+    'Ce produit possède déjà des mouvements de stock : son stock ne peut plus être initialisé.',
   directionRequired: "Le sens de l'ajustement est obligatoire (entrée ou sortie).",
   directionInvalid: "Le sens de l'ajustement doit être 'IN' ou 'OUT'.",
   reasonRequired: 'Le motif est obligatoire pour un ajustement.',
@@ -38,10 +38,17 @@ export const STOCK_DIRECTION_LABELS: Record<StockDirection, string> = {
 export const STOCK_MOVEMENT_LABELS = {
   STOCK_INITIAL: 'Stock initial',
   AJUSTEMENT: 'Ajustement',
+  APPROVISIONNEMENT: 'Approvisionnement',
+  TRANSFORMATION: 'Transformation',
 } as const
 
 /** Movement types already implemented: no other type can exist yet. */
-export const VISIBLE_MOVEMENT_TYPES = ['STOCK_INITIAL', 'AJUSTEMENT'] as const
+export const VISIBLE_MOVEMENT_TYPES = [
+  'STOCK_INITIAL',
+  'AJUSTEMENT',
+  'APPROVISIONNEMENT',
+  'TRANSFORMATION',
+] as const
 
 const formFieldSchema = z
   .string({ error: STOCK_MESSAGES.formRequired })
@@ -113,4 +120,49 @@ export function formatMovementDate(createdAt: Date): string {
     dateStyle: 'short',
     timeStyle: 'short',
   }).format(createdAt)
+}
+
+/**
+ * The stock page shows one row per product: a transformable product displays its
+ * two forms and its two quantities side by side. A product without any movement
+ * has a logical stock of 0, it is displayed like any other product.
+ */
+export type StockLevelState = 'RUPTURE' | 'NORMAL'
+
+/** The row of a product: one entry per form, current forms first. */
+export type StockProductRow = {
+  levels: Pick<
+    StockFormLevel,
+    'form' | 'quantity' | 'hasMovements' | 'isLegacyForm' | 'isProductActive'
+  >[]
+}
+
+/**
+ * Rupture only when every form of the product is empty: `0 / 0` is Rupture,
+ * while `3 / 0` or `0 / 2` stay Normal because one form is still available.
+ * A simple product has a single form, so `0` alone is a Rupture.
+ * The empty forms of a Normal product are listed next to the quantity.
+ */
+export function getStockLevelState(row: StockProductRow): StockLevelState {
+  return row.levels.length > 0 && row.levels.every((level) => level.quantity <= 0)
+    ? 'RUPTURE'
+    : 'NORMAL'
+}
+
+/** "CARTON / GROSSE" */
+export function formatRowForms(row: StockProductRow): string {
+  return row.levels.map((level) => level.form).join(' / ')
+}
+
+/** "20 / 2", aligned with formatRowForms. */
+export function formatRowQuantities(row: StockProductRow): string {
+  return row.levels.map((level) => level.quantity).join(' / ')
+}
+
+/**
+ * Forms left without stock while the product is still Normal, so `3 / 0` does
+ * not hide the empty GROSSE.
+ */
+export function getEmptyForms(row: StockProductRow): string[] {
+  return row.levels.filter((level) => level.quantity <= 0).map((level) => level.form)
 }

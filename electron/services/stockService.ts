@@ -37,8 +37,8 @@ export const STOCK_ERRORS = {
   positiveQuantityRequired:
     'Au moins une forme doit être initialisée avec une quantité supérieure à 0.',
   alreadyInitialized: 'Le stock de ce produit est déjà initialisé.',
-  notInitialized:
-    "Le stock de ce produit doit être initialisé avant de pouvoir être ajusté.",
+  alreadyHasMovements:
+    'Ce produit possède déjà des mouvements de stock : son stock ne peut plus être initialisé.',
   directionRequired: "Le sens de l'ajustement est obligatoire (entrée ou sortie).",
   directionInvalid: "Le sens de l'ajustement doit être 'IN' ou 'OUT'.",
   reasonRequired: 'Le motif est obligatoire pour un ajustement.',
@@ -80,7 +80,6 @@ const signedQuantityExpression: SQL<number> = sql<number>`coalesce(sum(case when
 
 interface StockTotals {
   quantityByProductAndForm: Map<number, Map<string, number>>
-  initializedProductIds: Set<number>
 }
 
 /** Reasons are free text: trimmed, inner blanks collapsed, stored as typed. */
@@ -180,6 +179,11 @@ function assertFormBelongsToProduct(product: Product, form: string): void {
   }
 }
 
+/**
+ * Balances of every form that has a movement. A product absent from the map has
+ * no movement at all: its logical stock is 0, which is a normal value and never
+ * an error, so no row is invented for it here.
+ */
 function loadStockTotals(db: StockDatabase): StockTotals {
   const balanceRows = db
     .select({
@@ -200,18 +204,7 @@ function loadStockTotals(db: StockDatabase): StockTotals {
     quantityByProductAndForm.set(row.productId, forms)
   }
 
-  // A product is initialized as soon as one STOCK_INITIAL exists: an
-  // initialization is a single operation, whatever the number of forms.
-  const initializedRows = db
-    .select({ productId: stockMovements.productId })
-    .from(stockMovements)
-    .where(eq(stockMovements.movementType, 'STOCK_INITIAL'))
-    .all()
-
-  return {
-    quantityByProductAndForm,
-    initializedProductIds: new Set(initializedRows.map((row) => row.productId)),
-  }
+  return { quantityByProductAndForm }
 }
 
 function toSignedQuantity(direction: StockDirection, quantity: number): number {
@@ -238,7 +231,9 @@ function toMovement(row: typeof stockMovements.$inferSelect): StockMovement {
  * keeps its movements and stays visible instead of silently disappearing).
  */
 function buildStockLines(product: Product, totals: StockTotals): StockFormLevel[] {
-  const isInitialized = totals.initializedProductIds.has(product.id)
+  // No movement at all means a stock of 0, not a blocking state: the product is
+  // displayed like any other one and can be received directly.
+  const hasMovements = totals.quantityByProductAndForm.has(product.id)
   const productForms = getProductForms(product)
   const balances = totals.quantityByProductAndForm.get(product.id)
   const legacyForms = balances
@@ -257,7 +252,7 @@ function buildStockLines(product: Product, totals: StockTotals): StockFormLevel[
     categoryName: product.categoryName,
     form,
     quantity: balances?.get(form) ?? 0,
-    isInitialized,
+    hasMovements,
     isProductActive: product.isActive,
     isLegacyForm,
   }))
@@ -299,7 +294,11 @@ export function getProductFormStock(productId: number, form: string): StockFormL
   return level
 }
 
-/** True when the product already has its initial stock: the lock of section 10. */
+/**
+ * True when the product already carries an initial stock declaration
+ * (STOCK_INITIAL). A product without any movement is not "uninitialized": its
+ * stock is simply 0, and it can be received without any prior step.
+ */
 export function isStockInitialized(productId: number): boolean {
   const product = parseProductId(productId)
   const initial = getDb()
@@ -436,6 +435,17 @@ function isInitializedIn(db: StockDatabase, productId: number): boolean {
   return Boolean(initial)
 }
 
+/** Any movement at all, whatever its type: the real lock of an initialization. */
+function hasAnyMovementIn(db: StockDatabase, productId: number): boolean {
+  const movement = db
+    .select({ id: stockMovements.id })
+    .from(stockMovements)
+    .where(eq(stockMovements.productId, productId))
+    .get()
+
+  return Boolean(movement)
+}
+
 /**
  * A translation constraint violation (unique partial index or CHECK) can only be
  * a concurrency or programming issue: it is reported as a business error, and
@@ -486,7 +496,13 @@ function withMappedErrors<T>(operation: () => T): T {
 }
 
 /**
- * Single, irreversible initialization of a product stock.
+ * Single, irreversible declaration of the stock physically owned before using
+ * the application.
+ *
+ * It is refused as soon as the product has any movement: an initialization is
+ * only meaningful on a product whose history is still empty. A supply is a
+ * movement of its own, so it is never turned into an initialization, and an
+ * initialization is never turned into a supply.
  *
  * Everything happens in one SQLite transaction: the STOCK_INITIAL movements are
  * written, the stock is recomputed from those movements and compared with the
@@ -507,6 +523,12 @@ export function initializeStock(
 
       if (isInitializedIn(tx, parsedId)) {
         throw new StockError('alreadyInitialized')
+      }
+
+      // A supply or an adjustment already opened the history of the product: its
+      // stock is no longer a declared initial stock.
+      if (hasAnyMovementIn(tx, parsedId)) {
+        throw new StockError('alreadyHasMovements')
       }
 
       const now = new Date()
@@ -548,8 +570,10 @@ export function initializeStock(
 
 /**
  * Manual correction of an existing stock: entrée (IN) or sortie (OUT) on a
- * single form, always with a reason. The stock can never become negative and the
- * movement is kept in the history.
+ * single form, always with a reason. A product without any movement has a stock
+ * of 0, exactly like an empty product: an entrée is accepted and a sortie larger
+ * than the stock is refused. The stock can never become negative and the movement
+ * is kept in the history.
  */
 export function adjustStock(
   productId: number,
@@ -564,10 +588,6 @@ export function adjustStock(
       const product = readProductForWrite(parsedId)
 
       assertFormBelongsToProduct(product, parsedInput.form)
-
-      if (!isInitializedIn(tx, parsedId)) {
-        throw new StockError('notInitialized')
-      }
 
       const currentQuantity = computeFormQuantity(tx, parsedId, parsedInput.form)
       // Signed delta: positive for an entrée, negative for a sortie.
@@ -610,7 +630,7 @@ export function adjustStock(
           categoryName: product.categoryName,
           form: parsedInput.form,
           quantity: balance,
-          isInitialized: true,
+          hasMovements: true,
           isProductActive: product.isActive,
           isLegacyForm: false,
         },

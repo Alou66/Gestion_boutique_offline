@@ -29,6 +29,27 @@
       "when": 1791107413727,
       "tag": "0003_stock_movements_and_simple_forms",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1791114795754,
+      "tag": "0004_supplies_and_approvisionnement",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1791127873493,
+      "tag": "0005_transformations",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1791147244000,
+      "tag": "0006_add_clients",
+      "breakpoints": true
     }
   ]
 }
