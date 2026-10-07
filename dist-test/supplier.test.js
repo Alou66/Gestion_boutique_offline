@@ -4,15 +4,141 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// tests/supply.test.ts
+// tests/supplier.test.ts
 import assert2 from "node:assert/strict";
-import { after, beforeEach, describe as describe3, it } from "node:test";
+import { after, before, beforeEach, describe as describe3, it } from "node:test";
 
-// electron/database/client.ts
-import Database from "better-sqlite3";
+// tests/stubs/electron.ts
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+var app = {
+  getPath(name) {
+    const userDataDir2 = process.env.GESTION_BOUTIQUE_TEST_USER_DATA ?? path.join(os.tmpdir(), "gestion-boutique-tests");
+    fs.mkdirSync(userDataDir2, { recursive: true });
+    return name === "userData" ? userDataDir2 : path.join(userDataDir2, name);
+  }
+};
+var handlers = /* @__PURE__ */ new Map();
+var ipcMain = {
+  handle(channel, listener) {
+    handlers.set(channel, listener);
+  },
+  removeHandler(channel) {
+    handlers.delete(channel);
+  }
+};
+function invokeHandler(channel, ...args) {
+  const handler = handlers.get(channel);
+  if (!handler) {
+    throw new Error(`No handler registered for ${channel}`);
+  }
+  return handler({}, ...args);
+}
+function registeredChannels() {
+  return [...handlers.keys()].sort();
+}
+var printStubs = {
+  /** Every URL loaded in a document window, `data:` URLs included. */
+  loadedUrls: [],
+  /** Options of every document window opened by the print service. */
+  windowOptions: [],
+  printOptions: [],
+  pdfOptions: [],
+  saveOptions: [],
+  /** What `webContents.print` answers through its callback. */
+  printSucceeds: true,
+  /** Electron answered through a promise instead of the callback. */
+  printReturnsPromise: false,
+  /** Bytes returned by `printToPDF`, or an error to simulate a failure. */
+  pdfResult: Buffer.from("%PDF-1.4 facture"),
+  /** Where the save dialog points, or null when it is cancelled. */
+  savePath: "/tmp/gestion-boutique-facture.pdf",
+  failToLoad: false,
+  openWindows: 0
+};
+var BrowserWindow = class {
+  constructor(options = {}) {
+    this.options = options;
+    printStubs.openWindows += 1;
+    printStubs.windowOptions.push(options);
+    this.webContents = {
+      print(printOptions, callback) {
+        printStubs.printOptions.push(printOptions);
+        if (printStubs.printReturnsPromise) {
+          return printStubs.printSucceeds ? Promise.resolve(true) : Promise.reject(new Error("printing failed"));
+        }
+        callback(printStubs.printSucceeds);
+      },
+      printToPDF(pdfOptions) {
+        printStubs.pdfOptions.push(pdfOptions);
+        return printStubs.pdfResult instanceof Error ? Promise.reject(printStubs.pdfResult) : Promise.resolve(printStubs.pdfResult);
+      }
+    };
+  }
+  webContents;
+  destroyed = false;
+  async loadURL(url2) {
+    printStubs.loadedUrls.push(url2);
+    if (printStubs.failToLoad) {
+      throw new Error("cannot load the document");
+    }
+  }
+  isDestroyed() {
+    return this.destroyed;
+  }
+  destroy() {
+    this.destroyed = true;
+    printStubs.openWindows -= 1;
+  }
+};
+var dialog = {
+  showSaveDialog(options) {
+    printStubs.saveOptions.push(options);
+    return Promise.resolve({
+      canceled: printStubs.savePath === null,
+      filePath: printStubs.savePath ?? void 0
+    });
+  }
+};
 
-// node_modules/drizzle-orm/better-sqlite3/driver.js
-import Client from "better-sqlite3";
+// node_modules/drizzle-orm/migrator.js
+import crypto2 from "node:crypto";
+import fs2 from "node:fs";
+function readMigrationFiles(config2) {
+  const migrationFolderTo = config2.migrationsFolder;
+  const migrationQueries = [];
+  const journalPath = `${migrationFolderTo}/meta/_journal.json`;
+  if (!fs2.existsSync(journalPath)) {
+    throw new Error(`Can't find meta/_journal.json file`);
+  }
+  const journalAsString = fs2.readFileSync(`${migrationFolderTo}/meta/_journal.json`).toString();
+  const journal = JSON.parse(journalAsString);
+  for (const journalEntry of journal.entries) {
+    const migrationPath = `${migrationFolderTo}/${journalEntry.tag}.sql`;
+    try {
+      const query = fs2.readFileSync(`${migrationFolderTo}/${journalEntry.tag}.sql`).toString();
+      const result = query.split("--> statement-breakpoint").map((it2) => {
+        return it2;
+      });
+      migrationQueries.push({
+        sql: result,
+        bps: journalEntry.breakpoints,
+        folderMillis: journalEntry.when,
+        hash: crypto2.createHash("sha256").update(query).digest("hex")
+      });
+    } catch {
+      throw new Error(`No file ${migrationPath} found in ${migrationFolderTo} folder`);
+    }
+  }
+  return migrationQueries;
+}
+
+// node_modules/drizzle-orm/better-sqlite3/migrator.js
+function migrate(db2, config2) {
+  const migrations = readMigrationFiles(config2);
+  db2.dialect.migrate(migrations, db2.session, config2);
+}
 
 // node_modules/drizzle-orm/entity.js
 var entityKind = Symbol.for("drizzle:entityKind");
@@ -39,102 +165,6 @@ function is(value, type) {
     }
   }
   return false;
-}
-
-// node_modules/drizzle-orm/logger.js
-var ConsoleLogWriter = class {
-  static [entityKind] = "ConsoleLogWriter";
-  write(message) {
-    console.log(message);
-  }
-};
-var DefaultLogger = class {
-  static [entityKind] = "DefaultLogger";
-  writer;
-  constructor(config2) {
-    this.writer = config2?.writer ?? new ConsoleLogWriter();
-  }
-  logQuery(query, params) {
-    const stringifiedParams = params.map((p) => {
-      try {
-        return JSON.stringify(p);
-      } catch {
-        return String(p);
-      }
-    });
-    const paramsStr = stringifiedParams.length ? ` -- params: [${stringifiedParams.join(", ")}]` : "";
-    this.writer.write(`Query: ${query}${paramsStr}`);
-  }
-};
-var NoopLogger = class {
-  static [entityKind] = "NoopLogger";
-  logQuery() {
-  }
-};
-
-// node_modules/drizzle-orm/table.utils.js
-var TableName = Symbol.for("drizzle:Name");
-
-// node_modules/drizzle-orm/table.js
-var Schema = Symbol.for("drizzle:Schema");
-var Columns = Symbol.for("drizzle:Columns");
-var ExtraConfigColumns = Symbol.for("drizzle:ExtraConfigColumns");
-var OriginalName = Symbol.for("drizzle:OriginalName");
-var BaseName = Symbol.for("drizzle:BaseName");
-var IsAlias = Symbol.for("drizzle:IsAlias");
-var ExtraConfigBuilder = Symbol.for("drizzle:ExtraConfigBuilder");
-var IsDrizzleTable = Symbol.for("drizzle:IsDrizzleTable");
-var Table = class {
-  static [entityKind] = "Table";
-  /** @internal */
-  static Symbol = {
-    Name: TableName,
-    Schema,
-    OriginalName,
-    Columns,
-    ExtraConfigColumns,
-    BaseName,
-    IsAlias,
-    ExtraConfigBuilder
-  };
-  /**
-   * @internal
-   * Can be changed if the table is aliased.
-   */
-  [TableName];
-  /**
-   * @internal
-   * Used to store the original name of the table, before any aliasing.
-   */
-  [OriginalName];
-  /** @internal */
-  [Schema];
-  /** @internal */
-  [Columns];
-  /** @internal */
-  [ExtraConfigColumns];
-  /**
-   *  @internal
-   * Used to store the table name before the transformation via the `tableCreator` functions.
-   */
-  [BaseName];
-  /** @internal */
-  [IsAlias] = false;
-  /** @internal */
-  [IsDrizzleTable] = true;
-  /** @internal */
-  [ExtraConfigBuilder] = void 0;
-  constructor(name, schema2, baseName) {
-    this[TableName] = this[OriginalName] = name;
-    this[Schema] = schema2;
-    this[BaseName] = baseName;
-  }
-};
-function getTableName(table) {
-  return table[TableName];
-}
-function getTableUniqueName(table) {
-  return `${table[Schema] ?? "public"}.${table[TableName]}`;
 }
 
 // node_modules/drizzle-orm/column.js
@@ -290,6 +320,9 @@ var ColumnBuilder = class {
     this.config.name = name;
   }
 };
+
+// node_modules/drizzle-orm/table.utils.js
+var TableName = Symbol.for("drizzle:Name");
 
 // node_modules/drizzle-orm/pg-core/foreign-keys.js
 var ForeignKeyBuilder = class {
@@ -783,6 +816,68 @@ var tracer = {
 // node_modules/drizzle-orm/view-common.js
 var ViewBaseConfig = Symbol.for("drizzle:ViewBaseConfig");
 
+// node_modules/drizzle-orm/table.js
+var Schema = Symbol.for("drizzle:Schema");
+var Columns = Symbol.for("drizzle:Columns");
+var ExtraConfigColumns = Symbol.for("drizzle:ExtraConfigColumns");
+var OriginalName = Symbol.for("drizzle:OriginalName");
+var BaseName = Symbol.for("drizzle:BaseName");
+var IsAlias = Symbol.for("drizzle:IsAlias");
+var ExtraConfigBuilder = Symbol.for("drizzle:ExtraConfigBuilder");
+var IsDrizzleTable = Symbol.for("drizzle:IsDrizzleTable");
+var Table = class {
+  static [entityKind] = "Table";
+  /** @internal */
+  static Symbol = {
+    Name: TableName,
+    Schema,
+    OriginalName,
+    Columns,
+    ExtraConfigColumns,
+    BaseName,
+    IsAlias,
+    ExtraConfigBuilder
+  };
+  /**
+   * @internal
+   * Can be changed if the table is aliased.
+   */
+  [TableName];
+  /**
+   * @internal
+   * Used to store the original name of the table, before any aliasing.
+   */
+  [OriginalName];
+  /** @internal */
+  [Schema];
+  /** @internal */
+  [Columns];
+  /** @internal */
+  [ExtraConfigColumns];
+  /**
+   *  @internal
+   * Used to store the table name before the transformation via the `tableCreator` functions.
+   */
+  [BaseName];
+  /** @internal */
+  [IsAlias] = false;
+  /** @internal */
+  [IsDrizzleTable] = true;
+  /** @internal */
+  [ExtraConfigBuilder] = void 0;
+  constructor(name, schema2, baseName) {
+    this[TableName] = this[OriginalName] = name;
+    this[Schema] = schema2;
+    this[BaseName] = baseName;
+  }
+};
+function getTableName(table) {
+  return table[TableName];
+}
+function getTableUniqueName(table) {
+  return `${table[Schema] ?? "public"}.${table[TableName]}`;
+}
+
 // node_modules/drizzle-orm/sql/sql.js
 var FakePrimitiveParam = class {
   static [entityKind] = "FakePrimitiveParam";
@@ -1175,6 +1270,184 @@ Table.prototype.getSQL = function() {
 };
 Subquery.prototype.getSQL = function() {
   return new SQL([this]);
+};
+
+// node_modules/drizzle-orm/alias.js
+var ColumnAliasProxyHandler = class {
+  constructor(table) {
+    this.table = table;
+  }
+  static [entityKind] = "ColumnAliasProxyHandler";
+  get(columnObj, prop) {
+    if (prop === "table") {
+      return this.table;
+    }
+    return columnObj[prop];
+  }
+};
+var TableAliasProxyHandler = class {
+  constructor(alias, replaceOriginalName) {
+    this.alias = alias;
+    this.replaceOriginalName = replaceOriginalName;
+  }
+  static [entityKind] = "TableAliasProxyHandler";
+  get(target, prop) {
+    if (prop === Table.Symbol.IsAlias) {
+      return true;
+    }
+    if (prop === Table.Symbol.Name) {
+      return this.alias;
+    }
+    if (this.replaceOriginalName && prop === Table.Symbol.OriginalName) {
+      return this.alias;
+    }
+    if (prop === ViewBaseConfig) {
+      return {
+        ...target[ViewBaseConfig],
+        name: this.alias,
+        isAlias: true
+      };
+    }
+    if (prop === Table.Symbol.Columns) {
+      const columns = target[Table.Symbol.Columns];
+      if (!columns) {
+        return columns;
+      }
+      const proxiedColumns = {};
+      Object.keys(columns).map((key) => {
+        proxiedColumns[key] = new Proxy(
+          columns[key],
+          new ColumnAliasProxyHandler(new Proxy(target, this))
+        );
+      });
+      return proxiedColumns;
+    }
+    const value = target[prop];
+    if (is(value, Column)) {
+      return new Proxy(value, new ColumnAliasProxyHandler(new Proxy(target, this)));
+    }
+    return value;
+  }
+};
+var RelationTableAliasProxyHandler = class {
+  constructor(alias) {
+    this.alias = alias;
+  }
+  static [entityKind] = "RelationTableAliasProxyHandler";
+  get(target, prop) {
+    if (prop === "sourceTable") {
+      return aliasedTable(target.sourceTable, this.alias);
+    }
+    return target[prop];
+  }
+};
+function aliasedTable(table, tableAlias) {
+  return new Proxy(table, new TableAliasProxyHandler(tableAlias, false));
+}
+function aliasedTableColumn(column, tableAlias) {
+  return new Proxy(
+    column,
+    new ColumnAliasProxyHandler(new Proxy(column.table, new TableAliasProxyHandler(tableAlias, false)))
+  );
+}
+function mapColumnsInAliasedSQLToAlias(query, alias) {
+  return new SQL.Aliased(mapColumnsInSQLToAlias(query.sql, alias), query.fieldAlias);
+}
+function mapColumnsInSQLToAlias(query, alias) {
+  return sql.join(query.queryChunks.map((c) => {
+    if (is(c, Column)) {
+      return aliasedTableColumn(c, alias);
+    }
+    if (is(c, SQL)) {
+      return mapColumnsInSQLToAlias(c, alias);
+    }
+    if (is(c, SQL.Aliased)) {
+      return mapColumnsInAliasedSQLToAlias(c, alias);
+    }
+    return c;
+  }));
+}
+
+// node_modules/drizzle-orm/errors.js
+var DrizzleError = class extends Error {
+  static [entityKind] = "DrizzleError";
+  constructor({ message, cause }) {
+    super(message);
+    this.name = "DrizzleError";
+    this.cause = cause;
+  }
+};
+var DrizzleQueryError = class _DrizzleQueryError extends Error {
+  constructor(query, params, cause) {
+    super(`Failed query: ${query}
+params: ${params}`);
+    this.query = query;
+    this.params = params;
+    this.cause = cause;
+    Error.captureStackTrace(this, _DrizzleQueryError);
+    if (cause) this.cause = cause;
+  }
+};
+var TransactionRollbackError = class extends DrizzleError {
+  static [entityKind] = "TransactionRollbackError";
+  constructor() {
+    super({ message: "Rollback" });
+  }
+};
+
+// node_modules/drizzle-orm/logger.js
+var ConsoleLogWriter = class {
+  static [entityKind] = "ConsoleLogWriter";
+  write(message) {
+    console.log(message);
+  }
+};
+var DefaultLogger = class {
+  static [entityKind] = "DefaultLogger";
+  writer;
+  constructor(config2) {
+    this.writer = config2?.writer ?? new ConsoleLogWriter();
+  }
+  logQuery(query, params) {
+    const stringifiedParams = params.map((p) => {
+      try {
+        return JSON.stringify(p);
+      } catch {
+        return String(p);
+      }
+    });
+    const paramsStr = stringifiedParams.length ? ` -- params: [${stringifiedParams.join(", ")}]` : "";
+    this.writer.write(`Query: ${query}${paramsStr}`);
+  }
+};
+var NoopLogger = class {
+  static [entityKind] = "NoopLogger";
+  logQuery() {
+  }
+};
+
+// node_modules/drizzle-orm/query-promise.js
+var QueryPromise = class {
+  static [entityKind] = "QueryPromise";
+  [Symbol.toStringTag] = "QueryPromise";
+  catch(onRejected) {
+    return this.then(void 0, onRejected);
+  }
+  finally(onFinally) {
+    return this.then(
+      (value) => {
+        onFinally?.();
+        return value;
+      },
+      (reason) => {
+        onFinally?.();
+        throw reason;
+      }
+    );
+  }
+  then(onFulfilled, onRejected) {
+    return this.execute().then(onFulfilled, onRejected);
+  }
 };
 
 // node_modules/drizzle-orm/utils.js
@@ -1762,193 +2035,55 @@ function mapRelationalRow(tablesConfig, tableConfig, row, buildQueryResultSelect
   return result;
 }
 
-// node_modules/drizzle-orm/alias.js
-var ColumnAliasProxyHandler = class {
-  constructor(table) {
+// node_modules/drizzle-orm/sql/functions/aggregate.js
+function count(expression) {
+  return sql`count(${expression || sql.raw("*")})`.mapWith(Number);
+}
+
+// electron/database/schema.ts
+var schema_exports = {};
+__export(schema_exports, {
+  categories: () => categories,
+  clients: () => clients,
+  payments: () => payments,
+  products: () => products,
+  saleItems: () => saleItems,
+  sales: () => sales,
+  schema: () => schema,
+  settings: () => settings,
+  stockMovements: () => stockMovements,
+  suppliers: () => suppliers,
+  supplies: () => supplies,
+  supplyItems: () => supplyItems,
+  transformations: () => transformations,
+  users: () => users
+});
+
+// node_modules/drizzle-orm/sqlite-core/checks.js
+var CheckBuilder = class {
+  constructor(name, value) {
+    this.name = name;
+    this.value = value;
+  }
+  static [entityKind] = "SQLiteCheckBuilder";
+  brand;
+  build(table) {
+    return new Check(table, this);
+  }
+};
+var Check = class {
+  constructor(table, builder) {
     this.table = table;
+    this.name = builder.name;
+    this.value = builder.value;
   }
-  static [entityKind] = "ColumnAliasProxyHandler";
-  get(columnObj, prop) {
-    if (prop === "table") {
-      return this.table;
-    }
-    return columnObj[prop];
-  }
+  static [entityKind] = "SQLiteCheck";
+  name;
+  value;
 };
-var TableAliasProxyHandler = class {
-  constructor(alias, replaceOriginalName) {
-    this.alias = alias;
-    this.replaceOriginalName = replaceOriginalName;
-  }
-  static [entityKind] = "TableAliasProxyHandler";
-  get(target, prop) {
-    if (prop === Table.Symbol.IsAlias) {
-      return true;
-    }
-    if (prop === Table.Symbol.Name) {
-      return this.alias;
-    }
-    if (this.replaceOriginalName && prop === Table.Symbol.OriginalName) {
-      return this.alias;
-    }
-    if (prop === ViewBaseConfig) {
-      return {
-        ...target[ViewBaseConfig],
-        name: this.alias,
-        isAlias: true
-      };
-    }
-    if (prop === Table.Symbol.Columns) {
-      const columns = target[Table.Symbol.Columns];
-      if (!columns) {
-        return columns;
-      }
-      const proxiedColumns = {};
-      Object.keys(columns).map((key) => {
-        proxiedColumns[key] = new Proxy(
-          columns[key],
-          new ColumnAliasProxyHandler(new Proxy(target, this))
-        );
-      });
-      return proxiedColumns;
-    }
-    const value = target[prop];
-    if (is(value, Column)) {
-      return new Proxy(value, new ColumnAliasProxyHandler(new Proxy(target, this)));
-    }
-    return value;
-  }
-};
-var RelationTableAliasProxyHandler = class {
-  constructor(alias) {
-    this.alias = alias;
-  }
-  static [entityKind] = "RelationTableAliasProxyHandler";
-  get(target, prop) {
-    if (prop === "sourceTable") {
-      return aliasedTable(target.sourceTable, this.alias);
-    }
-    return target[prop];
-  }
-};
-function aliasedTable(table, tableAlias) {
-  return new Proxy(table, new TableAliasProxyHandler(tableAlias, false));
+function check(name, value) {
+  return new CheckBuilder(name, value);
 }
-function aliasedTableColumn(column, tableAlias) {
-  return new Proxy(
-    column,
-    new ColumnAliasProxyHandler(new Proxy(column.table, new TableAliasProxyHandler(tableAlias, false)))
-  );
-}
-function mapColumnsInAliasedSQLToAlias(query, alias) {
-  return new SQL.Aliased(mapColumnsInSQLToAlias(query.sql, alias), query.fieldAlias);
-}
-function mapColumnsInSQLToAlias(query, alias) {
-  return sql.join(query.queryChunks.map((c) => {
-    if (is(c, Column)) {
-      return aliasedTableColumn(c, alias);
-    }
-    if (is(c, SQL)) {
-      return mapColumnsInSQLToAlias(c, alias);
-    }
-    if (is(c, SQL.Aliased)) {
-      return mapColumnsInAliasedSQLToAlias(c, alias);
-    }
-    return c;
-  }));
-}
-
-// node_modules/drizzle-orm/selection-proxy.js
-var SelectionProxyHandler = class _SelectionProxyHandler {
-  static [entityKind] = "SelectionProxyHandler";
-  config;
-  constructor(config2) {
-    this.config = { ...config2 };
-  }
-  get(subquery, prop) {
-    if (prop === "_") {
-      return {
-        ...subquery["_"],
-        selectedFields: new Proxy(
-          subquery._.selectedFields,
-          this
-        )
-      };
-    }
-    if (prop === ViewBaseConfig) {
-      return {
-        ...subquery[ViewBaseConfig],
-        selectedFields: new Proxy(
-          subquery[ViewBaseConfig].selectedFields,
-          this
-        )
-      };
-    }
-    if (typeof prop === "symbol") {
-      return subquery[prop];
-    }
-    const columns = is(subquery, Subquery) ? subquery._.selectedFields : is(subquery, View) ? subquery[ViewBaseConfig].selectedFields : subquery;
-    const value = columns[prop];
-    if (is(value, SQL.Aliased)) {
-      if (this.config.sqlAliasedBehavior === "sql" && !value.isSelectionField) {
-        return value.sql;
-      }
-      const newValue = value.clone();
-      newValue.isSelectionField = true;
-      return newValue;
-    }
-    if (is(value, SQL)) {
-      if (this.config.sqlBehavior === "sql") {
-        return value;
-      }
-      throw new Error(
-        `You tried to reference "${prop}" field from a subquery, which is a raw SQL field, but it doesn't have an alias declared. Please add an alias to the field using ".as('alias')" method.`
-      );
-    }
-    if (is(value, Column)) {
-      if (this.config.alias) {
-        return new Proxy(
-          value,
-          new ColumnAliasProxyHandler(
-            new Proxy(
-              value.table,
-              new TableAliasProxyHandler(this.config.alias, this.config.replaceOriginalName ?? false)
-            )
-          )
-        );
-      }
-      return value;
-    }
-    if (typeof value !== "object" || value === null) {
-      return value;
-    }
-    return new Proxy(value, new _SelectionProxyHandler(this.config));
-  }
-};
-
-// node_modules/drizzle-orm/query-promise.js
-var QueryPromise = class {
-  static [entityKind] = "QueryPromise";
-  [Symbol.toStringTag] = "QueryPromise";
-  catch(onRejected) {
-    return this.then(void 0, onRejected);
-  }
-  finally(onFinally) {
-    return this.then(
-      (value) => {
-        onFinally?.();
-        return value;
-      },
-      (reason) => {
-        onFinally?.();
-        throw reason;
-      }
-    );
-  }
-  then(onFulfilled, onRejected) {
-    return this.execute().then(onFulfilled, onRejected);
-  }
-};
 
 // node_modules/drizzle-orm/sqlite-core/foreign-keys.js
 var ForeignKeyBuilder2 = class {
@@ -2502,6 +2637,74 @@ function text(a, b = {}) {
   return new SQLiteTextBuilder(name, config2);
 }
 
+// node_modules/drizzle-orm/selection-proxy.js
+var SelectionProxyHandler = class _SelectionProxyHandler {
+  static [entityKind] = "SelectionProxyHandler";
+  config;
+  constructor(config2) {
+    this.config = { ...config2 };
+  }
+  get(subquery, prop) {
+    if (prop === "_") {
+      return {
+        ...subquery["_"],
+        selectedFields: new Proxy(
+          subquery._.selectedFields,
+          this
+        )
+      };
+    }
+    if (prop === ViewBaseConfig) {
+      return {
+        ...subquery[ViewBaseConfig],
+        selectedFields: new Proxy(
+          subquery[ViewBaseConfig].selectedFields,
+          this
+        )
+      };
+    }
+    if (typeof prop === "symbol") {
+      return subquery[prop];
+    }
+    const columns = is(subquery, Subquery) ? subquery._.selectedFields : is(subquery, View) ? subquery[ViewBaseConfig].selectedFields : subquery;
+    const value = columns[prop];
+    if (is(value, SQL.Aliased)) {
+      if (this.config.sqlAliasedBehavior === "sql" && !value.isSelectionField) {
+        return value.sql;
+      }
+      const newValue = value.clone();
+      newValue.isSelectionField = true;
+      return newValue;
+    }
+    if (is(value, SQL)) {
+      if (this.config.sqlBehavior === "sql") {
+        return value;
+      }
+      throw new Error(
+        `You tried to reference "${prop}" field from a subquery, which is a raw SQL field, but it doesn't have an alias declared. Please add an alias to the field using ".as('alias')" method.`
+      );
+    }
+    if (is(value, Column)) {
+      if (this.config.alias) {
+        return new Proxy(
+          value,
+          new ColumnAliasProxyHandler(
+            new Proxy(
+              value.table,
+              new TableAliasProxyHandler(this.config.alias, this.config.replaceOriginalName ?? false)
+            )
+          )
+        );
+      }
+      return value;
+    }
+    if (typeof value !== "object" || value === null) {
+      return value;
+    }
+    return new Proxy(value, new _SelectionProxyHandler(this.config));
+  }
+};
+
 // node_modules/drizzle-orm/sqlite-core/columns/all.js
 function getSQLiteColumnBuilders() {
   return {
@@ -2552,32 +2755,6 @@ function sqliteTableBase(name, columns, extraConfig, schema2, baseName = name) {
 var sqliteTable = (name, columns, extraConfig) => {
   return sqliteTableBase(name, columns, extraConfig);
 };
-
-// node_modules/drizzle-orm/sqlite-core/checks.js
-var CheckBuilder = class {
-  constructor(name, value) {
-    this.name = name;
-    this.value = value;
-  }
-  static [entityKind] = "SQLiteCheckBuilder";
-  brand;
-  build(table) {
-    return new Check(table, this);
-  }
-};
-var Check = class {
-  constructor(table, builder) {
-    this.table = table;
-    this.name = builder.name;
-    this.value = builder.value;
-  }
-  static [entityKind] = "SQLiteCheck";
-  name;
-  value;
-};
-function check(name, value) {
-  return new CheckBuilder(name, value);
-}
 
 // node_modules/drizzle-orm/sqlite-core/indexes.js
 var IndexBuilderOn = class {
@@ -2805,33 +2982,6 @@ var CasingCache = class {
   clearCache() {
     this.cache = {};
     this.cachedTables = {};
-  }
-};
-
-// node_modules/drizzle-orm/errors.js
-var DrizzleError = class extends Error {
-  static [entityKind] = "DrizzleError";
-  constructor({ message, cause }) {
-    super(message);
-    this.name = "DrizzleError";
-    this.cause = cause;
-  }
-};
-var DrizzleQueryError = class _DrizzleQueryError extends Error {
-  constructor(query, params, cause) {
-    super(`Failed query: ${query}
-params: ${params}`);
-    this.query = query;
-    this.params = params;
-    this.cause = cause;
-    Error.captureStackTrace(this, _DrizzleQueryError);
-    if (cause) this.cause = cause;
-  }
-};
-var TransactionRollbackError = class extends DrizzleError {
-  static [entityKind] = "TransactionRollbackError";
-  constructor() {
-    super({ message: "Rollback" });
   }
 };
 
@@ -5341,216 +5491,7 @@ var SQLiteTransaction = class extends BaseSQLiteDatabase {
   }
 };
 
-// node_modules/drizzle-orm/better-sqlite3/session.js
-var BetterSQLiteSession = class extends SQLiteSession {
-  constructor(client, dialect, schema2, options = {}) {
-    super(dialect);
-    this.client = client;
-    this.schema = schema2;
-    this.logger = options.logger ?? new NoopLogger();
-    this.cache = options.cache ?? new NoopCache();
-  }
-  static [entityKind] = "BetterSQLiteSession";
-  logger;
-  cache;
-  prepareQuery(query, fields, executeMethod, isResponseInArrayMode, customResultMapper, queryMetadata, cacheConfig) {
-    const stmt = this.client.prepare(query.sql);
-    return new PreparedQuery(
-      stmt,
-      query,
-      this.logger,
-      this.cache,
-      queryMetadata,
-      cacheConfig,
-      fields,
-      executeMethod,
-      isResponseInArrayMode,
-      customResultMapper
-    );
-  }
-  transaction(transaction, config2 = {}) {
-    const tx = new BetterSQLiteTransaction("sync", this.dialect, this, this.schema);
-    const nativeTx = this.client.transaction(transaction);
-    return nativeTx[config2.behavior ?? "deferred"](tx);
-  }
-};
-var BetterSQLiteTransaction = class _BetterSQLiteTransaction extends SQLiteTransaction {
-  static [entityKind] = "BetterSQLiteTransaction";
-  transaction(transaction) {
-    const savepointName = `sp${this.nestedIndex}`;
-    const tx = new _BetterSQLiteTransaction("sync", this.dialect, this.session, this.schema, this.nestedIndex + 1);
-    this.session.run(sql.raw(`savepoint ${savepointName}`));
-    try {
-      const result = transaction(tx);
-      this.session.run(sql.raw(`release savepoint ${savepointName}`));
-      return result;
-    } catch (err) {
-      this.session.run(sql.raw(`rollback to savepoint ${savepointName}`));
-      throw err;
-    }
-  }
-};
-var PreparedQuery = class extends SQLitePreparedQuery {
-  constructor(stmt, query, logger, cache, queryMetadata, cacheConfig, fields, executeMethod, _isResponseInArrayMode, customResultMapper) {
-    super("sync", executeMethod, query, cache, queryMetadata, cacheConfig);
-    this.stmt = stmt;
-    this.logger = logger;
-    this.fields = fields;
-    this._isResponseInArrayMode = _isResponseInArrayMode;
-    this.customResultMapper = customResultMapper;
-  }
-  static [entityKind] = "BetterSQLitePreparedQuery";
-  run(placeholderValues) {
-    const params = fillPlaceholders(this.query.params, placeholderValues ?? {});
-    this.logger.logQuery(this.query.sql, params);
-    return this.stmt.run(...params);
-  }
-  all(placeholderValues) {
-    const { fields, joinsNotNullableMap, query, logger, stmt, customResultMapper } = this;
-    if (!fields && !customResultMapper) {
-      const params = fillPlaceholders(query.params, placeholderValues ?? {});
-      logger.logQuery(query.sql, params);
-      return stmt.all(...params);
-    }
-    const rows = this.values(placeholderValues);
-    if (customResultMapper) {
-      return customResultMapper(rows);
-    }
-    return rows.map((row) => mapResultRow(fields, row, joinsNotNullableMap));
-  }
-  get(placeholderValues) {
-    const params = fillPlaceholders(this.query.params, placeholderValues ?? {});
-    this.logger.logQuery(this.query.sql, params);
-    const { fields, stmt, joinsNotNullableMap, customResultMapper } = this;
-    if (!fields && !customResultMapper) {
-      return stmt.get(...params);
-    }
-    const row = stmt.raw().get(...params);
-    if (!row) {
-      return void 0;
-    }
-    if (customResultMapper) {
-      return customResultMapper([row]);
-    }
-    return mapResultRow(fields, row, joinsNotNullableMap);
-  }
-  values(placeholderValues) {
-    const params = fillPlaceholders(this.query.params, placeholderValues ?? {});
-    this.logger.logQuery(this.query.sql, params);
-    return this.stmt.raw().all(...params);
-  }
-  /** @internal */
-  isResponseInArrayMode() {
-    return this._isResponseInArrayMode;
-  }
-};
-
-// node_modules/drizzle-orm/better-sqlite3/driver.js
-var BetterSQLite3Database = class extends BaseSQLiteDatabase {
-  static [entityKind] = "BetterSQLite3Database";
-};
-function construct(client, config2 = {}) {
-  const dialect = new SQLiteSyncDialect({ casing: config2.casing });
-  let logger;
-  if (config2.logger === true) {
-    logger = new DefaultLogger();
-  } else if (config2.logger !== false) {
-    logger = config2.logger;
-  }
-  let schema2;
-  if (config2.schema) {
-    const tablesConfig = extractTablesRelationalConfig(
-      config2.schema,
-      createTableRelationsHelpers
-    );
-    schema2 = {
-      fullSchema: config2.schema,
-      schema: tablesConfig.tables,
-      tableNamesMap: tablesConfig.tableNamesMap
-    };
-  }
-  const session = new BetterSQLiteSession(client, dialect, schema2, { logger });
-  const db2 = new BetterSQLite3Database("sync", dialect, session, schema2);
-  db2.$client = client;
-  return db2;
-}
-function drizzle(...params) {
-  if (params[0] === void 0 || typeof params[0] === "string") {
-    const instance = params[0] === void 0 ? new Client() : new Client(params[0]);
-    return construct(instance, params[1]);
-  }
-  if (isConfig(params[0])) {
-    const { connection, client, ...drizzleConfig } = params[0];
-    if (client) return construct(client, drizzleConfig);
-    if (typeof connection === "object") {
-      const { source, ...options } = connection;
-      const instance2 = new Client(source, options);
-      return construct(instance2, drizzleConfig);
-    }
-    const instance = new Client(connection);
-    return construct(instance, drizzleConfig);
-  }
-  return construct(params[0], params[1]);
-}
-((drizzle2) => {
-  function mock(config2) {
-    return construct({}, config2);
-  }
-  drizzle2.mock = mock;
-})(drizzle || (drizzle = {}));
-
-// tests/stubs/electron.ts
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-var app = {
-  getPath(name) {
-    const userDataDir2 = process.env.GESTION_BOUTIQUE_TEST_USER_DATA ?? path.join(os.tmpdir(), "gestion-boutique-tests");
-    fs.mkdirSync(userDataDir2, { recursive: true });
-    return name === "userData" ? userDataDir2 : path.join(userDataDir2, name);
-  }
-};
-var printStubs = {
-  /** Every URL loaded in a document window, `data:` URLs included. */
-  loadedUrls: [],
-  /** Options of every document window opened by the print service. */
-  windowOptions: [],
-  printOptions: [],
-  pdfOptions: [],
-  saveOptions: [],
-  /** What `webContents.print` answers through its callback. */
-  printSucceeds: true,
-  /** Electron answered through a promise instead of the callback. */
-  printReturnsPromise: false,
-  /** Bytes returned by `printToPDF`, or an error to simulate a failure. */
-  pdfResult: Buffer.from("%PDF-1.4 facture"),
-  /** Where the save dialog points, or null when it is cancelled. */
-  savePath: "/tmp/gestion-boutique-facture.pdf",
-  failToLoad: false,
-  openWindows: 0
-};
-
-// electron/database/client.ts
-import path2 from "node:path";
-
 // electron/database/schema.ts
-var schema_exports = {};
-__export(schema_exports, {
-  categories: () => categories,
-  clients: () => clients,
-  payments: () => payments,
-  products: () => products,
-  saleItems: () => saleItems,
-  sales: () => sales,
-  schema: () => schema,
-  settings: () => settings,
-  stockMovements: () => stockMovements,
-  suppliers: () => suppliers,
-  supplies: () => supplies,
-  supplyItems: () => supplyItems,
-  transformations: () => transformations,
-  users: () => users
-});
 var users = sqliteTable("users", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   username: text("username").notNull().unique(),
@@ -5866,6 +5807,171 @@ var schema = {
 };
 
 // electron/database/client.ts
+import Database from "better-sqlite3";
+
+// node_modules/drizzle-orm/better-sqlite3/driver.js
+import Client from "better-sqlite3";
+
+// node_modules/drizzle-orm/better-sqlite3/session.js
+var BetterSQLiteSession = class extends SQLiteSession {
+  constructor(client, dialect, schema2, options = {}) {
+    super(dialect);
+    this.client = client;
+    this.schema = schema2;
+    this.logger = options.logger ?? new NoopLogger();
+    this.cache = options.cache ?? new NoopCache();
+  }
+  static [entityKind] = "BetterSQLiteSession";
+  logger;
+  cache;
+  prepareQuery(query, fields, executeMethod, isResponseInArrayMode, customResultMapper, queryMetadata, cacheConfig) {
+    const stmt = this.client.prepare(query.sql);
+    return new PreparedQuery(
+      stmt,
+      query,
+      this.logger,
+      this.cache,
+      queryMetadata,
+      cacheConfig,
+      fields,
+      executeMethod,
+      isResponseInArrayMode,
+      customResultMapper
+    );
+  }
+  transaction(transaction, config2 = {}) {
+    const tx = new BetterSQLiteTransaction("sync", this.dialect, this, this.schema);
+    const nativeTx = this.client.transaction(transaction);
+    return nativeTx[config2.behavior ?? "deferred"](tx);
+  }
+};
+var BetterSQLiteTransaction = class _BetterSQLiteTransaction extends SQLiteTransaction {
+  static [entityKind] = "BetterSQLiteTransaction";
+  transaction(transaction) {
+    const savepointName = `sp${this.nestedIndex}`;
+    const tx = new _BetterSQLiteTransaction("sync", this.dialect, this.session, this.schema, this.nestedIndex + 1);
+    this.session.run(sql.raw(`savepoint ${savepointName}`));
+    try {
+      const result = transaction(tx);
+      this.session.run(sql.raw(`release savepoint ${savepointName}`));
+      return result;
+    } catch (err) {
+      this.session.run(sql.raw(`rollback to savepoint ${savepointName}`));
+      throw err;
+    }
+  }
+};
+var PreparedQuery = class extends SQLitePreparedQuery {
+  constructor(stmt, query, logger, cache, queryMetadata, cacheConfig, fields, executeMethod, _isResponseInArrayMode, customResultMapper) {
+    super("sync", executeMethod, query, cache, queryMetadata, cacheConfig);
+    this.stmt = stmt;
+    this.logger = logger;
+    this.fields = fields;
+    this._isResponseInArrayMode = _isResponseInArrayMode;
+    this.customResultMapper = customResultMapper;
+  }
+  static [entityKind] = "BetterSQLitePreparedQuery";
+  run(placeholderValues) {
+    const params = fillPlaceholders(this.query.params, placeholderValues ?? {});
+    this.logger.logQuery(this.query.sql, params);
+    return this.stmt.run(...params);
+  }
+  all(placeholderValues) {
+    const { fields, joinsNotNullableMap, query, logger, stmt, customResultMapper } = this;
+    if (!fields && !customResultMapper) {
+      const params = fillPlaceholders(query.params, placeholderValues ?? {});
+      logger.logQuery(query.sql, params);
+      return stmt.all(...params);
+    }
+    const rows = this.values(placeholderValues);
+    if (customResultMapper) {
+      return customResultMapper(rows);
+    }
+    return rows.map((row) => mapResultRow(fields, row, joinsNotNullableMap));
+  }
+  get(placeholderValues) {
+    const params = fillPlaceholders(this.query.params, placeholderValues ?? {});
+    this.logger.logQuery(this.query.sql, params);
+    const { fields, stmt, joinsNotNullableMap, customResultMapper } = this;
+    if (!fields && !customResultMapper) {
+      return stmt.get(...params);
+    }
+    const row = stmt.raw().get(...params);
+    if (!row) {
+      return void 0;
+    }
+    if (customResultMapper) {
+      return customResultMapper([row]);
+    }
+    return mapResultRow(fields, row, joinsNotNullableMap);
+  }
+  values(placeholderValues) {
+    const params = fillPlaceholders(this.query.params, placeholderValues ?? {});
+    this.logger.logQuery(this.query.sql, params);
+    return this.stmt.raw().all(...params);
+  }
+  /** @internal */
+  isResponseInArrayMode() {
+    return this._isResponseInArrayMode;
+  }
+};
+
+// node_modules/drizzle-orm/better-sqlite3/driver.js
+var BetterSQLite3Database = class extends BaseSQLiteDatabase {
+  static [entityKind] = "BetterSQLite3Database";
+};
+function construct(client, config2 = {}) {
+  const dialect = new SQLiteSyncDialect({ casing: config2.casing });
+  let logger;
+  if (config2.logger === true) {
+    logger = new DefaultLogger();
+  } else if (config2.logger !== false) {
+    logger = config2.logger;
+  }
+  let schema2;
+  if (config2.schema) {
+    const tablesConfig = extractTablesRelationalConfig(
+      config2.schema,
+      createTableRelationsHelpers
+    );
+    schema2 = {
+      fullSchema: config2.schema,
+      schema: tablesConfig.tables,
+      tableNamesMap: tablesConfig.tableNamesMap
+    };
+  }
+  const session = new BetterSQLiteSession(client, dialect, schema2, { logger });
+  const db2 = new BetterSQLite3Database("sync", dialect, session, schema2);
+  db2.$client = client;
+  return db2;
+}
+function drizzle(...params) {
+  if (params[0] === void 0 || typeof params[0] === "string") {
+    const instance = params[0] === void 0 ? new Client() : new Client(params[0]);
+    return construct(instance, params[1]);
+  }
+  if (isConfig(params[0])) {
+    const { connection, client, ...drizzleConfig } = params[0];
+    if (client) return construct(client, drizzleConfig);
+    if (typeof connection === "object") {
+      const { source, ...options } = connection;
+      const instance2 = new Client(source, options);
+      return construct(instance2, drizzleConfig);
+    }
+    const instance = new Client(connection);
+    return construct(instance, drizzleConfig);
+  }
+  return construct(params[0], params[1]);
+}
+((drizzle2) => {
+  function mock(config2) {
+    return construct({}, config2);
+  }
+  drizzle2.mock = mock;
+})(drizzle || (drizzle = {}));
+
+// electron/database/client.ts
+import path2 from "node:path";
 var db = null;
 function removeDiacritics(value) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -5893,6 +5999,69 @@ function closeDatabase() {
     db = null;
   }
 }
+
+// electron/services/databaseService.ts
+function buildSettingsRow(input2, now) {
+  return {
+    shopName: input2.shopName.trim(),
+    address: input2.address?.trim() || null,
+    phone: input2.phone?.trim() || null,
+    phone2: input2.phone2?.trim() || null,
+    ninea: input2.ninea?.trim() || null,
+    ownerName: input2.ownerName?.trim() || null,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+function getDatabaseStatus() {
+  const db2 = getDb();
+  const sqlite = db2.$client;
+  const versionRow = sqlite.prepare("select sqlite_version() as version").get();
+  const settingsTable = sqlite.prepare(
+    "select name from sqlite_master where type='table' and name='settings'"
+  ).get();
+  return {
+    connected: true,
+    initialized: !!settingsTable,
+    version: versionRow?.version ?? "unknown"
+  };
+}
+async function getSettings() {
+  const db2 = getDb();
+  try {
+    const row = await db2.select().from(settings).where(eq(settings.id, 1)).get();
+    return row ?? null;
+  } catch (error62) {
+    console.error("[settings] getSettings failed:", error62);
+    return null;
+  }
+}
+async function saveSettings(input2) {
+  const db2 = getDb();
+  const values = buildSettingsRow(input2, /* @__PURE__ */ new Date());
+  const existing = await db2.select().from(settings).where(eq(settings.id, 1)).get();
+  if (existing) {
+    await db2.update(settings).set({
+      shopName: values.shopName,
+      address: values.address,
+      phone: values.phone,
+      phone2: values.phone2,
+      ninea: values.ninea,
+      ownerName: values.ownerName,
+      updatedAt: values.updatedAt
+    }).where(eq(settings.id, 1)).run();
+  } else {
+    await db2.insert(settings).values({ id: 1, ...values }).run();
+  }
+  const saved = await db2.select().from(settings).where(eq(settings.id, 1)).get();
+  if (!saved) {
+    throw new Error("Failed to save settings");
+  }
+  return saved;
+}
+
+// electron/services/authService.ts
+import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 
 // node_modules/zod/v4/classic/external.js
 var external_exports = {};
@@ -7108,14 +7277,14 @@ function codePointLength(str) {
   const units = str.length;
   if (!highSurrogate.test(str))
     return units;
-  let count = units;
+  let count2 = units;
   for (let i = 0; i < units - 1; i++) {
     if ((str.charCodeAt(i) & 64512) === 55296 && (str.charCodeAt(i + 1) & 64512) === 56320) {
-      count--;
+      count2--;
       i++;
     }
   }
-  return count;
+  return count2;
 }
 function getLengthableOrigin(input2) {
   if (Array.isArray(input2))
@@ -8466,8 +8635,8 @@ var Doc = class {
     const lines = content.split("\n").filter((x) => x);
     const minIndent = Math.min(...lines.map((x) => x.length - x.trimStart().length));
     const dedented = lines.map((x) => x.slice(minIndent)).map((x) => " ".repeat(this.indent * 2) + x);
-    for (const line2 of dedented) {
-      this.content.push(line2);
+    for (const line of dedented) {
+      this.content.push(line);
     }
   }
   compile() {
@@ -10712,10 +10881,10 @@ function partPattern(schema2) {
   const own2 = schema2._zod.pattern?.source;
   const inner = def.innerType ?? schema2._zod.innerType;
   if (inner) {
-    const before = inner._zod.pattern?.source;
+    const before2 = inner._zod.pattern?.source;
     const after2 = partPattern(inner);
-    if (own2 && before && after2 && after2 !== before) {
-      return own2.replace(cleanRegex(before), () => cleanRegex(after2));
+    if (own2 && before2 && after2 && after2 !== before2) {
+      return own2.replace(cleanRegex(before2), () => cleanRegex(after2));
     }
     return own2;
   }
@@ -11467,8 +11636,8 @@ function az_default() {
 }
 
 // node_modules/zod/v4/locales/be.js
-function getBelarusianPlural(count, one, few, many) {
-  const absCount = Math.abs(count);
+function getBelarusianPlural(count2, one, few, many) {
+  const absCount = Math.abs(count2);
   const lastDigit = absCount % 10;
   const lastTwoDigits = absCount % 100;
   if (lastTwoDigits >= 11 && lastTwoDigits <= 19) {
@@ -14114,8 +14283,8 @@ function hu_default() {
 }
 
 // node_modules/zod/v4/locales/hy.js
-function getArmenianPlural(count, one, many) {
-  return Math.abs(count) === 1 ? one : many;
+function getArmenianPlural(count2, one, many) {
+  return Math.abs(count2) === 1 ? one : many;
 }
 function withDefiniteArticle(word) {
   if (!word)
@@ -16853,8 +17022,8 @@ function ro_default() {
 }
 
 // node_modules/zod/v4/locales/ru.js
-function getRussianPlural(count, one, few, many) {
-  const absCount = Math.abs(count);
+function getRussianPlural(count2, one, few, many) {
+  const absCount = Math.abs(count2);
   const lastDigit = absCount % 10;
   const lastTwoDigits = absCount % 100;
   if (lastTwoDigits >= 11 && lastTwoDigits <= 19) {
@@ -25551,6 +25720,202 @@ function date4(params) {
   return _coercedDate(ZodDate, params);
 }
 
+// electron/services/authService.ts
+var SCRYPT_PREFIX = "scrypt";
+var SCRYPT_N = 16384;
+var SCRYPT_R = 8;
+var SCRYPT_P = 1;
+var SALT_BYTES = 16;
+var KEY_BYTES = 64;
+var AUTH_ERRORS = {
+  invalidCredentials: "Nom d'utilisateur ou mot de passe incorrect.",
+  alreadyConfigured: "La boutique est d\xE9j\xE0 configur\xE9e.",
+  invalidInput: "Les informations fournies sont invalides.",
+  usernameTaken: "Ce nom d'utilisateur est d\xE9j\xE0 utilis\xE9."
+};
+var credentialsSchema = external_exports.object({
+  username: external_exports.string().trim().min(1).max(50),
+  password: external_exports.string().min(1).max(200)
+});
+var setupSchema = external_exports.object({
+  shopName: external_exports.string().trim().min(1).max(120),
+  address: external_exports.string().trim().max(200).optional(),
+  phone: external_exports.string().trim().max(40).optional(),
+  phone2: external_exports.string().trim().max(40).optional(),
+  ninea: external_exports.string().trim().max(40).optional(),
+  ownerName: external_exports.string().trim().max(120).optional(),
+  username: external_exports.string().trim().min(3, "username too short").max(50, "username too long").regex(/^[a-zA-Z0-9._-]+$/, "username invalid chars"),
+  password: external_exports.string().min(8, "password too short").max(200, "password too long").regex(/[A-Za-z]/, "password needs a letter").regex(/[0-9]/, "password needs a digit")
+});
+var currentUserId = null;
+var dummyHash = null;
+function hashPassword(password) {
+  const salt = randomBytes(SALT_BYTES);
+  const derived2 = scryptSync(password, salt, KEY_BYTES, {
+    N: SCRYPT_N,
+    r: SCRYPT_R,
+    p: SCRYPT_P
+  });
+  return [
+    SCRYPT_PREFIX,
+    SCRYPT_N,
+    SCRYPT_R,
+    SCRYPT_P,
+    salt.toString("hex"),
+    derived2.toString("hex")
+  ].join("$");
+}
+function verifyPassword(password, stored) {
+  const parts = stored.split("$");
+  if (parts.length !== 6 || parts[0] !== SCRYPT_PREFIX) {
+    return false;
+  }
+  const cost = Number(parts[1]);
+  const blockSize = Number(parts[2]);
+  const parallelization = Number(parts[3]);
+  const expected = Buffer.from(parts[5], "hex");
+  if (!Number.isInteger(cost) || !Number.isInteger(blockSize) || !Number.isInteger(parallelization) || expected.length === 0) {
+    return false;
+  }
+  const actual = scryptSync(password, Buffer.from(parts[4], "hex"), expected.length, {
+    N: cost,
+    r: blockSize,
+    p: parallelization
+  });
+  return timingSafeEqual(actual, expected);
+}
+function burnVerification(password) {
+  dummyHash ??= hashPassword("no-account-in-this-installation");
+  verifyPassword(password, dummyHash);
+}
+function toPublicUser(row) {
+  return {
+    id: row.id,
+    username: row.username,
+    createdAt: row.createdAt
+  };
+}
+function hasAccount() {
+  const db2 = getDb();
+  const row = db2.select({ total: count() }).from(users).get();
+  return (row?.total ?? 0) > 0;
+}
+function setupAccount(input2) {
+  const parsed = setupSchema.safeParse(input2);
+  if (!parsed.success) {
+    throw new Error(AUTH_ERRORS.invalidInput);
+  }
+  if (hasAccount()) {
+    throw new Error(AUTH_ERRORS.alreadyConfigured);
+  }
+  const db2 = getDb();
+  const now = /* @__PURE__ */ new Date();
+  const data = parsed.data;
+  const settingsInput = {
+    shopName: data.shopName,
+    address: data.address ?? null,
+    phone: data.phone ?? null,
+    phone2: data.phone2 ?? null,
+    ninea: data.ninea ?? null,
+    ownerName: data.ownerName ?? null
+  };
+  let created;
+  try {
+    created = db2.transaction((tx) => {
+      const user = tx.insert(users).values({
+        username: data.username,
+        passwordHash: hashPassword(data.password),
+        createdAt: now,
+        updatedAt: now
+      }).returning().get();
+      tx.insert(settings).values({ id: 1, ...buildSettingsRow(settingsInput, now) }).run();
+      return user;
+    });
+  } catch (error62) {
+    if (error62 instanceof Error && error62.message.includes("UNIQUE")) {
+      throw new Error(AUTH_ERRORS.usernameTaken);
+    }
+    throw error62;
+  }
+  currentUserId = created.id;
+  return toPublicUser(created);
+}
+function login(credentials) {
+  const parsed = credentialsSchema.safeParse(credentials);
+  if (!parsed.success) {
+    return null;
+  }
+  const db2 = getDb();
+  const row = db2.select().from(users).where(eq(users.username, parsed.data.username)).get();
+  if (!row) {
+    burnVerification(parsed.data.password);
+    return null;
+  }
+  if (!verifyPassword(parsed.data.password, row.passwordHash)) {
+    return null;
+  }
+  currentUserId = row.id;
+  return toPublicUser(row);
+}
+function logout() {
+  currentUserId = null;
+}
+function getCurrentUser() {
+  if (currentUserId === null) {
+    return null;
+  }
+  const db2 = getDb();
+  const row = db2.select().from(users).where(eq(users.id, currentUserId)).get();
+  if (!row) {
+    currentUserId = null;
+    return null;
+  }
+  return toPublicUser(row);
+}
+function getAuthStatus() {
+  const user = getCurrentUser();
+  return {
+    isConfigured: hasAccount(),
+    isAuthenticated: user !== null,
+    user
+  };
+}
+
+// electron/ipc/auth.ts
+function toFailure(error62, fallback) {
+  return {
+    success: false,
+    error: error62 instanceof Error ? error62.message : fallback
+  };
+}
+function registerAuthIpcHandlers() {
+  ipcMain.handle("auth:status", () => {
+    return getAuthStatus();
+  });
+  ipcMain.handle("auth:setup", (_event, input2) => {
+    try {
+      return { success: true, user: setupAccount(input2) };
+    } catch (error62) {
+      return toFailure(error62, AUTH_ERRORS.invalidInput);
+    }
+  });
+  ipcMain.handle("auth:login", (_event, credentials) => {
+    try {
+      const user = login(credentials);
+      if (!user) {
+        return { success: false, error: AUTH_ERRORS.invalidCredentials };
+      }
+      return { success: true, user };
+    } catch (error62) {
+      return toFailure(error62, AUTH_ERRORS.invalidCredentials);
+    }
+  });
+  ipcMain.handle("auth:logout", () => {
+    logout();
+    return true;
+  });
+}
+
 // electron/services/productService.ts
 var PRODUCT_ERRORS = {
   nameRequired: "Le nom du produit est obligatoire.",
@@ -25592,6 +25957,13 @@ var PRODUCT_CONVERSION_QUANTITY_MAX = 1e6;
 var PRODUCT_ERROR_CODES = Object.keys(PRODUCT_ERRORS);
 function normalizeProductName(rawName) {
   return rawName.trim().replace(/\s+/g, " ").toUpperCase();
+}
+function buildSearchPattern(rawSearch) {
+  const search = removeDiacritics(rawSearch.trim()).toLowerCase().replace(/\s+/g, " ");
+  if (!search) {
+    return null;
+  }
+  return `%${search.replace(/[\\%_]/g, "\\$&")}%`;
 }
 function normalizeFormName(rawForm) {
   return rawForm.trim().replace(/\s+/g, " ").toUpperCase();
@@ -25726,6 +26098,24 @@ var productColumns = {
   createdAt: products.createdAt,
   updatedAt: products.updatedAt
 };
+function toProduct(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    categoryId: row.categoryId,
+    categoryName: row.categoryName,
+    purchasePrice: row.purchasePrice,
+    salePrice: row.salePrice,
+    isTransformable: row.isTransformable,
+    primaryForm: row.primaryForm,
+    secondaryForm: row.secondaryForm,
+    conversionQuantity: row.conversionQuantity,
+    secondarySalePrice: row.secondarySalePrice,
+    isActive: row.isActive,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+}
 function selectProductById(id) {
   const row = getDb().select(productColumns).from(products).innerJoin(categories, eq(products.categoryId, categories.id)).where(eq(products.id, id)).get();
   return row ?? null;
@@ -25784,6 +26174,33 @@ function withMappedErrors(operation) {
     throw error62;
   }
 }
+function listProducts(filters = {}) {
+  const conditions = [];
+  if (typeof filters?.search === "string") {
+    const pattern = buildSearchPattern(filters.search);
+    if (pattern) {
+      conditions.push(
+        sql`unaccent(lower(${products.name})) like ${pattern} escape '\\'`
+      );
+    }
+  }
+  if (typeof filters?.categorySearch === "string") {
+    const pattern = buildSearchPattern(filters.categorySearch);
+    if (pattern) {
+      conditions.push(
+        sql`unaccent(lower(${categories.name})) like ${pattern} escape '\\'`
+      );
+    }
+  }
+  if (typeof filters?.categoryId === "number") {
+    conditions.push(eq(products.categoryId, filters.categoryId));
+  }
+  if (typeof filters?.isActive === "boolean") {
+    conditions.push(eq(products.isActive, filters.isActive));
+  }
+  const rows = getDb().select(productColumns).from(products).innerJoin(categories, eq(products.categoryId, categories.id)).where(conditions.length > 0 ? and(...conditions) : void 0).orderBy(asc(products.name)).all();
+  return rows.map(toProduct);
+}
 function getProductById(id) {
   const productId = parseProductId(id);
   const product = selectProductById(productId);
@@ -25805,6 +26222,20 @@ function createProduct(input2) {
     return getProductById(inserted.id);
   });
 }
+function updateProduct(id, input2) {
+  const productId = parseProductId(id);
+  const parsed = parseProduct(input2);
+  const existing = getDb().select({ id: products.id }).from(products).where(eq(products.id, productId)).get();
+  if (!existing) {
+    throw new ProductError("notFound");
+  }
+  assertCategoryExists(parsed.categoryId);
+  assertNameIsAvailable(parsed.name, productId);
+  return withMappedErrors(() => {
+    getDb().update(products).set({ ...parsed, updatedAt: /* @__PURE__ */ new Date() }).where(eq(products.id, productId)).run();
+    return getProductById(productId);
+  });
+}
 function setProductActive(id, isActive) {
   const productId = parseProductId(id);
   const parsedActive = isActiveSchema.safeParse(isActive);
@@ -25817,6 +26248,1824 @@ function setProductActive(id, isActive) {
   }
   getDb().update(products).set({ isActive: parsedActive.data, updatedAt: /* @__PURE__ */ new Date() }).where(eq(products.id, productId)).run();
   return getProductById(productId);
+}
+function isCategoryUsedByProducts(categoryId) {
+  const usage = getDb().select({ id: products.id }).from(products).where(eq(products.categoryId, categoryId)).get();
+  return Boolean(usage);
+}
+function isNameAvailable(name, excludeId) {
+  if (!name || name.trim().length < PRODUCT_NAME_MIN_LENGTH) {
+    return false;
+  }
+  return !findByName(normalizeProductName(name.trim()), excludeId);
+}
+
+// electron/services/categoryService.ts
+var CATEGORY_ERRORS = {
+  nameRequired: "Le nom de la cat\xE9gorie est obligatoire.",
+  nameTooShort: "Le nom de la cat\xE9gorie doit contenir au moins 2 caract\xE8res.",
+  nameTooLong: "Le nom de la cat\xE9gorie ne peut pas d\xE9passer 60 caract\xE8res.",
+  duplicate: "Cette cat\xE9gorie existe d\xE9j\xE0.",
+  notFound: "Cette cat\xE9gorie n'existe pas.",
+  inUse: "Cette cat\xE9gorie est utilis\xE9e par un ou plusieurs produits et ne peut pas \xEAtre supprim\xE9e.",
+  unexpected: "Une erreur inattendue est survenue."
+};
+var CategoryError = class extends Error {
+  code;
+  constructor(code) {
+    super(CATEGORY_ERRORS[code]);
+    this.name = "CategoryError";
+    this.code = code;
+  }
+};
+var CATEGORY_NAME_MIN_LENGTH = 2;
+var CATEGORY_NAME_MAX_LENGTH = 60;
+var CATEGORY_ERROR_CODES = Object.keys(CATEGORY_ERRORS);
+var categoryNameSchema = external_exports.string({ error: CATEGORY_ERRORS.nameRequired }).trim().min(1, CATEGORY_ERRORS.nameRequired).max(CATEGORY_NAME_MAX_LENGTH, CATEGORY_ERRORS.nameTooLong).refine((name) => name.length >= CATEGORY_NAME_MIN_LENGTH, CATEGORY_ERRORS.nameTooShort);
+var categorySchema = external_exports.object({
+  name: categoryNameSchema
+});
+var categoryIdSchema2 = external_exports.number({ error: CATEGORY_ERRORS.notFound }).int().positive();
+function normalizeCategoryName(rawName) {
+  return rawName.trim().replace(/\s+/g, " ").toUpperCase();
+}
+function toErrorCode2(error62, fallback) {
+  const message = error62.issues[0]?.message;
+  return CATEGORY_ERROR_CODES.find((code) => CATEGORY_ERRORS[code] === message) ?? fallback;
+}
+function parseCategoryName(input2) {
+  const parsed = categorySchema.safeParse(input2);
+  if (!parsed.success) {
+    throw new CategoryError(toErrorCode2(parsed.error, "nameRequired"));
+  }
+  return normalizeCategoryName(parsed.data.name);
+}
+function parseCategoryId(id) {
+  const parsed = categoryIdSchema2.safeParse(id);
+  if (!parsed.success) {
+    throw new CategoryError("notFound");
+  }
+  return parsed.data;
+}
+function toCategory(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+}
+function findByName2(name, excludeId) {
+  const conditions = [sql`lower(${categories.name}) = ${name.toLowerCase()}`];
+  if (excludeId) {
+    conditions.push(ne(categories.id, excludeId));
+  }
+  return getDb().select({ id: categories.id }).from(categories).where(and(...conditions)).get();
+}
+function assertNameIsAvailable2(name, excludeId) {
+  if (findByName2(name, excludeId)) {
+    throw new CategoryError("duplicate");
+  }
+}
+function isUniqueViolation(error62) {
+  return error62 instanceof Error && error62.message.includes("UNIQUE");
+}
+function isForeignKeyViolation(error62) {
+  return error62 instanceof Error && error62.message.includes("FOREIGN KEY");
+}
+function listCategories() {
+  const rows = getDb().select().from(categories).orderBy(asc(categories.name)).all();
+  return rows.map(toCategory);
+}
+function getCategoryById(id) {
+  const categoryId = parseCategoryId(id);
+  const row = getDb().select().from(categories).where(eq(categories.id, categoryId)).get();
+  return row ? toCategory(row) : null;
+}
+function createCategory(input2) {
+  const name = parseCategoryName(input2);
+  const db2 = getDb();
+  const now = /* @__PURE__ */ new Date();
+  assertNameIsAvailable2(name);
+  try {
+    return toCategory(
+      db2.insert(categories).values({ name, createdAt: now, updatedAt: now }).returning().get()
+    );
+  } catch (error62) {
+    if (isUniqueViolation(error62)) {
+      throw new CategoryError("duplicate");
+    }
+    throw error62;
+  }
+}
+function updateCategory(id, input2) {
+  const categoryId = parseCategoryId(id);
+  const name = parseCategoryName(input2);
+  const db2 = getDb();
+  if (!db2.select({ id: categories.id }).from(categories).where(eq(categories.id, categoryId)).get()) {
+    throw new CategoryError("notFound");
+  }
+  assertNameIsAvailable2(name, categoryId);
+  try {
+    const updated = db2.update(categories).set({ name, updatedAt: /* @__PURE__ */ new Date() }).where(eq(categories.id, categoryId)).returning().get();
+    if (!updated) {
+      throw new CategoryError("notFound");
+    }
+    return toCategory(updated);
+  } catch (error62) {
+    if (isUniqueViolation(error62)) {
+      throw new CategoryError("duplicate");
+    }
+    throw error62;
+  }
+}
+function deleteCategory(id) {
+  const categoryId = parseCategoryId(id);
+  const db2 = getDb();
+  if (!db2.select({ id: categories.id }).from(categories).where(eq(categories.id, categoryId)).get()) {
+    throw new CategoryError("notFound");
+  }
+  if (isCategoryUsedByProducts(categoryId)) {
+    throw new CategoryError("inUse");
+  }
+  try {
+    db2.delete(categories).where(eq(categories.id, categoryId)).run();
+  } catch (error62) {
+    if (isForeignKeyViolation(error62)) {
+      throw new CategoryError("inUse");
+    }
+    throw error62;
+  }
+  return null;
+}
+function isNameAvailable2(name, excludeId) {
+  if (!name || name.trim().length < CATEGORY_NAME_MIN_LENGTH) {
+    return false;
+  }
+  return !findByName2(normalizeCategoryName(name.trim()), excludeId);
+}
+
+// electron/ipc/categories.ts
+function toSuccess(data) {
+  return { success: true, data };
+}
+function toFailure2(error62, fallback) {
+  if (error62 instanceof CategoryError) {
+    return { success: false, error: error62.message };
+  }
+  console.error("[categories] Unexpected error:", error62);
+  return { success: false, error: fallback };
+}
+function registerCategoryIpcHandlers() {
+  ipcMain.handle("categories:list", () => {
+    try {
+      return toSuccess(listCategories());
+    } catch (error62) {
+      return toFailure2(error62, CATEGORY_ERRORS.unexpected);
+    }
+  });
+  ipcMain.handle(
+    "categories:get",
+    (_event, id) => {
+      try {
+        return toSuccess(getCategoryById(id));
+      } catch (error62) {
+        return toFailure2(error62, CATEGORY_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "categories:create",
+    (_event, input2) => {
+      try {
+        return toSuccess(createCategory(input2));
+      } catch (error62) {
+        return toFailure2(error62, CATEGORY_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "categories:update",
+    (_event, id, input2) => {
+      try {
+        return toSuccess(updateCategory(id, input2));
+      } catch (error62) {
+        return toFailure2(error62, CATEGORY_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "categories:delete",
+    (_event, id) => {
+      try {
+        return toSuccess(deleteCategory(id));
+      } catch (error62) {
+        return toFailure2(error62, CATEGORY_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "categories:is-name-available",
+    (_event, name, excludeId) => {
+      try {
+        return toSuccess(isNameAvailable2(name, excludeId));
+      } catch (error62) {
+        return toFailure2(error62, CATEGORY_ERRORS.unexpected);
+      }
+    }
+  );
+}
+
+// electron/services/clientService.ts
+var CLIENT_ERRORS = {
+  nameRequired: "Le nom du client est obligatoire.",
+  nameTooShort: "Le nom du client doit contenir au moins 2 caract\xE8res.",
+  nameTooLong: "Le nom du client ne peut pas d\xE9passer 120 caract\xE8res.",
+  phoneRequired: "Le t\xE9l\xE9phone du client est obligatoire.",
+  phoneTooShort: "Le num\xE9ro de t\xE9l\xE9phone doit contenir au moins 9 chiffres.",
+  phoneTooLong: "Le num\xE9ro de t\xE9l\xE9phone ne peut pas d\xE9passer 20 caract\xE8res.",
+  phoneInvalid: "Le num\xE9ro de t\xE9l\xE9phone est invalide.",
+  addressTooLong: "L'adresse ne peut pas d\xE9passer 255 caract\xE8res.",
+  duplicateName: "Ce nom de client existe d\xE9j\xE0.",
+  duplicatePhone: "Ce num\xE9ro de t\xE9l\xE9phone est d\xE9j\xE0 utilis\xE9.",
+  notFound: "Ce client n'existe pas.",
+  systemClientImmutable: "Le client syst\xE8me ne peut pas \xEAtre modifi\xE9.",
+  systemClientCannotDeactivate: "Le client syst\xE8me ne peut pas \xEAtre d\xE9sactiv\xE9.",
+  unexpected: "Une erreur inattendue est survenue."
+};
+var ClientError = class extends Error {
+  code;
+  constructor(code) {
+    super(CLIENT_ERRORS[code]);
+    this.name = "ClientError";
+    this.code = code;
+  }
+};
+var CLIENT_NAME_MIN_LENGTH = 2;
+var CLIENT_NAME_MAX_LENGTH = 120;
+var CLIENT_PHONE_MIN_DIGITS = 9;
+var CLIENT_PHONE_MAX_LENGTH = 20;
+var CLIENT_ADDRESS_MAX_LENGTH = 255;
+var SYSTEM_CLIENT_NAME = "CLIENT COMPTANT";
+var SYSTEM_CLIENT_PHONE = "000-000-0000";
+var CLIENT_ERROR_CODES = Object.keys(CLIENT_ERRORS);
+function normalizeClientName(rawName) {
+  return rawName.trim().replace(/\s+/g, " ").toUpperCase();
+}
+function normalizePhone(rawPhone) {
+  const cleaned = rawPhone.trim().replace(/[\s\-().]/g, "");
+  if (cleaned.startsWith("+221")) {
+    return cleaned;
+  }
+  if (cleaned.startsWith("221") && cleaned.length === 12) {
+    return "+" + cleaned;
+  }
+  if (/^\d{9}$/.test(cleaned)) {
+    return "+221" + cleaned;
+  }
+  return cleaned;
+}
+function isValidSenegalesePhone(phone) {
+  const normalized = normalizePhone(phone);
+  return /^\+221\d{9}$/.test(normalized) || /^\d{9}$/.test(normalized);
+}
+function toErrorCode3(error62, fallback) {
+  const message = error62.issues[0]?.message;
+  return CLIENT_ERROR_CODES.find((code) => CLIENT_ERRORS[code] === message) ?? fallback;
+}
+function parseClientName(input2) {
+  const nameSchema = external_exports.string({ error: CLIENT_ERRORS.nameRequired }).trim().min(1, CLIENT_ERRORS.nameRequired).max(CLIENT_NAME_MAX_LENGTH, CLIENT_ERRORS.nameTooLong).refine((name) => name.length >= CLIENT_NAME_MIN_LENGTH, CLIENT_ERRORS.nameTooShort);
+  const parsed = nameSchema.safeParse(input2.name);
+  if (!parsed.success) {
+    throw new ClientError(toErrorCode3(parsed.error, "nameRequired"));
+  }
+  return normalizeClientName(parsed.data);
+}
+function parseClientPhone(input2) {
+  const phoneSchema = external_exports.string({ error: CLIENT_ERRORS.phoneRequired }).trim().min(1, CLIENT_ERRORS.phoneRequired).max(CLIENT_PHONE_MAX_LENGTH, CLIENT_ERRORS.phoneTooLong);
+  const parsed = phoneSchema.safeParse(input2.phone);
+  if (!parsed.success) {
+    throw new ClientError(toErrorCode3(parsed.error, "phoneRequired"));
+  }
+  const normalized = normalizePhone(parsed.data);
+  if (!isValidSenegalesePhone(normalized)) {
+    throw new ClientError("phoneInvalid");
+  }
+  return normalized;
+}
+function parseClientAddress(input2) {
+  if (input2.address === void 0 || input2.address === null || input2.address.trim() === "") {
+    return null;
+  }
+  const addressSchema = external_exports.string().trim().max(CLIENT_ADDRESS_MAX_LENGTH, CLIENT_ERRORS.addressTooLong);
+  const parsed = addressSchema.safeParse(input2.address);
+  if (!parsed.success) {
+    throw new ClientError(toErrorCode3(parsed.error, "addressTooLong"));
+  }
+  const trimmed = parsed.data.trim();
+  return trimmed === "" ? null : trimmed;
+}
+function parseClientId(id) {
+  const idSchema = external_exports.number({ error: CLIENT_ERRORS.notFound }).int().positive();
+  const parsed = idSchema.safeParse(id);
+  if (!parsed.success) {
+    throw new ClientError("notFound");
+  }
+  return parsed.data;
+}
+function toClient(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    phone: row.phone,
+    address: row.address,
+    isActive: Boolean(row.isActive),
+    isSystem: Boolean(row.isSystem),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+}
+function assertNameIsAvailable3(name, excludeId) {
+  const nameLower = name.toLowerCase();
+  const conditions = [sql`lower(${clients.name}) = ${nameLower}`];
+  if (excludeId) {
+    conditions.push(ne(clients.id, excludeId));
+  }
+  const duplicate = getDb().select({ id: clients.id }).from(clients).where(and(...conditions)).get();
+  if (duplicate) {
+    throw new ClientError("duplicateName");
+  }
+}
+function assertPhoneIsAvailable(phone, excludeId) {
+  const conditions = [eq(clients.phone, phone)];
+  if (excludeId) {
+    conditions.push(ne(clients.id, excludeId));
+  }
+  const duplicate = getDb().select({ id: clients.id }).from(clients).where(and(...conditions)).get();
+  if (duplicate) {
+    throw new ClientError("duplicatePhone");
+  }
+}
+function isUniqueViolation2(error62) {
+  return error62 instanceof Error && error62.message.includes("UNIQUE");
+}
+function listClients(filters = {}) {
+  const conditions = [];
+  if (typeof filters?.search === "string" && filters.search.trim()) {
+    const pattern = `%${filters.search.trim().toLowerCase().replace(/[\\%_]/g, "\\$&")}%`;
+    conditions.push(sql`lower(${clients.name}) like ${pattern} escape '\\'`);
+  }
+  if (typeof filters?.phoneSearch === "string" && filters.phoneSearch.trim()) {
+    const pattern = `%${filters.phoneSearch.trim().replace(/[\\%_]/g, "\\$&")}%`;
+    conditions.push(sql`${clients.phone} like ${pattern} escape '\\'`);
+  }
+  if (typeof filters?.isActive === "boolean") {
+    conditions.push(eq(clients.isActive, filters.isActive));
+  }
+  const rows = getDb().select().from(clients).where(conditions.length > 0 ? and(...conditions) : void 0).orderBy(asc(clients.name)).all();
+  return rows.map(toClient);
+}
+function getClientById(id) {
+  const clientId = parseClientId(id);
+  const row = getDb().select().from(clients).where(eq(clients.id, clientId)).get();
+  return row ? toClient(row) : null;
+}
+function createClient(input2) {
+  const name = parseClientName(input2);
+  const phone = parseClientPhone(input2);
+  const address = parseClientAddress(input2);
+  const db2 = getDb();
+  const now = /* @__PURE__ */ new Date();
+  if (name === SYSTEM_CLIENT_NAME) {
+    throw new ClientError("duplicateName");
+  }
+  assertNameIsAvailable3(name);
+  assertPhoneIsAvailable(phone);
+  try {
+    const inserted = db2.insert(clients).values({ name, phone, address, isActive: true, isSystem: false, createdAt: now, updatedAt: now }).returning({ id: clients.id }).get();
+    if (!inserted) {
+      throw new ClientError("unexpected");
+    }
+    return getClientById(inserted.id);
+  } catch (error62) {
+    if (isUniqueViolation2(error62)) {
+      const message = error62.message;
+      if (message.includes("clients_name_unique")) {
+        throw new ClientError("duplicateName");
+      }
+      if (message.includes("clients_phone_unique")) {
+        throw new ClientError("duplicatePhone");
+      }
+      throw new ClientError("duplicateName");
+    }
+    throw error62;
+  }
+}
+function updateClient(id, input2) {
+  const clientId = parseClientId(id);
+  const db2 = getDb();
+  const existing = db2.select({ id: clients.id, isSystem: clients.isSystem }).from(clients).where(eq(clients.id, clientId)).get();
+  if (!existing) {
+    throw new ClientError("notFound");
+  }
+  if (existing.isSystem) {
+    throw new ClientError("systemClientImmutable");
+  }
+  const name = parseClientName(input2);
+  const phone = parseClientPhone(input2);
+  const address = parseClientAddress(input2);
+  if (name === SYSTEM_CLIENT_NAME) {
+    throw new ClientError("duplicateName");
+  }
+  assertNameIsAvailable3(name, clientId);
+  assertPhoneIsAvailable(phone, clientId);
+  try {
+    const updated = db2.update(clients).set({ name, phone, address, updatedAt: /* @__PURE__ */ new Date() }).where(eq(clients.id, clientId)).returning({ id: clients.id }).get();
+    if (!updated) {
+      throw new ClientError("notFound");
+    }
+    return getClientById(clientId);
+  } catch (error62) {
+    if (isUniqueViolation2(error62)) {
+      const message = error62.message;
+      if (message.includes("clients_name_unique")) {
+        throw new ClientError("duplicateName");
+      }
+      if (message.includes("clients_phone_unique")) {
+        throw new ClientError("duplicatePhone");
+      }
+      throw new ClientError("duplicateName");
+    }
+    throw error62;
+  }
+}
+function setClientActive(id, isActive) {
+  const clientId = parseClientId(id);
+  const db2 = getDb();
+  const existing = db2.select({ id: clients.id, isSystem: clients.isSystem }).from(clients).where(eq(clients.id, clientId)).get();
+  if (!existing) {
+    throw new ClientError("notFound");
+  }
+  if (existing.isSystem && !isActive) {
+    throw new ClientError("systemClientCannotDeactivate");
+  }
+  db2.update(clients).set({ isActive, updatedAt: /* @__PURE__ */ new Date() }).where(eq(clients.id, clientId)).run();
+  return getClientById(clientId);
+}
+function isNameAvailable3(name, excludeClientId) {
+  if (!name || name.trim().length < CLIENT_NAME_MIN_LENGTH) {
+    return false;
+  }
+  const normalized = normalizeClientName(name.trim());
+  const normalizedLower = normalized.toLowerCase();
+  const duplicate = excludeClientId ? getDb().select({ id: clients.id }).from(clients).where(and(sql`lower(${clients.name}) = ${normalizedLower}`, ne(clients.id, excludeClientId))).get() : getDb().select({ id: clients.id }).from(clients).where(sql`lower(${clients.name}) = ${normalizedLower}`).get();
+  return !duplicate;
+}
+function isPhoneAvailable(phone, excludeClientId) {
+  if (!phone || phone.trim().length < CLIENT_PHONE_MIN_DIGITS) {
+    return false;
+  }
+  const normalized = normalizePhone(phone.trim());
+  if (!isValidSenegalesePhone(normalized)) {
+    return false;
+  }
+  const duplicate = excludeClientId ? getDb().select({ id: clients.id }).from(clients).where(and(eq(clients.phone, normalized), ne(clients.id, excludeClientId))).get() : getDb().select({ id: clients.id }).from(clients).where(eq(clients.phone, normalized)).get();
+  return !duplicate;
+}
+function ensureSystemClient() {
+  const existing = getDb().select().from(clients).where(eq(clients.name, SYSTEM_CLIENT_NAME)).get();
+  if (existing) {
+    return toClient(existing);
+  }
+  const db2 = getDb();
+  const now = /* @__PURE__ */ new Date();
+  const inserted = db2.insert(clients).values({
+    name: SYSTEM_CLIENT_NAME,
+    phone: SYSTEM_CLIENT_PHONE,
+    address: null,
+    isActive: true,
+    isSystem: true,
+    createdAt: now,
+    updatedAt: now
+  }).returning({ id: clients.id }).get();
+  if (!inserted) {
+    throw new ClientError("unexpected");
+  }
+  return getClientById(inserted.id);
+}
+
+// electron/ipc/clients.ts
+function toSuccess2(data) {
+  return { success: true, data };
+}
+function toFailure3(error62, fallback) {
+  if (error62 instanceof ClientError) {
+    return { success: false, error: error62.message };
+  }
+  console.error("[clients] Unexpected error:", error62);
+  return { success: false, error: fallback };
+}
+function registerClientIpcHandlers() {
+  ipcMain.handle("clients:list", (_event, filters) => {
+    try {
+      return toSuccess2(listClients(filters ?? {}));
+    } catch (error62) {
+      return toFailure3(error62, CLIENT_ERRORS.unexpected);
+    }
+  });
+  ipcMain.handle("clients:get", (_event, id) => {
+    try {
+      return toSuccess2(getClientById(id));
+    } catch (error62) {
+      return toFailure3(error62, CLIENT_ERRORS.unexpected);
+    }
+  });
+  ipcMain.handle(
+    "clients:create",
+    (_event, input2) => {
+      try {
+        return toSuccess2(createClient(input2));
+      } catch (error62) {
+        return toFailure3(error62, CLIENT_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "clients:update",
+    (_event, id, input2) => {
+      try {
+        return toSuccess2(updateClient(id, input2));
+      } catch (error62) {
+        return toFailure3(error62, CLIENT_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "clients:set-active",
+    (_event, id, isActive) => {
+      try {
+        return toSuccess2(setClientActive(id, isActive));
+      } catch (error62) {
+        return toFailure3(error62, CLIENT_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "clients:is-name-available",
+    (_event, name, excludeClientId) => {
+      try {
+        return toSuccess2(isNameAvailable3(name, excludeClientId));
+      } catch (error62) {
+        return toFailure3(error62, CLIENT_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "clients:is-phone-available",
+    (_event, phone, excludeClientId) => {
+      try {
+        return toSuccess2(isPhoneAvailable(phone, excludeClientId));
+      } catch (error62) {
+        return toFailure3(error62, CLIENT_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle("clients:ensure-system", () => {
+    try {
+      return toSuccess2(ensureSystemClient());
+    } catch (error62) {
+      return toFailure3(error62, CLIENT_ERRORS.unexpected);
+    }
+  });
+}
+
+// electron/services/invoiceService.ts
+var INVOICE_ERRORS = {
+  dateRequired: "La date de la facture est obligatoire.",
+  dateInvalid: "La date doit \xEAtre au format AAAA-MM-JJ.",
+  dateOutOfRange: "La date doit \xEAtre comprise entre le 01/01/2000 et le 31/12/2099.",
+  itemsRequired: "Une facture doit contenir au moins un produit.",
+  tooManyItems: "Une facture ne peut pas d\xE9passer 100 lignes.",
+  duplicateLine: "Un m\xEAme produit ne peut pas appara\xEEtre deux fois avec la m\xEAme forme. Regroupez les quantit\xE9s sur une seule ligne.",
+  clientNotFound: "Ce client n'existe pas.",
+  clientInactive: "Client inactif : choisissez un client actif ou le client comptant.",
+  productNotFound: "Produit introuvable.",
+  productInactive: "Produit inactif. Veuillez r\xE9activer le produit avant de le facturer.",
+  formRequired: "La forme est obligatoire.",
+  formTooLong: `La forme ne peut pas d\xE9passer ${PRODUCT_FORM_MAX_LENGTH} caract\xE8res.`,
+  formInvalid: "Forme invalide pour ce produit.",
+  quantityRequired: "La quantit\xE9 est obligatoire.",
+  quantityInvalid: "La quantit\xE9 doit \xEAtre un entier sup\xE9rieur \xE0 0.",
+  quantityTooHigh: "La quantit\xE9 ne peut pas d\xE9passer 1 000 000.",
+  unitPriceRequired: "Le prix de vente unitaire est obligatoire.",
+  unitPriceInvalid: "Le prix de vente unitaire doit \xEAtre un entier sup\xE9rieur ou \xE9gal \xE0 0.",
+  unitPriceTooHigh: "Le prix de vente unitaire ne peut pas d\xE9passer 1 000 000 000 FCFA.",
+  unitPriceNotConfigured: "Le prix de vente de ce produit n'est pas configur\xE9 pour cette forme : saisissez le prix factur\xE9.",
+  insufficientStock: "Stock insuffisant pour cette facture.",
+  paymentRequired: "Le montant du paiement est obligatoire.",
+  paymentInvalid: "Le montant du paiement doit \xEAtre un entier sup\xE9rieur \xE0 0.",
+  paymentTooHigh: "Le montant pay\xE9 ne peut pas d\xE9passer le total de la facture.",
+  paymentNotFound: "Paiement introuvable.",
+  paymentOnCancelledSale: "Une facture annul\xE9e ne peut plus recevoir de paiement.",
+  locked: "Cette facture a d\xE9j\xE0 re\xE7u un paiement : son contenu ne peut plus \xEAtre modifi\xE9.",
+  alreadyCancelled: "Cette facture est d\xE9j\xE0 annul\xE9e.",
+  cancelNotAllowed: "Une facture ayant re\xE7u un paiement ne peut pas \xEAtre annul\xE9e.",
+  deleteNotAllowed: "Seule une facture annul\xE9e et non pay\xE9e peut \xEAtre supprim\xE9e.",
+  notFound: "Facture introuvable.",
+  referenceConflict: "La r\xE9f\xE9rence de la facture est d\xE9j\xE0 utilis\xE9e.",
+  totalInvalid: "Le total de la facture est invalide.",
+  unexpected: "Une erreur inattendue est survenue."
+};
+var InvoiceError = class extends Error {
+  code;
+  constructor(code) {
+    super(INVOICE_ERRORS[code]);
+    this.name = "InvoiceError";
+    this.code = code;
+  }
+};
+var INVOICE_REFERENCE_PREFIX = "VTE";
+var INVOICE_REFERENCE_PADDING = 6;
+var INVOICE_QUANTITY_MAX = 1e6;
+var INVOICE_UNIT_PRICE_MAX = 1e9;
+var INVOICE_ITEMS_MAX = 100;
+var INVOICE_ERROR_CODES = Object.keys(INVOICE_ERRORS);
+function formatInvoiceReference(sequence) {
+  return `${INVOICE_REFERENCE_PREFIX}-${String(sequence).padStart(
+    INVOICE_REFERENCE_PADDING,
+    "0"
+  )}`;
+}
+function invoiceMovementReason(reference) {
+  return `Facture ${reference}`;
+}
+function invoiceAdjustmentReason(reference, action) {
+  return `${action} facture ${reference}`;
+}
+function parseInvoiceDate(rawDate) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(rawDate ?? "").trim());
+  if (!match) {
+    throw new InvoiceError("dateInvalid");
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date5 = new Date(year, month - 1, day);
+  if (date5.getFullYear() !== year || date5.getMonth() !== month - 1 || date5.getDate() !== day) {
+    throw new InvoiceError("dateInvalid");
+  }
+  if (year < 2e3 || year > 2099) {
+    throw new InvoiceError("dateOutOfRange");
+  }
+  return date5;
+}
+function todayAsInvoiceDate(now = /* @__PURE__ */ new Date()) {
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+var clientIdSchema = external_exports.number({ error: INVOICE_ERRORS.clientNotFound }).int(INVOICE_ERRORS.clientNotFound).positive(INVOICE_ERRORS.clientNotFound);
+var productIdSchema2 = external_exports.number({ error: INVOICE_ERRORS.productNotFound }).int(INVOICE_ERRORS.productNotFound).positive(INVOICE_ERRORS.productNotFound);
+var formSchema = external_exports.string({ error: INVOICE_ERRORS.formRequired }).transform(normalizeFormName).pipe(
+  external_exports.string().min(1, INVOICE_ERRORS.formRequired).max(PRODUCT_FORM_MAX_LENGTH, INVOICE_ERRORS.formTooLong)
+);
+var quantitySchema = external_exports.number({ error: INVOICE_ERRORS.quantityRequired }).int(INVOICE_ERRORS.quantityInvalid).positive(INVOICE_ERRORS.quantityInvalid).max(INVOICE_QUANTITY_MAX, INVOICE_ERRORS.quantityTooHigh);
+var unitPriceSchema = external_exports.number({ error: INVOICE_ERRORS.unitPriceRequired }).int(INVOICE_ERRORS.unitPriceInvalid).min(0, INVOICE_ERRORS.unitPriceInvalid).max(INVOICE_UNIT_PRICE_MAX, INVOICE_ERRORS.unitPriceTooHigh);
+var optionalUnitPriceSchema = unitPriceSchema.nullable().optional();
+var itemsSchema = external_exports.array(
+  external_exports.object({
+    productId: productIdSchema2,
+    form: formSchema,
+    quantity: quantitySchema,
+    unitPrice: optionalUnitPriceSchema
+  })
+).min(1, INVOICE_ERRORS.itemsRequired).max(INVOICE_ITEMS_MAX, INVOICE_ERRORS.tooManyItems);
+var paymentAmountSchema = external_exports.number({ error: INVOICE_ERRORS.paymentRequired }).int(INVOICE_ERRORS.paymentInvalid).positive(INVOICE_ERRORS.paymentInvalid).max(INVOICE_UNIT_PRICE_MAX, INVOICE_ERRORS.paymentTooHigh);
+var saleItemInputSchema = itemsSchema.element;
+var invoiceCreateSchema = external_exports.object({
+  clientId: clientIdSchema.nullish(),
+  date: external_exports.string().nullish(),
+  items: itemsSchema
+});
+var invoiceUpdateSchema = invoiceCreateSchema.partial({ items: true });
+var invoicePaymentSchema = external_exports.object({
+  amount: paymentAmountSchema,
+  date: external_exports.string().nullish()
+});
+function toErrorCode4(error62, fallback) {
+  const message = error62.issues[0]?.message;
+  return INVOICE_ERROR_CODES.find((code) => INVOICE_ERRORS[code] === message) ?? fallback;
+}
+function getProductForms(product) {
+  return [product.primaryForm, product.secondaryForm].filter(
+    (form) => Boolean(form)
+  );
+}
+function assertFormBelongsToProduct(product, form) {
+  if (!getProductForms(product).includes(form)) {
+    throw new InvoiceError("formInvalid");
+  }
+}
+function findProduct(productId) {
+  try {
+    return getProductById(productId);
+  } catch (error62) {
+    if (error62 instanceof ProductError && error62.code === "notFound") {
+      throw new InvoiceError("productNotFound");
+    }
+    throw error62;
+  }
+}
+function getProductSalePrice(product, form) {
+  const isSecondary = Boolean(
+    product.secondaryForm && product.secondaryForm === form
+  );
+  const price = isSecondary ? product.secondarySalePrice : product.salePrice;
+  return typeof price === "number" && Number.isInteger(price) && price >= 0 ? price : null;
+}
+var signedQuantityExpression = sql`coalesce(sum(case when ${stockMovements.direction} = 'IN' then ${stockMovements.quantity} else -${stockMovements.quantity} end), 0)`;
+function computeFormQuantity(db2, productId, form) {
+  const row = db2.select({ quantity: signedQuantityExpression }).from(stockMovements).where(and(eq(stockMovements.productId, productId), eq(stockMovements.form, form))).get();
+  return row?.quantity ?? 0;
+}
+function lineKey(productId, form) {
+  return `${productId}|${form}`;
+}
+function resolveLines(items) {
+  return items.map((item) => {
+    const product = findProduct(item.productId);
+    if (!product.isActive) {
+      throw new InvoiceError("productInactive");
+    }
+    assertFormBelongsToProduct(product, item.form);
+    const typedPrice = typeof item.unitPrice === "number" ? item.unitPrice : null;
+    if (typedPrice === null) {
+      const configuredPrice = getProductSalePrice(product, item.form);
+      if (configuredPrice === null) {
+        throw new InvoiceError("unitPriceNotConfigured");
+      }
+      return {
+        productId: product.id,
+        form: item.form,
+        quantity: item.quantity,
+        unitPrice: configuredPrice,
+        lineTotal: item.quantity * configuredPrice
+      };
+    }
+    return {
+      productId: product.id,
+      form: item.form,
+      quantity: item.quantity,
+      unitPrice: typedPrice,
+      lineTotal: item.quantity * typedPrice
+    };
+  });
+}
+function assertNoDuplicateLines(items) {
+  const seen = /* @__PURE__ */ new Set();
+  for (const item of items) {
+    const key = lineKey(item.productId, item.form);
+    if (seen.has(key)) {
+      throw new InvoiceError("duplicateLine");
+    }
+    seen.add(key);
+  }
+}
+function assertUnitPriceTypes(items) {
+  for (const item of items) {
+    const unitPrice = item.unitPrice;
+    if (unitPrice !== void 0 && unitPrice !== null && (typeof unitPrice !== "number" || Number.isNaN(unitPrice))) {
+      throw new InvoiceError("unitPriceInvalid");
+    }
+  }
+}
+function ensureSystemClientIn(db2) {
+  const existing = db2.select({ id: clients.id }).from(clients).where(eq(clients.name, SYSTEM_CLIENT_NAME)).get();
+  if (existing) {
+    return existing.id;
+  }
+  const now = /* @__PURE__ */ new Date();
+  const inserted = db2.insert(clients).values({
+    name: SYSTEM_CLIENT_NAME,
+    phone: SYSTEM_CLIENT_PHONE,
+    address: null,
+    isActive: true,
+    isSystem: true,
+    createdAt: now,
+    updatedAt: now
+  }).returning({ id: clients.id }).get();
+  if (!inserted) {
+    throw new InvoiceError("unexpected");
+  }
+  return inserted.id;
+}
+function resolveClientId(db2, clientId) {
+  if (clientId === void 0 || clientId === null) {
+    return ensureSystemClientIn(db2);
+  }
+  const row = db2.select({ id: clients.id, isActive: clients.isActive }).from(clients).where(eq(clients.id, clientId)).get();
+  if (!row) {
+    throw new InvoiceError("clientNotFound");
+  }
+  if (!row.isActive) {
+    throw new InvoiceError("clientInactive");
+  }
+  return row.id;
+}
+function nextReferenceSequence(db2) {
+  const last = db2.select({ id: sales.id }).from(sales).orderBy(desc(sales.id)).limit(1).get();
+  return (last?.id ?? 0) + 1;
+}
+var saleColumns = {
+  id: sales.id,
+  reference: sales.reference,
+  clientId: sales.clientId,
+  clientName: clients.name,
+  saleDate: sales.saleDate,
+  status: sales.status,
+  totalAmount: sales.totalAmount,
+  createdAt: sales.createdAt,
+  updatedAt: sales.updatedAt
+};
+function findSaleRow(db2, id) {
+  return db2.select(saleColumns).from(sales).innerJoin(clients, eq(sales.clientId, clients.id)).where(eq(sales.id, id)).get() ?? null;
+}
+function computePaymentStatus(totalAmount, paidAmount) {
+  if (paidAmount <= 0) {
+    return "NON_PAYEE";
+  }
+  return paidAmount >= totalAmount ? "PAYEE" : "PARTIELLEMENT_PAYEE";
+}
+function computePaidAmount(db2, saleId) {
+  const row = db2.select({ paid: sql`coalesce(sum(${payments.amount}), 0)` }).from(payments).where(eq(payments.saleId, saleId)).get();
+  return row?.paid ?? 0;
+}
+function computePaymentSummary(db2, totalAmount, saleId) {
+  const paidAmount = computePaidAmount(db2, saleId);
+  return {
+    paidAmount,
+    remainingAmount: Math.max(0, totalAmount - paidAmount),
+    status: computePaymentStatus(totalAmount, paidAmount)
+  };
+}
+function toSale(row, summary) {
+  return {
+    ...row,
+    paidAmount: summary.paidAmount,
+    remainingAmount: summary.remainingAmount,
+    paymentStatus: summary.status
+  };
+}
+function selectItems(db2, saleId) {
+  return db2.select({
+    id: saleItems.id,
+    saleId: saleItems.saleId,
+    productId: saleItems.productId,
+    productName: products.name,
+    form: saleItems.form,
+    quantity: saleItems.quantity,
+    unitPrice: saleItems.unitPrice,
+    lineTotal: saleItems.lineTotal
+  }).from(saleItems).innerJoin(products, eq(saleItems.productId, products.id)).where(eq(saleItems.saleId, saleId)).orderBy(asc(saleItems.id)).all();
+}
+function buildDetail(db2, row) {
+  const summary = computePaymentSummary(db2, row.totalAmount, row.id);
+  return {
+    ...toSale(row, summary),
+    items: selectItems(db2, row.id),
+    paymentSummary: summary
+  };
+}
+function buildSale(db2, row) {
+  return toSale(row, computePaymentSummary(db2, row.totalAmount, row.id));
+}
+function buildContainsPattern(rawSearch) {
+  const search = removeDiacritics(rawSearch.trim()).toLowerCase().replace(/\s+/g, " ");
+  return `%${search.replace(/[\\%_]/g, "\\$&")}%`;
+}
+function computePaidBySale(db2) {
+  const rows = db2.select({ saleId: payments.saleId, paid: sql`coalesce(sum(${payments.amount}), 0)` }).from(payments).groupBy(payments.saleId).all();
+  return new Map(rows.map((row) => [row.saleId, row.paid]));
+}
+function listInvoices(filters = {}) {
+  const conditions = [];
+  if (typeof filters?.search === "string" && filters.search.trim()) {
+    conditions.push(
+      sql`unaccent(lower(${sales.reference})) like ${buildContainsPattern(filters.search)} escape '\\'`
+    );
+  }
+  if (typeof filters?.clientSearch === "string" && filters.clientSearch.trim()) {
+    conditions.push(
+      sql`unaccent(lower(${clients.name})) like ${buildContainsPattern(filters.clientSearch)} escape '\\'`
+    );
+  }
+  if (typeof filters?.clientId === "number") {
+    conditions.push(eq(sales.clientId, filters.clientId));
+  }
+  if (typeof filters?.status === "string") {
+    conditions.push(eq(sales.status, filters.status));
+  }
+  if (typeof filters?.dateFrom === "string" && filters.dateFrom.trim()) {
+    conditions.push(
+      sql`${sales.saleDate} >= ${Math.floor(parseInvoiceDate(filters.dateFrom).getTime() / 1e3)}`
+    );
+  }
+  if (typeof filters?.dateTo === "string" && filters.dateTo.trim()) {
+    conditions.push(
+      sql`${sales.saleDate} <= ${Math.floor(parseInvoiceDate(filters.dateTo).getTime() / 1e3)}`
+    );
+  }
+  const db2 = getDb();
+  const rows = db2.select(saleColumns).from(sales).innerJoin(clients, eq(sales.clientId, clients.id)).where(conditions.length > 0 ? and(...conditions) : void 0).orderBy(desc(sales.id)).all();
+  const paidBySale = computePaidBySale(db2);
+  return rows.map((row) => {
+    const paidAmount = paidBySale.get(row.id) ?? 0;
+    return toSale(row, {
+      paidAmount,
+      remainingAmount: Math.max(0, row.totalAmount - paidAmount),
+      status: computePaymentStatus(row.totalAmount, paidAmount)
+    });
+  });
+}
+function getInvoiceById(id) {
+  const saleId = Number(id);
+  if (!Number.isInteger(saleId) || saleId <= 0) {
+    throw new InvoiceError("notFound");
+  }
+  const db2 = getDb();
+  const row = findSaleRow(db2, saleId);
+  if (!row) {
+    throw new InvoiceError("notFound");
+  }
+  return buildDetail(db2, row);
+}
+function getInvoiceByReference(reference) {
+  const normalized = String(reference ?? "").trim().toUpperCase();
+  const db2 = getDb();
+  const row = db2.select(saleColumns).from(sales).innerJoin(clients, eq(sales.clientId, clients.id)).where(eq(sales.reference, normalized)).get();
+  if (!row) {
+    throw new InvoiceError("notFound");
+  }
+  return buildDetail(db2, row);
+}
+function toDatabaseError2(error62) {
+  if (!(error62 instanceof Error)) {
+    return null;
+  }
+  const message = error62.message;
+  if (message.includes("sales_reference_unique")) {
+    return new InvoiceError("referenceConflict");
+  }
+  if (message.includes("sale_items_sale_product_form_unique")) {
+    return new InvoiceError("duplicateLine");
+  }
+  if (message.includes("sale_items_quantity_check")) {
+    return new InvoiceError("quantityInvalid");
+  }
+  if (message.includes("sale_items_unit_price_check")) {
+    return new InvoiceError("unitPriceInvalid");
+  }
+  if (message.includes("sale_items_line_total_check") || message.includes("sales_total_amount_check")) {
+    return new InvoiceError("totalInvalid");
+  }
+  if (message.includes("payments_amount_check")) {
+    return new InvoiceError("paymentInvalid");
+  }
+  if (message.includes("stock_movements_sale_reason_check") || message.includes("stock_movements_sale_direction_check") || message.includes("stock_movements_type_check")) {
+    return new InvoiceError("unexpected");
+  }
+  if (message.includes("FOREIGN KEY")) {
+    return new InvoiceError("clientNotFound");
+  }
+  return null;
+}
+function withMappedErrors2(operation) {
+  try {
+    return operation();
+  } catch (error62) {
+    if (error62 instanceof InvoiceError) {
+      throw error62;
+    }
+    const mapped = toDatabaseError2(error62);
+    if (mapped) {
+      throw mapped;
+    }
+    throw error62;
+  }
+}
+function parsePayload(input2) {
+  const rawInput = input2 ?? {};
+  assertUnitPriceTypes(Array.isArray(rawInput.items) ? rawInput.items : []);
+  const parsed = invoiceCreateSchema.safeParse({
+    // null is a real choice (the system client), undefined means "not submitted".
+    clientId: rawInput.clientId,
+    date: rawInput.date,
+    items: rawInput.items
+  });
+  if (!parsed.success) {
+    throw new InvoiceError(toErrorCode4(parsed.error, "itemsRequired"));
+  }
+  assertNoDuplicateLines(parsed.data.items);
+  const rawDate = typeof rawInput.date === "string" && rawInput.date.trim() ? rawInput.date : null;
+  return {
+    items: parsed.data.items,
+    clientId: parsed.data.clientId,
+    date: rawDate === null ? void 0 : parseInvoiceDate(rawDate)
+  };
+}
+function parsePaymentInput(amount, paymentDate) {
+  const parsed = invoicePaymentSchema.safeParse({
+    amount,
+    date: typeof paymentDate === "string" && paymentDate.trim() ? paymentDate : void 0
+  });
+  if (!parsed.success) {
+    throw new InvoiceError(toErrorCode4(parsed.error, "paymentInvalid"));
+  }
+  const rawDate = typeof paymentDate === "string" && paymentDate.trim() ? paymentDate : null;
+  return {
+    amount: parsed.data.amount,
+    date: rawDate === null ? parseInvoiceDate(todayAsInvoiceDate()) : parseInvoiceDate(rawDate)
+  };
+}
+function assertStockIsAvailable(db2, lines) {
+  for (const line of lines) {
+    if (computeFormQuantity(db2, line.productId, line.form) - line.quantity < 0) {
+      throw new InvoiceError("insufficientStock");
+    }
+  }
+}
+function assertUpdatedStockIsAvailable(db2, lines, previousQuantities) {
+  for (const line of lines) {
+    const givenBack = previousQuantities.get(lineKey(line.productId, line.form)) ?? 0;
+    const available = computeFormQuantity(db2, line.productId, line.form) + givenBack;
+    if (available - line.quantity < 0) {
+      throw new InvoiceError("insufficientStock");
+    }
+  }
+}
+function writeMovement(db2, values) {
+  db2.insert(stockMovements).values(values).run();
+}
+function writeCompensatingMovement(db2, values) {
+  const before2 = computeFormQuantity(db2, values.productId, values.form);
+  writeMovement(db2, {
+    productId: values.productId,
+    form: values.form,
+    movementType: values.delta > 0 ? "SALE" : "AJUSTEMENT",
+    direction: values.delta > 0 ? "OUT" : "IN",
+    quantity: Math.abs(values.delta),
+    reason: values.delta > 0 ? invoiceMovementReason(values.reference) : invoiceAdjustmentReason(values.reference, "Modification"),
+    createdAt: values.createdAt
+  });
+  const after2 = computeFormQuantity(db2, values.productId, values.form);
+  if (after2 !== before2 - values.delta || after2 < 0) {
+    throw new InvoiceError("unexpected");
+  }
+}
+function writeLines(db2, saleId, lines) {
+  db2.delete(saleItems).where(eq(saleItems.saleId, saleId)).run();
+  let totalAmount = 0;
+  for (const line of lines) {
+    const lineTotal = line.quantity * line.unitPrice;
+    db2.insert(saleItems).values({
+      saleId,
+      productId: line.productId,
+      form: line.form,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      lineTotal
+    }).run();
+    totalAmount += lineTotal;
+  }
+  const stored = db2.select({ total: sql`coalesce(sum(${saleItems.lineTotal}), 0)` }).from(saleItems).where(eq(saleItems.saleId, saleId)).get();
+  if ((stored?.total ?? -1) !== totalAmount || totalAmount < 0) {
+    throw new InvoiceError("totalInvalid");
+  }
+  return totalAmount;
+}
+function createInvoice(input2) {
+  const { items, clientId, date: date5 } = parsePayload(input2);
+  const db2 = getDb();
+  return withMappedErrors2(
+    () => db2.transaction((tx) => {
+      const resolvedClientId = resolveClientId(tx, clientId);
+      const lines = resolveLines(items);
+      assertStockIsAvailable(tx, lines);
+      const now = /* @__PURE__ */ new Date();
+      const reference = formatInvoiceReference(nextReferenceSequence(tx));
+      const inserted = tx.insert(sales).values({
+        reference,
+        clientId: resolvedClientId,
+        saleDate: date5 ?? parseInvoiceDate(todayAsInvoiceDate(now)),
+        status: "VALIDEE",
+        // Placeholder: the real total is the sum of the persisted lines,
+        // computed below and written back before the commit.
+        totalAmount: 0,
+        createdAt: now,
+        updatedAt: now
+      }).returning({ id: sales.id }).get();
+      if (!inserted) {
+        throw new InvoiceError("unexpected");
+      }
+      const saleId = inserted.id;
+      const totalAmount = writeLines(tx, saleId, lines);
+      tx.update(sales).set({ totalAmount }).where(eq(sales.id, saleId)).run();
+      for (const line of lines) {
+        const before2 = computeFormQuantity(tx, line.productId, line.form);
+        writeMovement(tx, {
+          productId: line.productId,
+          form: line.form,
+          movementType: "SALE",
+          direction: "OUT",
+          quantity: line.quantity,
+          reason: invoiceMovementReason(reference),
+          createdAt: now
+        });
+        const after2 = computeFormQuantity(tx, line.productId, line.form);
+        if (after2 !== before2 - line.quantity || after2 < 0) {
+          throw new InvoiceError("unexpected");
+        }
+      }
+      const row = findSaleRow(tx, saleId);
+      if (!row) {
+        throw new InvoiceError("unexpected");
+      }
+      return buildDetail(tx, row);
+    })
+  );
+}
+function readPersistedLineQuantities(db2, saleId) {
+  const rows = db2.select({
+    productId: saleItems.productId,
+    form: saleItems.form,
+    quantity: saleItems.quantity
+  }).from(saleItems).where(eq(saleItems.saleId, saleId)).all();
+  return new Map(
+    rows.map((row) => [
+      lineKey(row.productId, row.form),
+      { productId: row.productId, form: row.form, quantity: row.quantity }
+    ])
+  );
+}
+function updateInvoice(id, input2) {
+  const saleId = Number(id);
+  if (!Number.isInteger(saleId) || saleId <= 0) {
+    throw new InvoiceError("notFound");
+  }
+  const { items, clientId, date: date5 } = parsePayload(input2);
+  const db2 = getDb();
+  return withMappedErrors2(
+    () => db2.transaction((tx) => {
+      const row = findSaleRow(tx, saleId);
+      if (!row) {
+        throw new InvoiceError("notFound");
+      }
+      if (row.status === "ANNULEE") {
+        throw new InvoiceError("alreadyCancelled");
+      }
+      if (computePaidAmount(tx, saleId) > 0) {
+        throw new InvoiceError("locked");
+      }
+      const previousLines = readPersistedLineQuantities(tx, saleId);
+      const resolvedClientId = clientId === void 0 ? row.clientId : resolveClientId(tx, clientId);
+      const lines = resolveLines(items);
+      const previousQuantities = /* @__PURE__ */ new Map();
+      for (const [key, previous] of previousLines) {
+        previousQuantities.set(key, previous.quantity);
+      }
+      assertUpdatedStockIsAvailable(tx, lines, previousQuantities);
+      const now = /* @__PURE__ */ new Date();
+      const nextLines = new Map(
+        lines.map((line) => [
+          lineKey(line.productId, line.form),
+          { productId: line.productId, form: line.form, quantity: line.quantity }
+        ])
+      );
+      const totalAmount = writeLines(tx, saleId, lines);
+      tx.update(sales).set({
+        clientId: resolvedClientId,
+        saleDate: date5 ?? row.saleDate,
+        totalAmount,
+        updatedAt: now
+      }).where(eq(sales.id, saleId)).run();
+      for (const next of nextLines.values()) {
+        const previousQuantity = previousQuantities.get(lineKey(next.productId, next.form)) ?? 0;
+        const delta = next.quantity - previousQuantity;
+        if (delta === 0) {
+          continue;
+        }
+        writeCompensatingMovement(tx, {
+          productId: next.productId,
+          form: next.form,
+          delta,
+          reference: row.reference,
+          createdAt: now
+        });
+      }
+      for (const previous of previousLines.values()) {
+        if (nextLines.has(lineKey(previous.productId, previous.form))) {
+          continue;
+        }
+        writeCompensatingMovement(tx, {
+          productId: previous.productId,
+          form: previous.form,
+          delta: -previous.quantity,
+          reference: row.reference,
+          createdAt: now
+        });
+      }
+      const updated = findSaleRow(tx, saleId);
+      if (!updated) {
+        throw new InvoiceError("unexpected");
+      }
+      return buildDetail(tx, updated);
+    })
+  );
+}
+function cancelInvoice(id) {
+  const saleId = Number(id);
+  if (!Number.isInteger(saleId) || saleId <= 0) {
+    throw new InvoiceError("notFound");
+  }
+  const db2 = getDb();
+  return withMappedErrors2(
+    () => db2.transaction((tx) => {
+      const row = findSaleRow(tx, saleId);
+      if (!row) {
+        throw new InvoiceError("notFound");
+      }
+      if (row.status === "ANNULEE") {
+        throw new InvoiceError("alreadyCancelled");
+      }
+      if (computePaidAmount(tx, saleId) > 0) {
+        throw new InvoiceError("cancelNotAllowed");
+      }
+      const now = /* @__PURE__ */ new Date();
+      const lines = tx.select({
+        productId: saleItems.productId,
+        form: saleItems.form,
+        quantity: saleItems.quantity
+      }).from(saleItems).where(eq(saleItems.saleId, saleId)).all();
+      for (const line of lines) {
+        const before2 = computeFormQuantity(tx, line.productId, line.form);
+        writeMovement(tx, {
+          productId: line.productId,
+          form: line.form,
+          movementType: "AJUSTEMENT",
+          direction: "IN",
+          quantity: line.quantity,
+          reason: invoiceAdjustmentReason(row.reference, "Annulation"),
+          createdAt: now
+        });
+        const after2 = computeFormQuantity(tx, line.productId, line.form);
+        if (after2 !== before2 + line.quantity || after2 < 0) {
+          throw new InvoiceError("unexpected");
+        }
+      }
+      tx.update(sales).set({ status: "ANNULEE", updatedAt: now }).where(eq(sales.id, saleId)).run();
+      const updated = findSaleRow(tx, saleId);
+      if (!updated) {
+        throw new InvoiceError("unexpected");
+      }
+      return buildSale(tx, updated);
+    })
+  );
+}
+function deleteInvoice(id) {
+  const saleId = Number(id);
+  if (!Number.isInteger(saleId) || saleId <= 0) {
+    throw new InvoiceError("notFound");
+  }
+  const db2 = getDb();
+  return withMappedErrors2(
+    () => db2.transaction((tx) => {
+      const row = findSaleRow(tx, saleId);
+      if (!row) {
+        throw new InvoiceError("notFound");
+      }
+      if (row.status !== "ANNULEE" || computePaidAmount(tx, saleId) > 0) {
+        throw new InvoiceError("deleteNotAllowed");
+      }
+      tx.delete(saleItems).where(eq(saleItems.saleId, saleId)).run();
+      tx.delete(payments).where(eq(payments.saleId, saleId)).run();
+      tx.delete(sales).where(eq(sales.id, saleId)).run();
+      const remainingItems = tx.select({ count: sql`count(*)` }).from(saleItems).where(eq(saleItems.saleId, saleId)).get();
+      const remainingPayments = tx.select({ count: sql`count(*)` }).from(payments).where(eq(payments.saleId, saleId)).get();
+      if (findSaleRow(tx, saleId) || (remainingItems?.count ?? -1) !== 0 || (remainingPayments?.count ?? -1) !== 0) {
+        throw new InvoiceError("unexpected");
+      }
+      return null;
+    })
+  );
+}
+function listInvoicePayments(saleId) {
+  const id = Number(saleId);
+  if (!Number.isInteger(id) || id <= 0 || !findSaleRow(getDb(), id)) {
+    throw new InvoiceError("notFound");
+  }
+  return getDb().select().from(payments).where(eq(payments.saleId, id)).orderBy(desc(payments.id)).all();
+}
+function getInvoicePaymentSummary(saleId) {
+  const id = Number(saleId);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new InvoiceError("notFound");
+  }
+  const db2 = getDb();
+  const row = findSaleRow(db2, id);
+  if (!row) {
+    throw new InvoiceError("notFound");
+  }
+  return computePaymentSummary(db2, row.totalAmount, id);
+}
+function addPayment(saleId, amount, paymentDate) {
+  const id = Number(saleId);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new InvoiceError("notFound");
+  }
+  const input2 = parsePaymentInput(amount, paymentDate);
+  const db2 = getDb();
+  return withMappedErrors2(
+    () => db2.transaction((tx) => {
+      const row = findSaleRow(tx, id);
+      if (!row) {
+        throw new InvoiceError("notFound");
+      }
+      if (row.status === "ANNULEE") {
+        throw new InvoiceError("paymentOnCancelledSale");
+      }
+      const paidAmount = computePaidAmount(tx, id);
+      if (paidAmount + input2.amount > row.totalAmount) {
+        throw new InvoiceError("paymentTooHigh");
+      }
+      const now = /* @__PURE__ */ new Date();
+      const inserted = tx.insert(payments).values({
+        saleId: id,
+        amount: input2.amount,
+        paymentDate: input2.date,
+        createdAt: now,
+        updatedAt: now
+      }).returning().get();
+      if (!inserted) {
+        throw new InvoiceError("unexpected");
+      }
+      return inserted;
+    })
+  );
+}
+function updatePayment(paymentId, amount, paymentDate) {
+  const id = Number(paymentId);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new InvoiceError("paymentNotFound");
+  }
+  const input2 = parsePaymentInput(amount, paymentDate);
+  const db2 = getDb();
+  return withMappedErrors2(
+    () => db2.transaction((tx) => {
+      const existing = tx.select().from(payments).where(eq(payments.id, id)).get();
+      if (!existing) {
+        throw new InvoiceError("paymentNotFound");
+      }
+      const row = findSaleRow(tx, existing.saleId);
+      if (!row) {
+        throw new InvoiceError("notFound");
+      }
+      if (row.status === "ANNULEE") {
+        throw new InvoiceError("paymentOnCancelledSale");
+      }
+      const paidAmount = computePaidAmount(tx, existing.saleId) - existing.amount;
+      if (paidAmount + input2.amount > row.totalAmount) {
+        throw new InvoiceError("paymentTooHigh");
+      }
+      const updated = tx.update(payments).set({
+        amount: input2.amount,
+        paymentDate: paymentDate === void 0 || paymentDate === null ? existing.paymentDate : input2.date,
+        updatedAt: /* @__PURE__ */ new Date()
+      }).where(eq(payments.id, id)).returning().get();
+      if (!updated) {
+        throw new InvoiceError("paymentNotFound");
+      }
+      return updated;
+    })
+  );
+}
+function deletePayment(paymentId) {
+  const id = Number(paymentId);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new InvoiceError("paymentNotFound");
+  }
+  const db2 = getDb();
+  return withMappedErrors2(
+    () => db2.transaction((tx) => {
+      const existing = tx.select({ id: payments.id }).from(payments).where(eq(payments.id, id)).get();
+      if (!existing) {
+        throw new InvoiceError("paymentNotFound");
+      }
+      tx.delete(payments).where(eq(payments.id, id)).run();
+      const remaining = tx.select({ count: sql`count(*)` }).from(payments).where(eq(payments.id, id)).get();
+      if ((remaining?.count ?? -1) !== 0) {
+        throw new InvoiceError("unexpected");
+      }
+      return null;
+    })
+  );
+}
+
+// electron/ipc/invoices.ts
+function toSuccess3(data) {
+  return { success: true, data };
+}
+function toFailure4(error62, fallback) {
+  if (error62 instanceof InvoiceError) {
+    return { success: false, error: error62.message };
+  }
+  console.error("[invoices] Unexpected error:", error62);
+  return { success: false, error: fallback };
+}
+function registerInvoiceIpcHandlers() {
+  ipcMain.handle("invoices:create", (_event, input2) => {
+    try {
+      return toSuccess3(createInvoice(input2));
+    } catch (error62) {
+      return toFailure4(error62, INVOICE_ERRORS.unexpected);
+    }
+  });
+  ipcMain.handle(
+    "invoices:get-by-id",
+    (_event, id) => {
+      try {
+        return toSuccess3(getInvoiceById(id));
+      } catch (error62) {
+        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "invoices:get-by-reference",
+    (_event, reference) => {
+      try {
+        return toSuccess3(getInvoiceByReference(reference));
+      } catch (error62) {
+        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "invoices:list",
+    (_event, filters) => {
+      try {
+        return toSuccess3(listInvoices(filters ?? {}));
+      } catch (error62) {
+        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "invoices:update",
+    (_event, id, input2) => {
+      try {
+        return toSuccess3(updateInvoice(id, input2));
+      } catch (error62) {
+        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle("invoices:cancel", (_event, id) => {
+    try {
+      return toSuccess3(cancelInvoice(id));
+    } catch (error62) {
+      return toFailure4(error62, INVOICE_ERRORS.unexpected);
+    }
+  });
+  ipcMain.handle("invoices:delete", (_event, id) => {
+    try {
+      return toSuccess3(deleteInvoice(id));
+    } catch (error62) {
+      return toFailure4(error62, INVOICE_ERRORS.unexpected);
+    }
+  });
+  ipcMain.handle(
+    "invoices:add-payment",
+    (_event, saleId, input2) => {
+      try {
+        return toSuccess3(addPayment(saleId, input2.amount, input2.date));
+      } catch (error62) {
+        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "invoices:update-payment",
+    (_event, paymentId, input2) => {
+      try {
+        return toSuccess3(updatePayment(paymentId, input2.amount, input2.date));
+      } catch (error62) {
+        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "invoices:delete-payment",
+    (_event, paymentId) => {
+      try {
+        return toSuccess3(deletePayment(paymentId));
+      } catch (error62) {
+        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "invoices:get-payment-summary",
+    (_event, saleId) => {
+      try {
+        return toSuccess3(getInvoicePaymentSummary(saleId));
+      } catch (error62) {
+        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "invoices:list-payments",
+    (_event, saleId) => {
+      try {
+        return toSuccess3(listInvoicePayments(saleId));
+      } catch (error62) {
+        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+      }
+    }
+  );
+}
+
+// electron/services/printService.ts
+import fs3 from "node:fs/promises";
+var PRINT_ERRORS = {
+  emptyDocument: "Le document \xE0 imprimer est vide.",
+  documentTooLarge: "Le document \xE0 imprimer est trop volumineux.",
+  windowFailed: "La fen\xEAtre d'impression n'a pas pu \xEAtre ouverte.",
+  printFailed: "La facture n'a pas pu \xEAtre imprim\xE9e.",
+  pdfFailed: "Le PDF de la facture n'a pas pu \xEAtre g\xE9n\xE9r\xE9.",
+  saveFailed: "Le fichier PDF n'a pas pu \xEAtre enregistr\xE9.",
+  unexpected: "Une erreur inattendue est survenue."
+};
+var PrintError = class extends Error {
+  code;
+  constructor(code) {
+    super(PRINT_ERRORS[code]);
+    this.name = "PrintError";
+    this.code = code;
+  }
+};
+var PDF_MARGINS = { top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 };
+var PRINT_DOCUMENT_MAX_LENGTH = 8e6;
+function assertPrintableDocument(html) {
+  if (typeof html !== "string" || html.trim() === "") {
+    throw new PrintError("emptyDocument");
+  }
+  if (html.length > PRINT_DOCUMENT_MAX_LENGTH) {
+    throw new PrintError("documentTooLarge");
+  }
+  return html;
+}
+function buildDocumentUrl(html) {
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+}
+function sanitizePdfFileName(title) {
+  const base = String(title ?? "").split(/[\\/]+/).filter(Boolean).pop() ?? "facture";
+  const safe = base.replace(/[:*?"<>|]/g, " ").replace(/\s+/g, " ").trim();
+  return safe === "" ? "facture" : safe;
+}
+function createDocumentWindow(title) {
+  return new BrowserWindow({
+    show: false,
+    title,
+    width: 1123,
+    height: 794,
+    webPreferences: {
+      javascript: false,
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      devTools: false
+    }
+  });
+}
+function createPreviewWindow(title) {
+  return new BrowserWindow({
+    title,
+    width: 1180,
+    height: 860,
+    backgroundColor: "#f1f5f9",
+    webPreferences: {
+      javascript: true,
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      devTools: false
+    }
+  });
+}
+function closeDocumentWindow(window) {
+  if (!window.isDestroyed()) {
+    window.destroy();
+  }
+}
+function printWebContents(webContents) {
+  return new Promise((resolve) => {
+    const options = { silent: false, printBackground: true, landscape: true };
+    const legacyPrint = webContents.print;
+    const pending = legacyPrint.call(webContents, options, (success2) => resolve(success2));
+    if (pending && typeof pending.then === "function") {
+      pending.then(resolve, () => resolve(false));
+    }
+  });
+}
+async function openDocumentWindow(html, title) {
+  const window = createDocumentWindow(title);
+  try {
+    await window.loadURL(buildDocumentUrl(html));
+    return window;
+  } catch {
+    closeDocumentWindow(window);
+    throw new PrintError("windowFailed");
+  }
+}
+function toPrintFailure(error62, fallback) {
+  if (error62 instanceof PrintError) {
+    return error62;
+  }
+  console.error("[print] Unexpected error:", error62);
+  return new PrintError(fallback);
+}
+async function printHtmlDocument(html, title = "Document") {
+  const document = assertPrintableDocument(html);
+  const window = await openDocumentWindow(document, title);
+  try {
+    const printed = await printWebContents(window.webContents);
+    if (!printed) {
+      throw new PrintError("printFailed");
+    }
+  } catch (error62) {
+    throw toPrintFailure(error62, "printFailed");
+  } finally {
+    closeDocumentWindow(window);
+  }
+}
+async function previewHtmlDocument(html, title = "Document") {
+  const document = assertPrintableDocument(html);
+  const window = createPreviewWindow(title);
+  try {
+    await window.loadURL(buildDocumentUrl(document));
+  } catch {
+    closeDocumentWindow(window);
+    throw new PrintError("windowFailed");
+  }
+}
+async function exportHtmlDocumentToPdf(html, title = "Document") {
+  const document = assertPrintableDocument(html);
+  const window = await openDocumentWindow(document, title);
+  try {
+    let pdf;
+    try {
+      pdf = await window.webContents.printToPDF({
+        printBackground: true,
+        pageSize: "A4",
+        landscape: true,
+        margins: PDF_MARGINS
+      });
+    } catch (error62) {
+      throw toPrintFailure(error62, "pdfFailed");
+    }
+    try {
+      const { canceled, filePath } = await dialog.showSaveDialog({
+        title: "T\xE9l\xE9charger PDF",
+        defaultPath: `${sanitizePdfFileName(title)}.pdf`,
+        filters: [{ name: "Document PDF", extensions: ["pdf"] }]
+      });
+      if (canceled || !filePath) {
+        return null;
+      }
+      await fs3.writeFile(filePath, pdf);
+      return filePath;
+    } catch (error62) {
+      throw toPrintFailure(error62, "saveFailed");
+    }
+  } finally {
+    closeDocumentWindow(window);
+  }
+}
+
+// electron/ipc/print.ts
+function toSuccess4(data) {
+  return { success: true, data };
+}
+function toFailure5(error62, fallback) {
+  if (error62 instanceof PrintError) {
+    return { success: false, error: error62.message };
+  }
+  console.error("[print] Unexpected error:", error62);
+  return { success: false, error: fallback };
+}
+function registerPrintIpcHandlers() {
+  ipcMain.handle(
+    "print:html",
+    async (_event, request) => {
+      try {
+        await printHtmlDocument(request?.html, request?.title);
+        return toSuccess4(null);
+      } catch (error62) {
+        return toFailure5(error62, PRINT_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "print:pdf",
+    async (_event, request) => {
+      try {
+        return toSuccess4({ path: await exportHtmlDocumentToPdf(request?.html, request?.title) });
+      } catch (error62) {
+        return toFailure5(error62, PRINT_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "print:preview",
+    async (_event, request) => {
+      try {
+        await previewHtmlDocument(request?.html, request?.title);
+        return toSuccess4(null);
+      } catch (error62) {
+        return toFailure5(error62, PRINT_ERRORS.unexpected);
+      }
+    }
+  );
+}
+
+// electron/ipc/products.ts
+function toSuccess5(data) {
+  return { success: true, data };
+}
+function toFailure6(error62, fallback) {
+  if (error62 instanceof ProductError) {
+    return { success: false, error: error62.message };
+  }
+  console.error("[products] Unexpected error:", error62);
+  return { success: false, error: fallback };
+}
+function registerProductIpcHandlers() {
+  ipcMain.handle("products:list", (_event, filters) => {
+    try {
+      return toSuccess5(listProducts(filters ?? {}));
+    } catch (error62) {
+      return toFailure6(error62, PRODUCT_ERRORS.unexpected);
+    }
+  });
+  ipcMain.handle("products:get", (_event, id) => {
+    try {
+      return toSuccess5(getProductById(id));
+    } catch (error62) {
+      return toFailure6(error62, PRODUCT_ERRORS.unexpected);
+    }
+  });
+  ipcMain.handle(
+    "products:create",
+    (_event, input2) => {
+      try {
+        return toSuccess5(createProduct(input2));
+      } catch (error62) {
+        return toFailure6(error62, PRODUCT_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "products:update",
+    (_event, id, input2) => {
+      try {
+        return toSuccess5(updateProduct(id, input2));
+      } catch (error62) {
+        return toFailure6(error62, PRODUCT_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "products:set-active",
+    (_event, id, isActive) => {
+      try {
+        return toSuccess5(setProductActive(id, isActive));
+      } catch (error62) {
+        return toFailure6(error62, PRODUCT_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "products:is-name-available",
+    (_event, name, excludeId) => {
+      try {
+        return toSuccess5(isNameAvailable(name, excludeId));
+      } catch (error62) {
+        return toFailure6(error62, PRODUCT_ERRORS.unexpected);
+      }
+    }
+  );
 }
 
 // electron/services/stockService.ts
@@ -25852,12 +28101,12 @@ var StockError = class extends Error {
 var STOCK_QUANTITY_MAX = 1e6;
 var STOCK_REASON_MAX_LENGTH = 200;
 var STOCK_ERROR_CODES = Object.keys(STOCK_ERRORS);
-var signedQuantityExpression = sql`coalesce(sum(case when ${stockMovements.direction} = 'IN' then ${stockMovements.quantity} else -${stockMovements.quantity} end), 0)`;
+var signedQuantityExpression2 = sql`coalesce(sum(case when ${stockMovements.direction} = 'IN' then ${stockMovements.quantity} else -${stockMovements.quantity} end), 0)`;
 function normalizeStockReason(rawReason) {
   return rawReason.trim().replace(/\s+/g, " ");
 }
-var productIdSchema2 = external_exports.number({ error: STOCK_ERRORS.productNotFound }).int(STOCK_ERRORS.productNotFound).positive(STOCK_ERRORS.productNotFound);
-var formSchema = external_exports.string({ error: STOCK_ERRORS.formRequired }).transform(normalizeFormName).pipe(
+var productIdSchema3 = external_exports.number({ error: STOCK_ERRORS.productNotFound }).int(STOCK_ERRORS.productNotFound).positive(STOCK_ERRORS.productNotFound);
+var formSchema2 = external_exports.string({ error: STOCK_ERRORS.formRequired }).transform(normalizeFormName).pipe(
   external_exports.string().min(1, STOCK_ERRORS.formRequired).max(PRODUCT_FORM_MAX_LENGTH, STOCK_ERRORS.formTooLong)
 );
 var initialQuantitySchema = external_exports.number({ error: STOCK_ERRORS.quantityRequired }).int(STOCK_ERRORS.quantityInvalid).min(0, STOCK_ERRORS.quantityInvalid).max(STOCK_QUANTITY_MAX, STOCK_ERRORS.quantityTooHigh);
@@ -25869,39 +28118,39 @@ var reasonSchema = external_exports.string({ error: STOCK_ERRORS.reasonRequired 
   external_exports.string().min(1, STOCK_ERRORS.reasonRequired).max(STOCK_REASON_MAX_LENGTH, STOCK_ERRORS.reasonTooLong)
 );
 var stockInitializeSchema = external_exports.object({
-  productId: productIdSchema2,
+  productId: productIdSchema3,
   quantities: external_exports.array(
     external_exports.object({
-      form: formSchema,
+      form: formSchema2,
       quantity: initialQuantitySchema
     })
   ).min(1, STOCK_ERRORS.formsRequired)
 });
 var stockAdjustSchema = external_exports.object({
-  productId: productIdSchema2,
-  form: formSchema,
+  productId: productIdSchema3,
+  form: formSchema2,
   direction: directionSchema,
   quantity: movementQuantitySchema,
   reason: reasonSchema
 });
-function toErrorCode2(error62, fallback) {
+function toErrorCode5(error62, fallback) {
   const message = error62.issues[0]?.message;
   return STOCK_ERROR_CODES.find((code) => STOCK_ERRORS[code] === message) ?? fallback;
 }
 function parseProductId2(value) {
-  const parsed = productIdSchema2.safeParse(value);
+  const parsed = productIdSchema3.safeParse(value);
   if (!parsed.success) {
     throw new StockError("productNotFound");
   }
   return parsed.data;
 }
-function getProductForms(product) {
+function getProductForms2(product) {
   return [product.primaryForm, product.secondaryForm].filter(
     (form) => Boolean(form)
   );
 }
-function assertFormBelongsToProduct(product, form) {
-  if (!getProductForms(product).includes(form)) {
+function assertFormBelongsToProduct2(product, form) {
+  if (!getProductForms2(product).includes(form)) {
     throw new StockError("formInvalid");
   }
 }
@@ -25909,7 +28158,7 @@ function loadStockTotals(db2) {
   const balanceRows = db2.select({
     productId: stockMovements.productId,
     form: stockMovements.form,
-    quantity: signedQuantityExpression
+    quantity: signedQuantityExpression2
   }).from(stockMovements).groupBy(stockMovements.productId, stockMovements.form).all();
   const quantityByProductAndForm = /* @__PURE__ */ new Map();
   for (const row of balanceRows) {
@@ -25937,7 +28186,7 @@ function toMovement(row) {
 }
 function buildStockLines(product, totals) {
   const hasMovements = totals.quantityByProductAndForm.has(product.id);
-  const productForms = getProductForms(product);
+  const productForms = getProductForms2(product);
   const balances = totals.quantityByProductAndForm.get(product.id);
   const legacyForms = balances ? [...balances.keys()].filter((form) => !productForms.includes(form)).sort() : [];
   return [
@@ -25955,14 +28204,19 @@ function buildStockLines(product, totals) {
     isLegacyForm
   }));
 }
+function listStocks(filters = {}) {
+  const productList = listProducts(filters);
+  const totals = loadStockTotals(getDb());
+  return productList.flatMap((product) => buildStockLines(product, totals));
+}
 function getProductStock(productId) {
-  const product = findProduct(parseProductId2(productId));
+  const product = findProduct2(parseProductId2(productId));
   return buildStockLines(product, loadStockTotals(getDb()));
 }
 function getProductFormStock(productId, form) {
-  const product = findProduct(parseProductId2(productId));
+  const product = findProduct2(parseProductId2(productId));
   const normalizedForm = normalizeFormName(form ?? "");
-  assertFormBelongsToProduct(product, normalizedForm);
+  assertFormBelongsToProduct2(product, normalizedForm);
   const level = buildStockLines(product, loadStockTotals(getDb())).find(
     (candidate) => candidate.form === normalizedForm
   );
@@ -25974,12 +28228,12 @@ function getProductFormStock(productId, form) {
 function parseInitialQuantities(input2, product) {
   const parsed = stockInitializeSchema.safeParse(input2);
   if (!parsed.success) {
-    throw new StockError(toErrorCode2(parsed.error, "formRequired"));
+    throw new StockError(toErrorCode5(parsed.error, "formRequired"));
   }
-  const productForms = getProductForms(product);
+  const productForms = getProductForms2(product);
   const submitted = parsed.data.quantities;
   for (const entry of submitted) {
-    assertFormBelongsToProduct(product, entry.form);
+    assertFormBelongsToProduct2(product, entry.form);
   }
   if (submitted.length !== productForms.length) {
     throw new StockError("formsMismatch");
@@ -26000,7 +28254,7 @@ function parseInitialQuantities(input2, product) {
 function parseAdjustInput(input2, productId) {
   const parsed = stockAdjustSchema.safeParse({ ...input2, productId });
   if (!parsed.success) {
-    throw new StockError(toErrorCode2(parsed.error, "quantityInvalid"));
+    throw new StockError(toErrorCode5(parsed.error, "quantityInvalid"));
   }
   return {
     form: parsed.data.form,
@@ -26009,7 +28263,7 @@ function parseAdjustInput(input2, productId) {
     reason: parsed.data.reason
   };
 }
-function findProduct(productId) {
+function findProduct2(productId) {
   try {
     return getProductById(productId);
   } catch (error62) {
@@ -26020,14 +28274,14 @@ function findProduct(productId) {
   }
 }
 function readProductForWrite(productId) {
-  const product = findProduct(productId);
+  const product = findProduct2(productId);
   if (!product.isActive) {
     throw new StockError("productInactive");
   }
   return product;
 }
-function computeFormQuantity(db2, productId, form) {
-  const row = db2.select({ quantity: signedQuantityExpression }).from(stockMovements).where(and(eq(stockMovements.productId, productId), eq(stockMovements.form, form))).get();
+function computeFormQuantity2(db2, productId, form) {
+  const row = db2.select({ quantity: signedQuantityExpression2 }).from(stockMovements).where(and(eq(stockMovements.productId, productId), eq(stockMovements.form, form))).get();
   return row?.quantity ?? 0;
 }
 function isInitializedIn(db2, productId) {
@@ -26043,7 +28297,7 @@ function hasAnyMovementIn(db2, productId) {
   const movement = db2.select({ id: stockMovements.id }).from(stockMovements).where(eq(stockMovements.productId, productId)).get();
   return Boolean(movement);
 }
-function toDatabaseError2(error62) {
+function toDatabaseError3(error62) {
   if (!(error62 instanceof Error)) {
     return null;
   }
@@ -26062,14 +28316,14 @@ function toDatabaseError2(error62) {
   }
   return null;
 }
-function withMappedErrors2(operation) {
+function withMappedErrors3(operation) {
   try {
     return operation();
   } catch (error62) {
     if (error62 instanceof StockError) {
       throw error62;
     }
-    const mapped = toDatabaseError2(error62);
+    const mapped = toDatabaseError3(error62);
     if (mapped) {
       throw mapped;
     }
@@ -26079,7 +28333,7 @@ function withMappedErrors2(operation) {
 function initializeStock(productId, input2) {
   const parsedId = parseProductId2(productId);
   const db2 = getDb();
-  return withMappedErrors2(
+  return withMappedErrors3(
     () => db2.transaction((tx) => {
       const product = readProductForWrite(parsedId);
       const quantities = parseInitialQuantities(input2, product);
@@ -26105,7 +28359,7 @@ function initializeStock(productId, input2) {
         }).run();
       }
       for (const { form, quantity } of quantities) {
-        if (computeFormQuantity(tx, parsedId, form) !== quantity) {
+        if (computeFormQuantity2(tx, parsedId, form) !== quantity) {
           throw new StockError("unexpected");
         }
       }
@@ -26117,11 +28371,11 @@ function adjustStock(productId, input2) {
   const parsedId = parseProductId2(productId);
   const parsedInput = parseAdjustInput(input2, parsedId);
   const db2 = getDb();
-  return withMappedErrors2(
+  return withMappedErrors3(
     () => db2.transaction((tx) => {
       const product = readProductForWrite(parsedId);
-      assertFormBelongsToProduct(product, parsedInput.form);
-      const currentQuantity = computeFormQuantity(tx, parsedId, parsedInput.form);
+      assertFormBelongsToProduct2(product, parsedInput.form);
+      const currentQuantity = computeFormQuantity2(tx, parsedId, parsedInput.form);
       const signedDelta = toSignedQuantity(parsedInput.direction, parsedInput.quantity);
       if (currentQuantity + signedDelta < 0) {
         throw new StockError("insufficientStock");
@@ -26138,7 +28392,7 @@ function adjustStock(productId, input2) {
       if (!inserted) {
         throw new StockError("unexpected");
       }
-      const balance = computeFormQuantity(tx, parsedId, parsedInput.form);
+      const balance = computeFormQuantity2(tx, parsedId, parsedInput.form);
       if (balance !== currentQuantity + signedDelta || balance < 0) {
         throw new StockError("unexpected");
       }
@@ -26161,9 +28415,83 @@ function adjustStock(productId, input2) {
 }
 function listProductMovements(productId) {
   const product = parseProductId2(productId);
-  findProduct(product);
+  findProduct2(product);
   const rows = getDb().select().from(stockMovements).where(eq(stockMovements.productId, product)).orderBy(desc(stockMovements.createdAt), desc(stockMovements.id)).all();
   return rows.map(toMovement);
+}
+
+// electron/ipc/stock.ts
+function toSuccess6(data) {
+  return { success: true, data };
+}
+function toFailure7(error62, fallback) {
+  if (error62 instanceof StockError) {
+    return { success: false, error: error62.message };
+  }
+  console.error("[stock] Unexpected error:", error62);
+  return { success: false, error: fallback };
+}
+function registerStockIpcHandlers() {
+  ipcMain.handle(
+    "stock:list",
+    (_event, filters) => {
+      try {
+        return toSuccess6(listStocks(filters ?? {}));
+      } catch (error62) {
+        return toFailure7(error62, STOCK_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "stock:get",
+    (_event, productId) => {
+      try {
+        return toSuccess6(getProductStock(productId));
+      } catch (error62) {
+        return toFailure7(error62, STOCK_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "stock:get-form",
+    (_event, productId, form) => {
+      try {
+        return toSuccess6(getProductFormStock(productId, form));
+      } catch (error62) {
+        return toFailure7(error62, STOCK_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "stock:initialize",
+    (_event, productId, input2) => {
+      try {
+        return toSuccess6(initializeStock(productId, input2));
+      } catch (error62) {
+        return toFailure7(error62, STOCK_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "stock:adjust",
+    (_event, productId, input2) => {
+      try {
+        return toSuccess6(adjustStock(productId, input2));
+      } catch (error62) {
+        return toFailure7(error62, STOCK_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "stock:movements",
+    (_event, productId) => {
+      try {
+        return toSuccess6(listProductMovements(productId));
+      } catch (error62) {
+        return toFailure7(error62, STOCK_ERRORS.unexpected);
+      }
+    }
+  );
 }
 
 // electron/services/supplierService.ts
@@ -26191,9 +28519,70 @@ var SupplierError = class extends Error {
     this.code = code;
   }
 };
+var SUPPLIER_NAME_MIN_LENGTH = 2;
+var SUPPLIER_NAME_MAX_LENGTH = 120;
+var SUPPLIER_PHONE_MIN_DIGITS = 9;
+var SUPPLIER_PHONE_MAX_LENGTH = 20;
+var SUPPLIER_ADDRESS_MAX_LENGTH = 255;
 var SYSTEM_SUPPLIER_NAME = "FOURNISSEUR COMPTANT";
 var SYSTEM_SUPPLIER_PHONE = "000-000-0000";
 var SUPPLIER_ERROR_CODES = Object.keys(SUPPLIER_ERRORS);
+function normalizeSupplierName(rawName) {
+  return rawName.trim().replace(/\s+/g, " ").toUpperCase();
+}
+function normalizePhone2(rawPhone) {
+  const cleaned = rawPhone.trim().replace(/[\s\-().]/g, "");
+  if (cleaned.startsWith("+221")) {
+    return cleaned;
+  }
+  if (cleaned.startsWith("221") && cleaned.length === 12) {
+    return "+" + cleaned;
+  }
+  if (/^\d{9}$/.test(cleaned)) {
+    return "+221" + cleaned;
+  }
+  return cleaned;
+}
+function isValidSenegalesePhone2(phone) {
+  const normalized = normalizePhone2(phone);
+  return /^\+221\d{9}$/.test(normalized) || /^\d{9}$/.test(normalized);
+}
+function toErrorCode6(error62, fallback) {
+  const message = error62.issues[0]?.message;
+  return SUPPLIER_ERROR_CODES.find((code) => SUPPLIER_ERRORS[code] === message) ?? fallback;
+}
+function parseSupplierName(input2) {
+  const nameSchema = external_exports.string({ error: SUPPLIER_ERRORS.nameRequired }).trim().min(1, SUPPLIER_ERRORS.nameRequired).max(SUPPLIER_NAME_MAX_LENGTH, SUPPLIER_ERRORS.nameTooLong).refine((name) => name.length >= SUPPLIER_NAME_MIN_LENGTH, SUPPLIER_ERRORS.nameTooShort);
+  const parsed = nameSchema.safeParse(input2.name);
+  if (!parsed.success) {
+    throw new SupplierError(toErrorCode6(parsed.error, "nameRequired"));
+  }
+  return normalizeSupplierName(parsed.data);
+}
+function parseSupplierPhone(input2) {
+  const phoneSchema = external_exports.string({ error: SUPPLIER_ERRORS.phoneRequired }).trim().min(1, SUPPLIER_ERRORS.phoneRequired).max(SUPPLIER_PHONE_MAX_LENGTH, SUPPLIER_ERRORS.phoneTooLong);
+  const parsed = phoneSchema.safeParse(input2.phone);
+  if (!parsed.success) {
+    throw new SupplierError(toErrorCode6(parsed.error, "phoneRequired"));
+  }
+  const normalized = normalizePhone2(parsed.data);
+  if (!isValidSenegalesePhone2(normalized)) {
+    throw new SupplierError("phoneInvalid");
+  }
+  return normalized;
+}
+function parseSupplierAddress(input2) {
+  if (input2.address === void 0 || input2.address === null || input2.address.trim() === "") {
+    return null;
+  }
+  const addressSchema = external_exports.string().trim().max(SUPPLIER_ADDRESS_MAX_LENGTH, SUPPLIER_ERRORS.addressTooLong);
+  const parsed = addressSchema.safeParse(input2.address);
+  if (!parsed.success) {
+    throw new SupplierError(toErrorCode6(parsed.error, "addressTooLong"));
+  }
+  const trimmed = parsed.data.trim();
+  return trimmed === "" ? null : trimmed;
+}
 function parseSupplierId(id) {
   const idSchema = external_exports.number({ error: SUPPLIER_ERRORS.notFound }).int().positive();
   const parsed = idSchema.safeParse(id);
@@ -26214,10 +28603,152 @@ function toSupplier(row) {
     updatedAt: row.updatedAt
   };
 }
+function assertNameIsAvailable4(name, excludeId) {
+  const nameLower = name.toLowerCase();
+  const conditions = [sql`lower(${suppliers.name}) = ${nameLower}`];
+  if (excludeId) {
+    conditions.push(ne(suppliers.id, excludeId));
+  }
+  const duplicate = getDb().select({ id: suppliers.id }).from(suppliers).where(and(...conditions)).get();
+  if (duplicate) {
+    throw new SupplierError("duplicateName");
+  }
+}
+function assertPhoneIsAvailable2(phone, excludeId) {
+  const conditions = [eq(suppliers.phone, phone)];
+  if (excludeId) {
+    conditions.push(ne(suppliers.id, excludeId));
+  }
+  const duplicate = getDb().select({ id: suppliers.id }).from(suppliers).where(and(...conditions)).get();
+  if (duplicate) {
+    throw new SupplierError("duplicatePhone");
+  }
+}
+function isUniqueViolation3(error62) {
+  return error62 instanceof Error && error62.message.includes("UNIQUE");
+}
+function listSuppliers(filters = {}) {
+  const conditions = [];
+  if (typeof filters?.search === "string" && filters.search.trim()) {
+    const pattern = `%${filters.search.trim().toLowerCase().replace(/[\\%_]/g, "\\$&")}%`;
+    conditions.push(sql`lower(${suppliers.name}) like ${pattern} escape '\\'`);
+  }
+  if (typeof filters?.phoneSearch === "string" && filters.phoneSearch.trim()) {
+    const pattern = `%${filters.phoneSearch.trim().replace(/[\\%_]/g, "\\$&")}%`;
+    conditions.push(sql`${suppliers.phone} like ${pattern} escape '\\'`);
+  }
+  if (typeof filters?.isActive === "boolean") {
+    conditions.push(eq(suppliers.isActive, filters.isActive));
+  }
+  const rows = getDb().select().from(suppliers).where(conditions.length > 0 ? and(...conditions) : void 0).orderBy(asc(suppliers.name)).all();
+  return rows.map(toSupplier);
+}
 function getSupplierById(id) {
   const supplierId = parseSupplierId(id);
   const row = getDb().select().from(suppliers).where(eq(suppliers.id, supplierId)).get();
   return row ? toSupplier(row) : null;
+}
+function createSupplier(input2) {
+  const name = parseSupplierName(input2);
+  const phone = parseSupplierPhone(input2);
+  const address = parseSupplierAddress(input2);
+  const db2 = getDb();
+  const now = /* @__PURE__ */ new Date();
+  if (name === SYSTEM_SUPPLIER_NAME) {
+    throw new SupplierError("duplicateName");
+  }
+  assertNameIsAvailable4(name);
+  assertPhoneIsAvailable2(phone);
+  try {
+    const inserted = db2.insert(suppliers).values({ name, phone, address, isActive: true, isSystem: false, createdAt: now, updatedAt: now }).returning({ id: suppliers.id }).get();
+    if (!inserted) {
+      throw new SupplierError("unexpected");
+    }
+    return getSupplierById(inserted.id);
+  } catch (error62) {
+    if (isUniqueViolation3(error62)) {
+      const message = error62.message;
+      if (message.includes("suppliers_name_unique")) {
+        throw new SupplierError("duplicateName");
+      }
+      if (message.includes("suppliers_phone_unique")) {
+        throw new SupplierError("duplicatePhone");
+      }
+      throw new SupplierError("duplicateName");
+    }
+    throw error62;
+  }
+}
+function updateSupplier(id, input2) {
+  const supplierId = parseSupplierId(id);
+  const db2 = getDb();
+  const existing = db2.select({ id: suppliers.id, isSystem: suppliers.isSystem }).from(suppliers).where(eq(suppliers.id, supplierId)).get();
+  if (!existing) {
+    throw new SupplierError("notFound");
+  }
+  if (existing.isSystem) {
+    throw new SupplierError("systemSupplierImmutable");
+  }
+  const name = parseSupplierName(input2);
+  const phone = parseSupplierPhone(input2);
+  const address = parseSupplierAddress(input2);
+  if (name === SYSTEM_SUPPLIER_NAME) {
+    throw new SupplierError("duplicateName");
+  }
+  assertNameIsAvailable4(name, supplierId);
+  assertPhoneIsAvailable2(phone, supplierId);
+  try {
+    const updated = db2.update(suppliers).set({ name, phone, address, updatedAt: /* @__PURE__ */ new Date() }).where(eq(suppliers.id, supplierId)).returning({ id: suppliers.id }).get();
+    if (!updated) {
+      throw new SupplierError("notFound");
+    }
+    return getSupplierById(supplierId);
+  } catch (error62) {
+    if (isUniqueViolation3(error62)) {
+      const message = error62.message;
+      if (message.includes("suppliers_name_unique")) {
+        throw new SupplierError("duplicateName");
+      }
+      if (message.includes("suppliers_phone_unique")) {
+        throw new SupplierError("duplicatePhone");
+      }
+      throw new SupplierError("duplicateName");
+    }
+    throw error62;
+  }
+}
+function setSupplierActive(id, isActive) {
+  const supplierId = parseSupplierId(id);
+  const db2 = getDb();
+  const existing = db2.select({ id: suppliers.id, isSystem: suppliers.isSystem }).from(suppliers).where(eq(suppliers.id, supplierId)).get();
+  if (!existing) {
+    throw new SupplierError("notFound");
+  }
+  if (existing.isSystem && !isActive) {
+    throw new SupplierError("systemSupplierCannotDeactivate");
+  }
+  db2.update(suppliers).set({ isActive, updatedAt: /* @__PURE__ */ new Date() }).where(eq(suppliers.id, supplierId)).run();
+  return getSupplierById(supplierId);
+}
+function isNameAvailable4(name, excludeSupplierId) {
+  if (!name || name.trim().length < SUPPLIER_NAME_MIN_LENGTH) {
+    return false;
+  }
+  const normalized = normalizeSupplierName(name.trim());
+  const normalizedLower = normalized.toLowerCase();
+  const duplicate = excludeSupplierId ? getDb().select({ id: suppliers.id }).from(suppliers).where(and(sql`lower(${suppliers.name}) = ${normalizedLower}`, ne(suppliers.id, excludeSupplierId))).get() : getDb().select({ id: suppliers.id }).from(suppliers).where(sql`lower(${suppliers.name}) = ${normalizedLower}`).get();
+  return !duplicate;
+}
+function isPhoneAvailable2(phone, excludeSupplierId) {
+  if (!phone || phone.trim().length < SUPPLIER_PHONE_MIN_DIGITS) {
+    return false;
+  }
+  const normalized = normalizePhone2(phone.trim());
+  if (!isValidSenegalesePhone2(normalized)) {
+    return false;
+  }
+  const duplicate = excludeSupplierId ? getDb().select({ id: suppliers.id }).from(suppliers).where(and(eq(suppliers.phone, normalized), ne(suppliers.id, excludeSupplierId))).get() : getDb().select({ id: suppliers.id }).from(suppliers).where(eq(suppliers.phone, normalized)).get();
+  return !duplicate;
 }
 function ensureSystemSupplier() {
   const existing = getDb().select().from(suppliers).where(eq(suppliers.name, SYSTEM_SUPPLIER_NAME)).get();
@@ -26239,6 +28770,91 @@ function ensureSystemSupplier() {
     throw new SupplierError("unexpected");
   }
   return getSupplierById(inserted.id);
+}
+
+// electron/ipc/suppliers.ts
+function toSuccess7(data) {
+  return { success: true, data };
+}
+function toFailure8(error62, fallback) {
+  if (error62 instanceof SupplierError) {
+    return { success: false, error: error62.message };
+  }
+  console.error("[suppliers] Unexpected error:", error62);
+  return { success: false, error: fallback };
+}
+function registerSupplierIpcHandlers() {
+  ipcMain.handle("suppliers:list", (_event, filters) => {
+    try {
+      return toSuccess7(listSuppliers(filters ?? {}));
+    } catch (error62) {
+      return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+    }
+  });
+  ipcMain.handle("suppliers:get", (_event, id) => {
+    try {
+      return toSuccess7(getSupplierById(id));
+    } catch (error62) {
+      return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+    }
+  });
+  ipcMain.handle(
+    "suppliers:create",
+    (_event, input2) => {
+      try {
+        return toSuccess7(createSupplier(input2));
+      } catch (error62) {
+        return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "suppliers:update",
+    (_event, id, input2) => {
+      try {
+        return toSuccess7(updateSupplier(id, input2));
+      } catch (error62) {
+        return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "suppliers:set-active",
+    (_event, id, isActive) => {
+      try {
+        return toSuccess7(setSupplierActive(id, isActive));
+      } catch (error62) {
+        return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "suppliers:is-name-available",
+    (_event, name, excludeSupplierId) => {
+      try {
+        return toSuccess7(isNameAvailable4(name, excludeSupplierId));
+      } catch (error62) {
+        return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "suppliers:is-phone-available",
+    (_event, phone, excludeSupplierId) => {
+      try {
+        return toSuccess7(isPhoneAvailable2(phone, excludeSupplierId));
+      } catch (error62) {
+        return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle("suppliers:ensure-system", () => {
+    try {
+      return toSuccess7(ensureSystemSupplier());
+    } catch (error62) {
+      return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+    }
+  });
 }
 
 // electron/services/supplyService.ts
@@ -26286,7 +28902,7 @@ var SUPPLY_ERROR_CODES = Object.keys(SUPPLY_ERRORS);
 function formatSupplyReference(sequence) {
   return `${SUPPLY_REFERENCE_PREFIX}-${String(sequence).padStart(SUPPLY_REFERENCE_PADDING, "0")}`;
 }
-function normalizeSupplierName(rawName) {
+function normalizeSupplierName2(rawName) {
   return rawName.trim().replace(/\s+/g, " ");
 }
 function parseSupplyDate(rawDate) {
@@ -26312,37 +28928,37 @@ function todayAsSupplyDate(now = /* @__PURE__ */ new Date()) {
   const day = String(now.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
-var supplierNameSchema = external_exports.string({ error: SUPPLY_ERRORS.supplierTooLong }).transform(normalizeSupplierName).pipe(external_exports.string().max(SUPPLY_SUPPLIER_MAX_LENGTH, SUPPLY_ERRORS.supplierTooLong));
-var productIdSchema3 = external_exports.number({ error: SUPPLY_ERRORS.productNotFound }).int(SUPPLY_ERRORS.productNotFound).positive(SUPPLY_ERRORS.productNotFound);
-var formSchema2 = external_exports.string({ error: SUPPLY_ERRORS.formRequired }).transform(normalizeFormName).pipe(
+var supplierNameSchema = external_exports.string({ error: SUPPLY_ERRORS.supplierTooLong }).transform(normalizeSupplierName2).pipe(external_exports.string().max(SUPPLY_SUPPLIER_MAX_LENGTH, SUPPLY_ERRORS.supplierTooLong));
+var productIdSchema4 = external_exports.number({ error: SUPPLY_ERRORS.productNotFound }).int(SUPPLY_ERRORS.productNotFound).positive(SUPPLY_ERRORS.productNotFound);
+var formSchema3 = external_exports.string({ error: SUPPLY_ERRORS.formRequired }).transform(normalizeFormName).pipe(
   external_exports.string().min(1, SUPPLY_ERRORS.formRequired).max(PRODUCT_FORM_MAX_LENGTH, SUPPLY_ERRORS.formTooLong)
 );
-var quantitySchema = external_exports.number({ error: SUPPLY_ERRORS.quantityRequired }).int(SUPPLY_ERRORS.quantityInvalid).positive(SUPPLY_ERRORS.quantityInvalid).max(SUPPLY_QUANTITY_MAX, SUPPLY_ERRORS.quantityTooHigh);
-var unitPriceSchema = external_exports.number({ error: SUPPLY_ERRORS.unitPriceRequired }).int(SUPPLY_ERRORS.unitPriceInvalid).min(0, SUPPLY_ERRORS.unitPriceInvalid).max(SUPPLY_UNIT_PRICE_MAX, SUPPLY_ERRORS.unitPriceTooHigh);
+var quantitySchema2 = external_exports.number({ error: SUPPLY_ERRORS.quantityRequired }).int(SUPPLY_ERRORS.quantityInvalid).positive(SUPPLY_ERRORS.quantityInvalid).max(SUPPLY_QUANTITY_MAX, SUPPLY_ERRORS.quantityTooHigh);
+var unitPriceSchema2 = external_exports.number({ error: SUPPLY_ERRORS.unitPriceRequired }).int(SUPPLY_ERRORS.unitPriceInvalid).min(0, SUPPLY_ERRORS.unitPriceInvalid).max(SUPPLY_UNIT_PRICE_MAX, SUPPLY_ERRORS.unitPriceTooHigh);
 var supplyItemInputSchema = external_exports.object({
-  productId: productIdSchema3,
-  form: formSchema2,
-  quantity: quantitySchema,
-  purchaseUnitPrice: unitPriceSchema
+  productId: productIdSchema4,
+  form: formSchema3,
+  quantity: quantitySchema2,
+  purchaseUnitPrice: unitPriceSchema2
 });
 var supplyCreateSchema = external_exports.object({
   items: external_exports.array(supplyItemInputSchema).min(1, SUPPLY_ERRORS.itemsRequired).max(SUPPLY_ITEMS_MAX, SUPPLY_ERRORS.tooManyItems)
 });
-function toErrorCode3(error62, fallback) {
+function toErrorCode7(error62, fallback) {
   const message = error62.issues[0]?.message;
   return SUPPLY_ERROR_CODES.find((code) => SUPPLY_ERRORS[code] === message) ?? fallback;
 }
-function getProductForms2(product) {
+function getProductForms3(product) {
   return [product.primaryForm, product.secondaryForm].filter(
     (form) => Boolean(form)
   );
 }
-function assertFormBelongsToProduct2(product, form) {
-  if (!getProductForms2(product).includes(form)) {
+function assertFormBelongsToProduct3(product, form) {
+  if (!getProductForms3(product).includes(form)) {
     throw new SupplyError("formInvalid");
   }
 }
-function findProduct2(productId) {
+function findProduct3(productId) {
   try {
     return getProductById(productId);
   } catch (error62) {
@@ -26352,19 +28968,19 @@ function findProduct2(productId) {
     throw error62;
   }
 }
-var signedQuantityExpression2 = sql`coalesce(sum(case when ${stockMovements.direction} = 'IN' then ${stockMovements.quantity} else -${stockMovements.quantity} end), 0)`;
-function computeFormQuantity2(db2, productId, form) {
-  const row = db2.select({ quantity: signedQuantityExpression2 }).from(stockMovements).where(and(eq(stockMovements.productId, productId), eq(stockMovements.form, form))).get();
+var signedQuantityExpression3 = sql`coalesce(sum(case when ${stockMovements.direction} = 'IN' then ${stockMovements.quantity} else -${stockMovements.quantity} end), 0)`;
+function computeFormQuantity3(db2, productId, form) {
+  const row = db2.select({ quantity: signedQuantityExpression3 }).from(stockMovements).where(and(eq(stockMovements.productId, productId), eq(stockMovements.form, form))).get();
   return row?.quantity ?? 0;
 }
-function nextReferenceSequence(db2) {
+function nextReferenceSequence2(db2) {
   const last = db2.select({ id: supplies.id }).from(supplies).orderBy(desc(supplies.id)).limit(1).get();
   return (last?.id ?? 0) + 1;
 }
-function assertNoDuplicateLines(lines) {
+function assertNoDuplicateLines2(lines) {
   const seen = /* @__PURE__ */ new Set();
-  for (const line2 of lines) {
-    const key = `${line2.productId}|${line2.form}`;
+  for (const line of lines) {
+    const key = `${line.productId}|${line.form}`;
     if (seen.has(key)) {
       throw new SupplyError("duplicateLine");
     }
@@ -26380,7 +28996,7 @@ var supplyColumns = {
   totalAmount: supplies.totalAmount,
   createdAt: supplies.createdAt
 };
-function toSupply(row, itemCount2) {
+function toSupply(row, itemCount) {
   return {
     id: row.id,
     reference: row.reference,
@@ -26388,7 +29004,7 @@ function toSupply(row, itemCount2) {
     supplierName: row.supplierName,
     date: row.date,
     totalAmount: row.totalAmount,
-    itemCount: itemCount2,
+    itemCount,
     createdAt: row.createdAt
   };
 }
@@ -26400,7 +29016,7 @@ function countItemsOf(db2, supplyId) {
   const row = db2.select({ count: sql`count(*)` }).from(supplyItems).where(eq(supplyItems.supplyId, supplyId)).get();
   return row?.count ?? 0;
 }
-function buildContainsPattern(rawSearch) {
+function buildContainsPattern2(rawSearch) {
   const search = removeDiacritics(rawSearch.trim()).toLowerCase().replace(/\s+/g, " ");
   return `%${search.replace(/[\\%_]/g, "\\$&")}%`;
 }
@@ -26408,12 +29024,12 @@ function listSupplies(filters = {}) {
   const conditions = [];
   if (typeof filters?.search === "string" && filters.search.trim()) {
     conditions.push(
-      sql`unaccent(lower(${supplies.reference})) like ${buildContainsPattern(filters.search)} escape '\\'`
+      sql`unaccent(lower(${supplies.reference})) like ${buildContainsPattern2(filters.search)} escape '\\'`
     );
   }
   if (typeof filters?.supplierSearch === "string" && filters.supplierSearch.trim()) {
     conditions.push(
-      sql`unaccent(lower(coalesce(${supplies.supplierName}, ''))) like ${buildContainsPattern(filters.supplierSearch)} escape '\\'`
+      sql`unaccent(lower(coalesce(${supplies.supplierName}, ''))) like ${buildContainsPattern2(filters.supplierSearch)} escape '\\'`
     );
   }
   const db2 = getDb();
@@ -26421,7 +29037,7 @@ function listSupplies(filters = {}) {
   const itemCounts = countItemsBySupply(db2);
   return rows.map((row) => toSupply(row, itemCounts.get(row.id) ?? 0));
 }
-function selectItems(db2, supplyId) {
+function selectItems2(db2, supplyId) {
   return db2.select({
     id: supplyItems.id,
     supplyId: supplyItems.supplyId,
@@ -26433,8 +29049,8 @@ function selectItems(db2, supplyId) {
     lineTotal: supplyItems.lineTotal
   }).from(supplyItems).innerJoin(products, eq(supplyItems.productId, products.id)).where(eq(supplyItems.supplyId, supplyId)).orderBy(asc(supplyItems.id)).all();
 }
-function buildDetail(db2, supply) {
-  return { ...supply, items: selectItems(db2, supply.id) };
+function buildDetail2(db2, supply) {
+  return { ...supply, items: selectItems2(db2, supply.id) };
 }
 function findSupplyRow(db2, id) {
   return db2.select(supplyColumns).from(supplies).where(eq(supplies.id, id)).get() ?? null;
@@ -26449,7 +29065,7 @@ function getSupplyById(id) {
   if (!row) {
     throw new SupplyError("notFound");
   }
-  return buildDetail(db2, toSupply(row, countItemsOf(db2, row.id)));
+  return buildDetail2(db2, toSupply(row, countItemsOf(db2, row.id)));
 }
 function getSupplyByReference(reference) {
   const normalized = String(reference ?? "").trim().toUpperCase();
@@ -26458,9 +29074,9 @@ function getSupplyByReference(reference) {
   if (!row) {
     throw new SupplyError("notFound");
   }
-  return buildDetail(db2, toSupply(row, countItemsOf(db2, row.id)));
+  return buildDetail2(db2, toSupply(row, countItemsOf(db2, row.id)));
 }
-function toDatabaseError3(error62) {
+function toDatabaseError4(error62) {
   if (!(error62 instanceof Error)) {
     return null;
   }
@@ -26494,30 +29110,30 @@ function toDatabaseError3(error62) {
   }
   return null;
 }
-function withMappedErrors3(operation) {
+function withMappedErrors4(operation) {
   try {
     return operation();
   } catch (error62) {
     if (error62 instanceof SupplyError) {
       throw error62;
     }
-    const mapped = toDatabaseError3(error62);
+    const mapped = toDatabaseError4(error62);
     if (mapped) {
       throw mapped;
     }
     throw error62;
   }
 }
-function parsePayload(input2) {
+function parsePayload2(input2) {
   const rawInput = input2 ?? {};
   const parsed = supplyCreateSchema.safeParse({ items: rawInput.items });
   if (!parsed.success) {
-    throw new SupplyError(toErrorCode3(parsed.error, "itemsRequired"));
+    throw new SupplyError(toErrorCode7(parsed.error, "itemsRequired"));
   }
   const date5 = parseSupplyDate(
     typeof rawInput.date === "string" && rawInput.date.trim() ? rawInput.date : todayAsSupplyDate()
   );
-  assertNoDuplicateLines(parsed.data.items);
+  assertNoDuplicateLines2(parsed.data.items);
   let supplierId = null;
   let supplierName = null;
   if (rawInput.supplierId !== void 0 && rawInput.supplierId !== null) {
@@ -26529,7 +29145,7 @@ function parsePayload(input2) {
       throw new SupplyError("supplierInactive");
     }
     supplierId = supplier.id;
-    supplierName = normalizeSupplierName(supplier.name);
+    supplierName = normalizeSupplierName2(supplier.name);
   } else if (typeof rawInput.supplierName === "string" && rawInput.supplierName.trim()) {
     const parsedSupplier = supplierNameSchema.safeParse(rawInput.supplierName);
     if (!parsedSupplier.success) {
@@ -26540,7 +29156,7 @@ function parsePayload(input2) {
   } else {
     const systemSupplier = ensureSystemSupplier();
     supplierId = systemSupplier.id;
-    supplierName = normalizeSupplierName(systemSupplier.name);
+    supplierName = normalizeSupplierName2(systemSupplier.name);
   }
   return {
     lines: parsed.data.items,
@@ -26550,19 +29166,19 @@ function parsePayload(input2) {
   };
 }
 function createSupply(input2) {
-  const { lines, supplierId, supplierName, date: date5 } = parsePayload(input2);
+  const { lines, supplierId, supplierName, date: date5 } = parsePayload2(input2);
   const db2 = getDb();
-  return withMappedErrors3(
+  return withMappedErrors4(
     () => db2.transaction((tx) => {
-      for (const line2 of lines) {
-        const product = findProduct2(line2.productId);
+      for (const line of lines) {
+        const product = findProduct3(line.productId);
         if (!product.isActive) {
           throw new SupplyError("productInactive");
         }
-        assertFormBelongsToProduct2(product, line2.form);
+        assertFormBelongsToProduct3(product, line.form);
       }
       const now = /* @__PURE__ */ new Date();
-      const reference = formatSupplyReference(nextReferenceSequence(tx));
+      const reference = formatSupplyReference(nextReferenceSequence2(tx));
       const inserted = tx.insert(supplies).values({
         reference,
         supplierId,
@@ -26578,29 +29194,29 @@ function createSupply(input2) {
       }
       const supplyId = inserted.id;
       let totalAmount = 0;
-      for (const line2 of lines) {
-        const lineTotal = line2.quantity * line2.purchaseUnitPrice;
+      for (const line of lines) {
+        const lineTotal = line.quantity * line.purchaseUnitPrice;
         tx.insert(supplyItems).values({
           supplyId,
-          productId: line2.productId,
-          form: line2.form,
-          quantity: line2.quantity,
-          purchaseUnitPrice: line2.purchaseUnitPrice,
+          productId: line.productId,
+          form: line.form,
+          quantity: line.quantity,
+          purchaseUnitPrice: line.purchaseUnitPrice,
           lineTotal
         }).run();
         totalAmount += lineTotal;
-        const before = computeFormQuantity2(tx, line2.productId, line2.form);
+        const before2 = computeFormQuantity3(tx, line.productId, line.form);
         tx.insert(stockMovements).values({
-          productId: line2.productId,
-          form: line2.form,
+          productId: line.productId,
+          form: line.form,
           movementType: "APPROVISIONNEMENT",
           direction: "IN",
-          quantity: line2.quantity,
+          quantity: line.quantity,
           reason: null,
           createdAt: now
         }).run();
-        const after2 = computeFormQuantity2(tx, line2.productId, line2.form);
-        if (after2 !== before + line2.quantity || after2 < 0) {
+        const after2 = computeFormQuantity3(tx, line.productId, line.form);
+        if (after2 !== before2 + line.quantity || after2 < 0) {
           throw new SupplyError("unexpected");
         }
       }
@@ -26613,135 +29229,513 @@ function createSupply(input2) {
       if (!row) {
         throw new SupplyError("unexpected");
       }
-      return buildDetail(tx, toSupply(row, lines.length));
+      return buildDetail2(tx, toSupply(row, lines.length));
     })
   );
+}
+
+// electron/ipc/supplies.ts
+function toSuccess8(data) {
+  return { success: true, data };
+}
+function toFailure9(error62, fallback) {
+  if (error62 instanceof SupplyError) {
+    return { success: false, error: error62.message };
+  }
+  console.error("[supplies] Unexpected error:", error62);
+  return { success: false, error: fallback };
+}
+function registerSupplyIpcHandlers() {
+  ipcMain.handle(
+    "supplies:list",
+    (_event, filters) => {
+      try {
+        return toSuccess8(listSupplies(filters ?? {}));
+      } catch (error62) {
+        return toFailure9(error62, SUPPLY_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "supplies:get",
+    (_event, id) => {
+      try {
+        return toSuccess8(getSupplyById(id));
+      } catch (error62) {
+        return toFailure9(error62, SUPPLY_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "supplies:get-by-reference",
+    (_event, reference) => {
+      try {
+        return toSuccess8(getSupplyByReference(reference));
+      } catch (error62) {
+        return toFailure9(error62, SUPPLY_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "supplies:create",
+    (_event, input2) => {
+      try {
+        return toSuccess8(createSupply(input2));
+      } catch (error62) {
+        return toFailure9(error62, SUPPLY_ERRORS.unexpected);
+      }
+    }
+  );
+}
+
+// electron/services/transformationService.ts
+var TRANSFORMATION_ERRORS = {
+  productRequired: "Le produit est obligatoire.",
+  productNotFound: "Produit introuvable.",
+  productInactive: "Produit inactif. Veuillez r\xE9activer le produit avant de le transformer.",
+  productNotTransformable: "Ce produit est simple : il ne poss\xE8de pas de forme secondaire et ne peut pas \xEAtre transform\xE9.",
+  conversionRequired: "Ce produit transformable ne poss\xE8de pas de conversion exploitable.",
+  formRequired: "La forme de d\xE9part est obligatoire.",
+  formTooLong: `La forme ne peut pas d\xE9passer ${PRODUCT_FORM_MAX_LENGTH} caract\xE8res.`,
+  formInvalid: "Forme invalide pour ce produit.",
+  sameForm: "La forme de d\xE9part et la forme d'arriv\xE9e doivent \xEAtre diff\xE9rentes.",
+  quantityRequired: "La quantit\xE9 est obligatoire.",
+  quantityInvalid: "La quantit\xE9 doit \xEAtre un entier sup\xE9rieur \xE0 0.",
+  quantityTooHigh: "La quantit\xE9 ne peut pas d\xE9passer 1 000 000.",
+  conversionInvalid: "Cette quantit\xE9 ne peut pas \xEAtre convertie exactement : aucune quantit\xE9 fractionnaire n'est accept\xE9e.",
+  insufficientStock: "Stock insuffisant pour cette transformation.",
+  dateRequired: "La date de la transformation est obligatoire.",
+  dateInvalid: "La date doit \xEAtre au format AAAA-MM-JJ.",
+  dateOutOfRange: "La date doit \xEAtre comprise entre le 01/01/2000 et le 31/12/2099.",
+  notFound: "Transformation introuvable.",
+  referenceConflict: "La r\xE9f\xE9rence de la transformation est d\xE9j\xE0 utilis\xE9e.",
+  unexpected: "Une erreur inattendue est survenue."
+};
+var TransformationError = class extends Error {
+  code;
+  constructor(code) {
+    super(TRANSFORMATION_ERRORS[code]);
+    this.name = "TransformationError";
+    this.code = code;
+  }
+};
+var TRANSFORMATION_REFERENCE_PREFIX = "TRF";
+var TRANSFORMATION_REFERENCE_PADDING = 6;
+var TRANSFORMATION_QUANTITY_MAX = 1e6;
+var TRANSFORMATION_ERROR_CODES = Object.keys(
+  TRANSFORMATION_ERRORS
+);
+var signedQuantityExpression4 = sql`coalesce(sum(case when ${stockMovements.direction} = 'IN' then ${stockMovements.quantity} else -${stockMovements.quantity} end), 0)`;
+function formatTransformationReference(sequence) {
+  return `${TRANSFORMATION_REFERENCE_PREFIX}-${String(sequence).padStart(
+    TRANSFORMATION_REFERENCE_PADDING,
+    "0"
+  )}`;
+}
+function parseTransformationDate(rawDate) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(rawDate ?? "").trim());
+  if (!match) {
+    throw new TransformationError("dateInvalid");
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date5 = new Date(year, month - 1, day);
+  if (date5.getFullYear() !== year || date5.getMonth() !== month - 1 || date5.getDate() !== day) {
+    throw new TransformationError("dateInvalid");
+  }
+  if (year < 2e3 || year > 2099) {
+    throw new TransformationError("dateOutOfRange");
+  }
+  return date5;
+}
+function todayAsTransformationDate(now = /* @__PURE__ */ new Date()) {
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+var productIdSchema5 = external_exports.number({ error: TRANSFORMATION_ERRORS.productRequired }).int(TRANSFORMATION_ERRORS.productNotFound).positive(TRANSFORMATION_ERRORS.productNotFound);
+var formSchema4 = external_exports.string({ error: TRANSFORMATION_ERRORS.formRequired }).transform(normalizeFormName).pipe(
+  external_exports.string().min(1, TRANSFORMATION_ERRORS.formRequired).max(PRODUCT_FORM_MAX_LENGTH, TRANSFORMATION_ERRORS.formTooLong)
+);
+var quantitySchema3 = external_exports.number({ error: TRANSFORMATION_ERRORS.quantityRequired }).int(TRANSFORMATION_ERRORS.quantityInvalid).positive(TRANSFORMATION_ERRORS.quantityInvalid).max(TRANSFORMATION_QUANTITY_MAX, TRANSFORMATION_ERRORS.quantityTooHigh);
+var transformationCreateSchema = external_exports.object({
+  productId: productIdSchema5,
+  sourceForm: formSchema4,
+  sourceQuantity: quantitySchema3
+});
+function toErrorCode8(error62, fallback) {
+  const message = error62.issues[0]?.message;
+  return TRANSFORMATION_ERROR_CODES.find((code) => TRANSFORMATION_ERRORS[code] === message) ?? fallback;
+}
+function getProductForms4(product) {
+  return [product.primaryForm, product.secondaryForm].filter(
+    (form) => Boolean(form)
+  );
+}
+function assertTransformable(product) {
+  if (!product.isTransformable) {
+    throw new TransformationError("productNotTransformable");
+  }
+  const [primaryForm, secondaryForm] = getProductForms4(product);
+  if (!primaryForm || !secondaryForm || primaryForm === secondaryForm) {
+    throw new TransformationError("conversionRequired");
+  }
+  const conversionQuantity = product.conversionQuantity;
+  if (conversionQuantity === null || !Number.isInteger(conversionQuantity) || conversionQuantity <= 0) {
+    throw new TransformationError("conversionRequired");
+  }
+  return { primaryForm, secondaryForm, conversionQuantity };
+}
+function resolveDestinationForm(product, sourceForm) {
+  const { primaryForm, secondaryForm } = assertTransformable(product);
+  if (![primaryForm, secondaryForm].includes(sourceForm)) {
+    throw new TransformationError("formInvalid");
+  }
+  return {
+    sourceForm,
+    destinationForm: sourceForm === primaryForm ? secondaryForm : primaryForm
+  };
+}
+function computeDestinationQuantity(product, sourceForm, sourceQuantity) {
+  const { primaryForm, conversionQuantity } = assertTransformable(product);
+  const destinationQuantity = sourceForm === primaryForm ? sourceQuantity * conversionQuantity : sourceQuantity / conversionQuantity;
+  if (!Number.isInteger(destinationQuantity) || destinationQuantity <= 0) {
+    throw new TransformationError("conversionInvalid");
+  }
+  if (destinationQuantity > TRANSFORMATION_QUANTITY_MAX) {
+    throw new TransformationError("quantityTooHigh");
+  }
+  return destinationQuantity;
+}
+function findProduct4(productId) {
+  try {
+    return getProductById(productId);
+  } catch (error62) {
+    if (error62 instanceof ProductError && error62.code === "notFound") {
+      throw new TransformationError("productNotFound");
+    }
+    throw error62;
+  }
+}
+function computeFormQuantity4(db2, productId, form) {
+  const row = db2.select({ quantity: signedQuantityExpression4 }).from(stockMovements).where(and(eq(stockMovements.productId, productId), eq(stockMovements.form, form))).get();
+  return row?.quantity ?? 0;
+}
+function buildStockLevels(db2, product) {
+  const hasMovements = Boolean(
+    db2.select({ id: stockMovements.id }).from(stockMovements).where(eq(stockMovements.productId, product.id)).limit(1).get()
+  );
+  return getProductForms4(product).map((form) => ({
+    productId: product.id,
+    productName: product.name,
+    categoryId: product.categoryId,
+    categoryName: product.categoryName,
+    form,
+    quantity: computeFormQuantity4(db2, product.id, form),
+    hasMovements,
+    isProductActive: product.isActive,
+    isLegacyForm: false
+  }));
+}
+function nextReferenceSequence3(db2) {
+  const last = db2.select({ id: transformations.id }).from(transformations).orderBy(desc(transformations.id)).limit(1).get();
+  return (last?.id ?? 0) + 1;
+}
+var transformationColumns = {
+  id: transformations.id,
+  reference: transformations.reference,
+  productId: transformations.productId,
+  productName: products.name,
+  sourceForm: transformations.sourceForm,
+  sourceQuantity: transformations.sourceQuantity,
+  destinationForm: transformations.destinationForm,
+  destinationQuantity: transformations.destinationQuantity,
+  date: transformations.date,
+  createdAt: transformations.createdAt
+};
+function toTransformation(row) {
+  return { ...row };
+}
+function selectTransformationRows(db2) {
+  return db2.select(transformationColumns).from(transformations).innerJoin(products, eq(transformations.productId, products.id)).all();
+}
+function buildContainsPattern3(rawSearch) {
+  const search = removeDiacritics(rawSearch.trim()).toLowerCase().replace(/\s+/g, " ");
+  return `%${search.replace(/[\\%_]/g, "\\$&")}%`;
+}
+function listTransformableProducts() {
+  return listProducts({ isActive: true }).filter((product) => {
+    try {
+      assertTransformable(product);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+function listTransformations(filters = {}) {
+  const conditions = [];
+  if (typeof filters?.search === "string" && filters.search.trim()) {
+    conditions.push(
+      sql`unaccent(lower(${transformations.reference})) like ${buildContainsPattern3(filters.search)} escape '\\'`
+    );
+  }
+  if (typeof filters?.productSearch === "string" && filters.productSearch.trim()) {
+    conditions.push(
+      sql`unaccent(lower(${products.name})) like ${buildContainsPattern3(filters.productSearch)} escape '\\'`
+    );
+  }
+  const rows = conditions.length > 0 ? getDb().select(transformationColumns).from(transformations).innerJoin(products, eq(transformations.productId, products.id)).where(and(...conditions)).orderBy(desc(transformations.id)).all() : selectTransformationRows(getDb()).sort((left, right) => right.id - left.id);
+  return rows.map(toTransformation);
+}
+function findTransformationRow(db2, id) {
+  return db2.select(transformationColumns).from(transformations).innerJoin(products, eq(transformations.productId, products.id)).where(eq(transformations.id, id)).get() ?? null;
+}
+function buildDetail3(db2, row) {
+  const product = findProduct4(row.productId);
+  return {
+    ...toTransformation(row),
+    stockAfter: buildStockLevels(db2, product)
+  };
+}
+function getTransformationById(id) {
+  const transformationId = Number(id);
+  if (!Number.isInteger(transformationId) || transformationId <= 0) {
+    throw new TransformationError("notFound");
+  }
+  const db2 = getDb();
+  const row = findTransformationRow(db2, transformationId);
+  if (!row) {
+    throw new TransformationError("notFound");
+  }
+  return buildDetail3(db2, row);
+}
+function getTransformationByReference(reference) {
+  const normalized = String(reference ?? "").trim().toUpperCase();
+  const db2 = getDb();
+  const row = db2.select(transformationColumns).from(transformations).innerJoin(products, eq(transformations.productId, products.id)).where(eq(transformations.reference, normalized)).get();
+  if (!row) {
+    throw new TransformationError("notFound");
+  }
+  return buildDetail3(db2, row);
+}
+function toDatabaseError5(error62) {
+  if (!(error62 instanceof Error)) {
+    return null;
+  }
+  const message = error62.message;
+  if (message.includes("transformations_reference_unique")) {
+    return new TransformationError("referenceConflict");
+  }
+  if (message.includes("transformations_source_quantity_check") || message.includes("transformations_destination_quantity_check") || message.includes("stock_movements_quantity_check")) {
+    return new TransformationError("quantityInvalid");
+  }
+  if (message.includes("transformations_forms_check")) {
+    return new TransformationError("sameForm");
+  }
+  if (message.includes("FOREIGN KEY")) {
+    return new TransformationError("productNotFound");
+  }
+  return null;
+}
+function withMappedErrors5(operation) {
+  try {
+    return operation();
+  } catch (error62) {
+    if (error62 instanceof TransformationError) {
+      throw error62;
+    }
+    const mapped = toDatabaseError5(error62);
+    if (mapped) {
+      throw mapped;
+    }
+    throw error62;
+  }
+}
+function parsePayload3(input2) {
+  const rawInput = input2 ?? {};
+  const parsed = transformationCreateSchema.safeParse({
+    productId: rawInput.productId,
+    sourceForm: rawInput.sourceForm,
+    sourceQuantity: rawInput.sourceQuantity
+  });
+  if (!parsed.success) {
+    throw new TransformationError(toErrorCode8(parsed.error, "quantityInvalid"));
+  }
+  const date5 = parseTransformationDate(
+    typeof rawInput.date === "string" && rawInput.date.trim() ? rawInput.date : todayAsTransformationDate()
+  );
+  return {
+    productId: parsed.data.productId,
+    sourceForm: parsed.data.sourceForm,
+    sourceQuantity: parsed.data.sourceQuantity,
+    date: date5
+  };
+}
+function createTransformation(input2) {
+  const { productId, sourceForm, sourceQuantity, date: date5 } = parsePayload3(input2);
+  const db2 = getDb();
+  return withMappedErrors5(
+    () => db2.transaction((tx) => {
+      const product = findProduct4(productId);
+      if (!product.isActive) {
+        throw new TransformationError("productInactive");
+      }
+      const { sourceForm: resolvedSource, destinationForm } = resolveDestinationForm(product, sourceForm);
+      const destinationQuantity = computeDestinationQuantity(
+        product,
+        resolvedSource,
+        sourceQuantity
+      );
+      const sourceBefore = computeFormQuantity4(tx, productId, resolvedSource);
+      const destinationBefore = computeFormQuantity4(tx, productId, destinationForm);
+      if (sourceBefore - sourceQuantity < 0) {
+        throw new TransformationError("insufficientStock");
+      }
+      const now = /* @__PURE__ */ new Date();
+      const reference = formatTransformationReference(nextReferenceSequence3(tx));
+      const inserted = tx.insert(transformations).values({
+        reference,
+        productId,
+        sourceForm: resolvedSource,
+        sourceQuantity,
+        destinationForm,
+        destinationQuantity,
+        date: date5,
+        createdAt: now
+      }).returning({ id: transformations.id }).get();
+      if (!inserted) {
+        throw new TransformationError("unexpected");
+      }
+      tx.insert(stockMovements).values({
+        productId,
+        form: resolvedSource,
+        movementType: "TRANSFORMATION",
+        direction: "OUT",
+        quantity: sourceQuantity,
+        reason: null,
+        createdAt: now
+      }).run();
+      tx.insert(stockMovements).values({
+        productId,
+        form: destinationForm,
+        movementType: "TRANSFORMATION",
+        direction: "IN",
+        quantity: destinationQuantity,
+        reason: null,
+        createdAt: now
+      }).run();
+      const sourceAfter = computeFormQuantity4(tx, productId, resolvedSource);
+      const destinationAfter = computeFormQuantity4(tx, productId, destinationForm);
+      if (sourceAfter !== sourceBefore - sourceQuantity || destinationAfter !== destinationBefore + destinationQuantity || sourceAfter < 0 || destinationAfter < 0) {
+        throw new TransformationError("unexpected");
+      }
+      const row = findTransformationRow(tx, inserted.id);
+      if (!row) {
+        throw new TransformationError("unexpected");
+      }
+      return buildDetail3(tx, row);
+    })
+  );
+}
+
+// electron/ipc/transformations.ts
+function toSuccess9(data) {
+  return { success: true, data };
+}
+function toFailure10(error62, fallback) {
+  if (error62 instanceof TransformationError) {
+    return { success: false, error: error62.message };
+  }
+  console.error("[transformations] Unexpected error:", error62);
+  return { success: false, error: fallback };
+}
+function registerTransformationIpcHandlers() {
+  ipcMain.handle(
+    "transformations:list-products",
+    () => {
+      try {
+        return toSuccess9(listTransformableProducts());
+      } catch (error62) {
+        return toFailure10(error62, TRANSFORMATION_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "transformations:list",
+    (_event, filters) => {
+      try {
+        return toSuccess9(listTransformations(filters ?? {}));
+      } catch (error62) {
+        return toFailure10(error62, TRANSFORMATION_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "transformations:get",
+    (_event, id) => {
+      try {
+        return toSuccess9(getTransformationById(id));
+      } catch (error62) {
+        return toFailure10(error62, TRANSFORMATION_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "transformations:get-by-reference",
+    (_event, reference) => {
+      try {
+        return toSuccess9(getTransformationByReference(reference));
+      } catch (error62) {
+        return toFailure10(error62, TRANSFORMATION_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "transformations:create",
+    (_event, input2) => {
+      try {
+        return toSuccess9(createTransformation(input2));
+      } catch (error62) {
+        return toFailure10(error62, TRANSFORMATION_ERRORS.unexpected);
+      }
+    }
+  );
+}
+
+// electron/ipc/index.ts
+function registerIpcHandlers() {
+  ipcMain.handle("database:status", () => {
+    try {
+      return getDatabaseStatus();
+    } catch {
+      return { connected: false, initialized: false, version: "unknown" };
+    }
+  });
+  ipcMain.handle("settings:get", () => {
+    return getSettings();
+  });
+  ipcMain.handle("settings:save", (_event, input2) => {
+    return saveSettings(input2);
+  });
+  registerAuthIpcHandlers();
+  registerCategoryIpcHandlers();
+  registerProductIpcHandlers();
+  registerStockIpcHandlers();
+  registerSupplyIpcHandlers();
+  registerTransformationIpcHandlers();
+  registerClientIpcHandlers();
+  registerSupplierIpcHandlers();
+  registerInvoiceIpcHandlers();
+  registerPrintIpcHandlers();
 }
 
 // tests/helpers/database.ts
 import { mkdtempSync, rmSync } from "node:fs";
 import os2 from "node:os";
 import path3 from "node:path";
-
-// node_modules/drizzle-orm/migrator.js
-import crypto2 from "node:crypto";
-import fs2 from "node:fs";
-function readMigrationFiles(config2) {
-  const migrationFolderTo = config2.migrationsFolder;
-  const migrationQueries = [];
-  const journalPath = `${migrationFolderTo}/meta/_journal.json`;
-  if (!fs2.existsSync(journalPath)) {
-    throw new Error(`Can't find meta/_journal.json file`);
-  }
-  const journalAsString = fs2.readFileSync(`${migrationFolderTo}/meta/_journal.json`).toString();
-  const journal = JSON.parse(journalAsString);
-  for (const journalEntry of journal.entries) {
-    const migrationPath = `${migrationFolderTo}/${journalEntry.tag}.sql`;
-    try {
-      const query = fs2.readFileSync(`${migrationFolderTo}/${journalEntry.tag}.sql`).toString();
-      const result = query.split("--> statement-breakpoint").map((it2) => {
-        return it2;
-      });
-      migrationQueries.push({
-        sql: result,
-        bps: journalEntry.breakpoints,
-        folderMillis: journalEntry.when,
-        hash: crypto2.createHash("sha256").update(query).digest("hex")
-      });
-    } catch {
-      throw new Error(`No file ${migrationPath} found in ${migrationFolderTo} folder`);
-    }
-  }
-  return migrationQueries;
-}
-
-// node_modules/drizzle-orm/better-sqlite3/migrator.js
-function migrate(db2, config2) {
-  const migrations = readMigrationFiles(config2);
-  db2.dialect.migrate(migrations, db2.session, config2);
-}
-
-// electron/services/categoryService.ts
-var CATEGORY_ERRORS = {
-  nameRequired: "Le nom de la cat\xE9gorie est obligatoire.",
-  nameTooShort: "Le nom de la cat\xE9gorie doit contenir au moins 2 caract\xE8res.",
-  nameTooLong: "Le nom de la cat\xE9gorie ne peut pas d\xE9passer 60 caract\xE8res.",
-  duplicate: "Cette cat\xE9gorie existe d\xE9j\xE0.",
-  notFound: "Cette cat\xE9gorie n'existe pas.",
-  inUse: "Cette cat\xE9gorie est utilis\xE9e par un ou plusieurs produits et ne peut pas \xEAtre supprim\xE9e.",
-  unexpected: "Une erreur inattendue est survenue."
-};
-var CategoryError = class extends Error {
-  code;
-  constructor(code) {
-    super(CATEGORY_ERRORS[code]);
-    this.name = "CategoryError";
-    this.code = code;
-  }
-};
-var CATEGORY_NAME_MIN_LENGTH = 2;
-var CATEGORY_NAME_MAX_LENGTH = 60;
-var CATEGORY_ERROR_CODES = Object.keys(CATEGORY_ERRORS);
-var categoryNameSchema = external_exports.string({ error: CATEGORY_ERRORS.nameRequired }).trim().min(1, CATEGORY_ERRORS.nameRequired).max(CATEGORY_NAME_MAX_LENGTH, CATEGORY_ERRORS.nameTooLong).refine((name) => name.length >= CATEGORY_NAME_MIN_LENGTH, CATEGORY_ERRORS.nameTooShort);
-var categorySchema = external_exports.object({
-  name: categoryNameSchema
-});
-var categoryIdSchema2 = external_exports.number({ error: CATEGORY_ERRORS.notFound }).int().positive();
-function normalizeCategoryName(rawName) {
-  return rawName.trim().replace(/\s+/g, " ").toUpperCase();
-}
-function toErrorCode4(error62, fallback) {
-  const message = error62.issues[0]?.message;
-  return CATEGORY_ERROR_CODES.find((code) => CATEGORY_ERRORS[code] === message) ?? fallback;
-}
-function parseCategoryName(input2) {
-  const parsed = categorySchema.safeParse(input2);
-  if (!parsed.success) {
-    throw new CategoryError(toErrorCode4(parsed.error, "nameRequired"));
-  }
-  return normalizeCategoryName(parsed.data.name);
-}
-function toCategory(row) {
-  return {
-    id: row.id,
-    name: row.name,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt
-  };
-}
-function findByName2(name, excludeId) {
-  const conditions = [sql`lower(${categories.name}) = ${name.toLowerCase()}`];
-  if (excludeId) {
-    conditions.push(ne(categories.id, excludeId));
-  }
-  return getDb().select({ id: categories.id }).from(categories).where(and(...conditions)).get();
-}
-function assertNameIsAvailable2(name, excludeId) {
-  if (findByName2(name, excludeId)) {
-    throw new CategoryError("duplicate");
-  }
-}
-function isUniqueViolation(error62) {
-  return error62 instanceof Error && error62.message.includes("UNIQUE");
-}
-function createCategory(input2) {
-  const name = parseCategoryName(input2);
-  const db2 = getDb();
-  const now = /* @__PURE__ */ new Date();
-  assertNameIsAvailable2(name);
-  try {
-    return toCategory(
-      db2.insert(categories).values({ name, createdAt: now, updatedAt: now }).returning().get()
-    );
-  } catch (error62) {
-    if (isUniqueViolation(error62)) {
-      throw new CategoryError("duplicate");
-    }
-    throw error62;
-  }
-}
-
-// tests/helpers/database.ts
 var migrationsFolder = path3.join(process.cwd(), "electron", "database", "migrations");
 var userDataDir = null;
 function openTestDatabase() {
@@ -26754,10 +29748,6 @@ function resetTestDatabase() {
   removeUserDataDir();
   openTestDatabase();
 }
-function reopenTestDatabase() {
-  closeDatabase();
-  initializeDatabase();
-}
 function closeTestDatabase() {
   closeDatabase();
   removeUserDataDir();
@@ -26768,893 +29758,217 @@ function removeUserDataDir() {
     userDataDir = null;
   }
 }
-function execSql(statement) {
-  getDb().$client.exec(statement);
+function seedSimpleSupplier(name = "FOURNISSEUR SAHEL", phone = "+221771112233") {
+  return createSupplier({ name, phone });
 }
-function seedCategory(name = "BOISSONS") {
-  return createCategory({ name });
-}
-function seedSimpleProduct(category, name = "SUCRE 1 KG", overrides = {}) {
-  return createProduct({
-    name,
-    categoryId: category.id,
-    purchasePrice: 5e3,
-    salePrice: 7e3,
-    isTransformable: false,
-    primaryForm: "SAC",
-    ...overrides
-  });
-}
-function seedTransformableProduct(category, name = "CHOCOPAIN 5 KG", overrides = {}) {
-  return createProduct({
-    name,
-    categoryId: category.id,
-    purchasePrice: 12e3,
-    salePrice: 15e3,
-    isTransformable: true,
-    primaryForm: "CARTON",
-    secondaryForm: "SEAU",
-    conversionQuantity: 4,
-    secondarySalePrice: 4e3,
-    ...overrides
-  });
+function seedSystemSupplier() {
+  return ensureSystemSupplier();
 }
 
-// tests/supply.test.ts
-function expectSupplyError(code, run) {
-  assert2.throws(run, (error62) => {
-    assert2.ok(
-      error62 instanceof SupplyError,
-      `expected SupplyError, received ${String(error62)}`
-    );
-    assert2.equal(error62.code, code);
-    return true;
+// tests/supplier.test.ts
+function invokeSupplier(channel, ...args) {
+  return invokeHandler(channel, ...args);
+}
+function expectFailure(channel, ...args) {
+  const result = invokeSupplier(channel, ...args);
+  assert2.equal(
+    result.success,
+    false,
+    `${channel} must answer with an explicit business error, not a thrown error`
+  );
+  return result.success ? "" : result.error;
+}
+function isAvailable(channel, ...args) {
+  const result = invokeSupplier(channel, ...args);
+  assert2.equal(result.success, true);
+  return result.success ? result.data : true;
+}
+describe3("canaux IPC des fournisseurs", () => {
+  before(() => {
+    registerIpcHandlers();
   });
-}
-function expectStockError(code, run) {
-  assert2.throws(run, (error62) => {
-    assert2.ok(error62 instanceof StockError, `expected StockError, received ${String(error62)}`);
-    assert2.equal(error62.code, code);
-    return true;
-  });
-}
-function movementCount() {
-  return getDb().select().from(stockMovements).all().length;
-}
-function supplyCount() {
-  return getDb().select().from(supplies).all().length;
-}
-function itemCount() {
-  return getDb().select().from(supplyItems).all().length;
-}
-function balanceOf(productId, form) {
-  return getProductFormStock(productId, form).quantity;
-}
-function line(product, form, quantity, purchaseUnitPrice) {
-  return { productId: product.id, form, quantity, purchaseUnitPrice };
-}
-describe3("module Approvisionnement", () => {
-  let category;
-  let simpleProduct;
-  let transformableProduct;
   beforeEach(() => {
     resetTestDatabase();
-    category = seedCategory("BOISSONS");
-    simpleProduct = seedSimpleProduct(category, "SUCRE 1 KG");
-    transformableProduct = seedTransformableProduct(category, "CHOCOPAIN 5 KG");
-    initializeStock(simpleProduct.id, {
-      productId: simpleProduct.id,
-      quantities: [{ form: "SAC", quantity: 20 }]
-    });
-    initializeStock(transformableProduct.id, {
-      productId: transformableProduct.id,
-      quantities: [
-        { form: "CARTON", quantity: 10 },
-        { form: "SEAU", quantity: 2 }
-      ]
-    });
+    seedSystemSupplier();
   });
   after(() => {
     closeTestDatabase();
   });
-  describe3("cr\xE9ation", () => {
-    it("enregistre un approvisionnement avec une seule ligne", () => {
-      const supply = createSupply({
-        date: "2026-10-04",
-        supplierName: "Grossiste Sokna",
-        items: [line(simpleProduct, "SAC", 10, 2500)]
-      });
-      assert2.equal(supply.reference, "APP-000001");
-      assert2.equal(supply.itemCount, 1);
-      assert2.equal(supply.totalAmount, 25e3);
-      assert2.equal(supply.supplierName, "Grossiste Sokna");
-      assert2.equal(supply.items.length, 1);
-      assert2.deepEqual(
-        {
-          productId: supply.items[0].productId,
-          productName: supply.items[0].productName,
-          form: supply.items[0].form,
-          quantity: supply.items[0].quantity,
-          purchaseUnitPrice: supply.items[0].purchaseUnitPrice,
-          lineTotal: supply.items[0].lineTotal
-        },
-        {
-          productId: simpleProduct.id,
-          productName: "SUCRE 1 KG",
-          form: "SAC",
-          quantity: 10,
-          purchaseUnitPrice: 2500,
-          lineTotal: 25e3
-        }
-      );
-    });
-    it("enregistre un approvisionnement avec plusieurs produits", () => {
-      const sucre = seedSimpleProduct(category, "SUCRE 50 KG");
-      const riz = seedSimpleProduct(category, "RIZ 25 KG");
-      initializeStock(sucre.id, {
-        productId: sucre.id,
-        quantities: [{ form: "SAC", quantity: 1 }]
-      });
-      initializeStock(riz.id, {
-        productId: riz.id,
-        quantities: [{ form: "SAC", quantity: 1 }]
-      });
-      const supply = createSupply({
-        date: "2026-10-04",
-        items: [
-          line(sucre, "SAC", 10, 15e3),
-          line(simpleProduct, "SAC", 20, 4500),
-          line(riz, "SAC", 5, 12e3)
-        ]
-      });
-      assert2.equal(supply.itemCount, 3);
-      assert2.equal(supply.items.length, 3);
-      assert2.equal(supply.totalAmount, 3e5);
-      assert2.deepEqual(
-        supply.items.map((item) => item.lineTotal),
-        [15e4, 9e4, 6e4]
-      );
-    });
-    it("g\xE9n\xE8re la r\xE9f\xE9rence automatiquement et s\xE9quentiellement", () => {
-      const first = createSupply({
-        date: "2026-10-04",
-        items: [line(simpleProduct, "SAC", 1, 100)]
-      });
-      const second = createSupply({
-        date: "2026-10-05",
-        items: [line(simpleProduct, "SAC", 1, 100)]
-      });
-      const third = createSupply({
-        items: [line(simpleProduct, "SAC", 1, 100)]
-      });
-      assert2.deepEqual(
-        [first.reference, second.reference, third.reference],
-        ["APP-000001", "APP-000002", "APP-000003"]
-      );
-      assert2.ok(third.date instanceof Date);
-    });
-    it("garde une r\xE9f\xE9rence unique et l'interdit en base", () => {
-      const first = createSupply({
-        date: "2026-10-04",
-        items: [line(simpleProduct, "SAC", 1, 100)]
-      });
-      const second = createSupply({
-        date: "2026-10-05",
-        items: [line(simpleProduct, "SAC", 2, 100)]
-      });
-      assert2.notEqual(first.reference, second.reference);
-      assert2.equal(
-        new Set(listSupplies().map((supply) => supply.reference)).size,
-        2
-      );
-      assert2.throws(
-        () => getDb().insert(supplies).values({
-          reference: "APP-000001",
-          date: new Date(2026, 9, 4),
-          totalAmount: 0,
-          createdAt: /* @__PURE__ */ new Date()
-        }).run()
-      );
-    });
-    it("calcule le total \xE0 partir des lignes et jamais depuis la saisie", () => {
-      const supply = createSupply({
-        date: "2026-10-04",
-        items: [
-          line(transformableProduct, "CARTON", 10, 1e4),
-          line(transformableProduct, "SEAU", 4, 2500)
-        ]
-      });
-      const sumOfLines = supply.items.reduce((sum, item) => sum + item.lineTotal, 0);
-      assert2.equal(sumOfLines, 11e4);
-      assert2.equal(supply.totalAmount, sumOfLines);
-      const storedTotal = getDb().select({ total: supplies.totalAmount }).from(supplies).get();
-      assert2.equal(storedTotal?.total, 11e4);
-    });
-    it("calcule correctement chaque total de ligne", () => {
-      const supply = createSupply({
-        date: "2026-10-04",
-        items: [
-          line(transformableProduct, "CARTON", 10, 1e4),
-          line(transformableProduct, "SEAU", 3, 2500),
-          line(simpleProduct, "SAC", 7, 999)
-        ]
-      });
-      assert2.deepEqual(
-        supply.items.map((item) => [
-          item.quantity,
-          item.purchaseUnitPrice,
-          item.lineTotal
-        ]),
-        [
-          [10, 1e4, 1e5],
-          [3, 2500, 7500],
-          [7, 999, 6993]
-        ]
-      );
-      assert2.equal(supply.totalAmount, 114493);
-    });
-    it("accepte un prix d'achat \xE0 0 et normalise la forme saisie", () => {
-      const supply = createSupply({
-        date: "2026-10-04",
-        items: [line(simpleProduct, "  sac ", 2, 0)]
-      });
-      assert2.equal(supply.items[0].form, "SAC");
-      assert2.equal(supply.items[0].purchaseUnitPrice, 0);
-      assert2.equal(supply.items[0].lineTotal, 0);
-      assert2.equal(supply.totalAmount, 0);
-      assert2.equal(balanceOf(simpleProduct.id, "SAC"), 22);
-    });
-    it("refuse une date invalide ou hors plage", () => {
-      expectSupplyError(
-        "dateInvalid",
-        () => createSupply({ date: "04/10/2026", items: [line(simpleProduct, "SAC", 1, 100)] })
-      );
-      expectSupplyError(
-        "dateInvalid",
-        () => createSupply({ date: "2026-02-31", items: [line(simpleProduct, "SAC", 1, 100)] })
-      );
-      expectSupplyError(
-        "dateOutOfRange",
-        () => createSupply({ date: "1999-12-31", items: [line(simpleProduct, "SAC", 1, 100)] })
-      );
-      assert2.equal(supplyCount(), 0);
-      assert2.equal(itemCount(), 0);
-    });
+  it("expose les canaux attendus", () => {
+    const channels = registeredChannels();
+    for (const channel of [
+      "suppliers:list",
+      "suppliers:get",
+      "suppliers:create",
+      "suppliers:update",
+      "suppliers:set-active",
+      "suppliers:is-name-available",
+      "suppliers:is-phone-available",
+      "suppliers:ensure-system"
+    ]) {
+      assert2.ok(channels.includes(channel), `missing channel ${channel}`);
+    }
   });
-  describe3("produits", () => {
-    it("refuse un produit inexistant", () => {
-      expectSupplyError(
-        "productNotFound",
-        () => createSupply({
-          date: "2026-10-04",
-          items: [{ productId: 4242, form: "SAC", quantity: 1, purchaseUnitPrice: 100 }]
-        })
-      );
-      assert2.equal(supplyCount(), 0);
-      assert2.equal(itemCount(), 0);
-      assert2.equal(movementCount(), 3);
+  it("cr\xE9e, liste et lit un fournisseur", () => {
+    const created = invokeSupplier("suppliers:create", {
+      name: "Grossiste Sokna",
+      phone: "771234567",
+      address: "Dakar"
     });
-    it("refuse un produit inactif", () => {
-      setProductActive(transformableProduct.id, false);
-      expectSupplyError(
-        "productInactive",
-        () => createSupply({
-          date: "2026-10-04",
-          items: [line(transformableProduct, "CARTON", 5, 1e4)]
-        })
-      );
-      assert2.equal(supplyCount(), 0);
-      assert2.equal(balanceOf(transformableProduct.id, "CARTON"), 10);
-    });
-    it("accepte un produit simple dans sa forme unique", () => {
-      const supply = createSupply({
-        date: "2026-10-04",
-        items: [line(simpleProduct, "SAC", 5, 2e3)]
-      });
-      assert2.equal(supply.items[0].form, "SAC");
-      assert2.equal(balanceOf(simpleProduct.id, "SAC"), 25);
-    });
-    it("accepte un produit transformable dans sa forme principale ou secondaire", () => {
-      createSupply({
-        date: "2026-10-04",
-        items: [line(transformableProduct, "CARTON", 5, 1e4)]
-      });
-      assert2.equal(balanceOf(transformableProduct.id, "CARTON"), 15);
-      assert2.equal(balanceOf(transformableProduct.id, "SEAU"), 2);
-      createSupply({
-        date: "2026-10-04",
-        items: [line(transformableProduct, "SEAU", 5, 2500)]
-      });
-      assert2.equal(balanceOf(transformableProduct.id, "SEAU"), 7);
-      assert2.equal(balanceOf(transformableProduct.id, "CARTON"), 15);
-    });
-    it("refuse une forme qui n'appartient pas au produit", () => {
-      expectSupplyError(
-        "formInvalid",
-        () => createSupply({
-          date: "2026-10-04",
-          items: [line(simpleProduct, "CARTON", 5, 1e4)]
-        })
-      );
-      expectSupplyError(
-        "formInvalid",
-        () => createSupply({
-          date: "2026-10-04",
-          items: [line(transformableProduct, "BIDON", 5, 1e4)]
-        })
-      );
-      expectSupplyError(
-        "formInvalid",
-        () => createSupply({
-          date: "2026-10-04",
-          items: [line(transformableProduct, "CARTON", 5, 1e4), line(transformableProduct, "BIDON", 1, 1e4)]
-        })
-      );
-      assert2.equal(supplyCount(), 0);
-      assert2.equal(itemCount(), 0);
-      assert2.equal(movementCount(), 3);
-    });
-    it("approvisionne un produit sans aucun mouvement, sans initialisation pr\xE9alable", () => {
-      const newProduct = seedSimpleProduct(category, "RIZ 25 KG");
-      assert2.equal(balanceOf(newProduct.id, "SAC"), 0);
-      const supply = createSupply({
-        date: "2026-10-04",
-        items: [line(newProduct, "SAC", 20, 4e3)]
-      });
-      assert2.equal(supply.reference, "APP-000001");
-      assert2.equal(balanceOf(newProduct.id, "SAC"), 20);
-      const movements = listProductMovements(newProduct.id);
-      assert2.equal(movements.length, 1);
-      assert2.deepEqual(
-        [movements[0].movementType, movements[0].direction, movements[0].quantity],
-        ["APPROVISIONNEMENT", "IN", 20]
-      );
-      assert2.equal(
-        movements.filter((movement) => movement.movementType === "STOCK_INITIAL").length,
-        0
-      );
-    });
-    it("approvisionne un produit transformable sans mouvement, forme par forme", () => {
-      const product = seedTransformableProduct(category, "CHOCOPAIN 2 KG");
-      assert2.deepEqual(
-        getProductStock(product.id).map((level) => [level.form, level.quantity]),
-        [
-          ["CARTON", 0],
-          ["SEAU", 0]
-        ]
-      );
-      createSupply({
-        date: "2026-10-04",
-        items: [line(product, "CARTON", 5, 1e4)]
-      });
-      assert2.equal(balanceOf(product.id, "CARTON"), 5);
-      assert2.equal(balanceOf(product.id, "SEAU"), 0);
-      createSupply({
-        date: "2026-10-05",
-        items: [line(product, "SEAU", 8, 2500)]
-      });
-      assert2.equal(balanceOf(product.id, "CARTON"), 5);
-      assert2.equal(balanceOf(product.id, "SEAU"), 8);
-      assert2.equal(
-        listProductMovements(product.id).filter(
-          (movement) => movement.movementType === "STOCK_INITIAL"
-        ).length,
-        0
-      );
-    });
-    it("cumule plusieurs approvisionnements sur un produit sans mouvement", () => {
-      const product = seedSimpleProduct(category, "RIZ 25 KG");
-      createSupply({
-        date: "2026-10-04",
-        items: [line(product, "SAC", 20, 4e3)]
-      });
-      createSupply({
-        date: "2026-10-05",
-        items: [line(product, "SAC", 15, 4e3)]
-      });
-      assert2.equal(balanceOf(product.id, "SAC"), 35);
-      assert2.equal(listProductMovements(product.id).length, 2);
-    });
-    it("cumule stock initial et approvisionnement", () => {
-      const product = seedSimpleProduct(category, "RIZ 25 KG");
-      initializeStock(product.id, {
-        productId: product.id,
-        quantities: [{ form: "SAC", quantity: 50 }]
-      });
-      createSupply({
-        date: "2026-10-04",
-        items: [line(product, "SAC", 20, 4e3)]
-      });
-      assert2.equal(balanceOf(product.id, "SAC"), 70);
-    });
-    it("refuse une initialisation apr\xE8s un approvisionnement, sans toucher au stock", () => {
-      const product = seedSimpleProduct(category, "RIZ 25 KG");
-      createSupply({
-        date: "2026-10-04",
-        items: [line(product, "SAC", 20, 4e3)]
-      });
-      expectStockError(
-        "alreadyHasMovements",
-        () => initializeStock(product.id, {
-          productId: product.id,
-          quantities: [{ form: "SAC", quantity: 50 }]
-        })
-      );
-      assert2.equal(balanceOf(product.id, "SAC"), 20);
-      assert2.equal(supplyCount(), 1);
-    });
-    it("refuse un approvisionnement sans ligne", () => {
-      expectSupplyError("itemsRequired", () => createSupply({ date: "2026-10-04", items: [] }));
-      expectSupplyError(
-        "itemsRequired",
-        () => createSupply({ date: "2026-10-04" })
-      );
-      assert2.equal(supplyCount(), 0);
-    });
+    assert2.equal(created.success, true);
+    const supplier = created.success ? created.data : {};
+    assert2.equal(supplier.name, "GROSSISTE SOKNA");
+    assert2.equal(supplier.phone, "+221771234567");
+    assert2.equal(supplier.isActive, true);
+    assert2.equal(supplier.isSystem, false);
+    const listed = invokeSupplier("suppliers:list");
+    assert2.equal(listed.success, true);
+    assert2.equal(listed.success ? listed.data.length : 0, 2);
+    const fetched = invokeSupplier("suppliers:get", supplier.id);
+    assert2.equal(fetched.success, true);
+    assert2.equal(fetched.success ? fetched.data.name : "", "GROSSISTE SOKNA");
   });
-  describe3("quantit\xE9s et prix", () => {
-    it("refuse une quantit\xE9 nulle ou n\xE9gative", () => {
-      expectSupplyError(
-        "quantityInvalid",
-        () => createSupply({ date: "2026-10-04", items: [line(simpleProduct, "SAC", 0, 2500)] })
-      );
-      expectSupplyError(
-        "quantityInvalid",
-        () => createSupply({ date: "2026-10-04", items: [line(simpleProduct, "SAC", -5, 2500)] })
-      );
-      assert2.equal(supplyCount(), 0);
-    });
-    it("refuse une quantit\xE9 non enti\xE8re ou absente", () => {
-      expectSupplyError(
-        "quantityInvalid",
-        () => createSupply({ date: "2026-10-04", items: [line(simpleProduct, "SAC", 1.5, 2500)] })
-      );
-      expectSupplyError(
-        "quantityRequired",
-        () => createSupply({
-          date: "2026-10-04",
-          items: [
-            {
-              productId: simpleProduct.id,
-              form: "SAC",
-              quantity: void 0,
-              purchaseUnitPrice: 2500
-            }
-          ]
-        })
-      );
-      assert2.equal(supplyCount(), 0);
-    });
-    it("refuse un prix n\xE9gatif ou invalide et accepte 0", () => {
-      expectSupplyError(
-        "unitPriceInvalid",
-        () => createSupply({ date: "2026-10-04", items: [line(simpleProduct, "SAC", 5, -1)] })
-      );
-      expectSupplyError(
-        "unitPriceInvalid",
-        () => createSupply({ date: "2026-10-04", items: [line(simpleProduct, "SAC", 5, 1.5)] })
-      );
-      expectSupplyError(
-        "unitPriceRequired",
-        () => createSupply({
-          date: "2026-10-04",
-          items: [
-            {
-              productId: simpleProduct.id,
-              form: "SAC",
-              quantity: 5,
-              purchaseUnitPrice: void 0
-            }
-          ]
-        })
-      );
-      assert2.equal(supplyCount(), 0);
-      const supply = createSupply({
-        date: "2026-10-04",
-        items: [line(simpleProduct, "SAC", 5, 0)]
-      });
-      assert2.equal(supply.totalAmount, 0);
-    });
-    it("interdit une quantit\xE9 nulle et un prix n\xE9gatif au niveau SQL", () => {
-      const supply = createSupply({
-        date: "2026-10-04",
-        items: [line(simpleProduct, "SAC", 1, 100)]
-      });
-      assert2.throws(
-        () => getDb().insert(supplyItems).values({
-          supplyId: supply.id,
-          productId: simpleProduct.id,
-          form: "SAC",
-          quantity: 0,
-          purchaseUnitPrice: 100,
-          lineTotal: 0
-        }).run()
-      );
-      assert2.throws(
-        () => getDb().insert(supplyItems).values({
-          supplyId: supply.id,
-          productId: simpleProduct.id,
-          form: "SEAU",
-          quantity: 1,
-          purchaseUnitPrice: -100,
-          lineTotal: -100
-        }).run()
-      );
-      assert2.throws(
-        () => getDb().insert(supplies).values({ reference: "APP-999999", date: /* @__PURE__ */ new Date(), totalAmount: -1 }).run()
-      );
-      assert2.equal(itemCount(), 1);
-    });
+  it("cr\xE9e le fournisseur syst\xE8me automatiquement", () => {
+    const ensured = invokeSupplier("suppliers:ensure-system");
+    assert2.equal(ensured.success, true);
+    assert2.equal(ensured.success ? ensured.data.name : "", SYSTEM_SUPPLIER_NAME);
+    assert2.equal(ensured.success ? ensured.data.isSystem : false, true);
+    assert2.equal(ensured.success ? ensured.data.isActive : false, true);
+    assert2.equal(ensured.success ? ensured.data.phone : "", SYSTEM_SUPPLIER_PHONE);
   });
-  describe3("doublons", () => {
-    it("refuse deux lignes du m\xEAme produit dans la m\xEAme forme", () => {
-      expectSupplyError(
-        "duplicateLine",
-        () => createSupply({
-          date: "2026-10-04",
-          items: [
-            line(simpleProduct, "SAC", 10, 2500),
-            line(simpleProduct, "SAC", 5, 2500)
-          ]
-        })
-      );
-      assert2.equal(supplyCount(), 0);
-      assert2.equal(itemCount(), 0);
-      assert2.equal(balanceOf(simpleProduct.id, "SAC"), 20);
+  it("normalise le nom (majuscules, espaces) et le t\xE9l\xE9phone", () => {
+    const created = invokeSupplier("suppliers:create", {
+      name: "  grossiste  sokna  ",
+      phone: "77 123 45 67"
     });
-    it("accepte le m\xEAme produit dans deux formes diff\xE9rentes", () => {
-      const supply = createSupply({
-        date: "2026-10-04",
-        items: [
-          line(transformableProduct, "CARTON", 10, 1e4),
-          line(transformableProduct, "SEAU", 5, 2500)
-        ]
-      });
-      assert2.equal(supply.items.length, 2);
-      assert2.equal(balanceOf(transformableProduct.id, "CARTON"), 20);
-      assert2.equal(balanceOf(transformableProduct.id, "SEAU"), 7);
-    });
-    it("interdit le doublon au niveau SQL m\xEAme en contournant le service", () => {
-      const supply = createSupply({
-        date: "2026-10-04",
-        items: [line(simpleProduct, "SAC", 1, 100)]
-      });
-      assert2.throws(
-        () => getDb().insert(supplyItems).values({
-          supplyId: supply.id,
-          productId: simpleProduct.id,
-          form: "SAC",
-          quantity: 7,
-          purchaseUnitPrice: 100,
-          lineTotal: 700
-        }).run()
-      );
-      assert2.equal(itemCount(), 1);
-    });
+    assert2.equal(created.success, true);
+    assert2.equal(created.success ? created.data.name : "", "GROSSISTE SOKNA");
+    assert2.equal(created.success ? created.data.phone : "", "+221771234567");
   });
-  describe3("impact sur le stock", () => {
-    it("cr\xE9e un mouvement APPROVISIONNEMENT IN par ligne", () => {
-      createSupply({
-        date: "2026-10-04",
-        items: [
-          line(transformableProduct, "CARTON", 10, 1e4),
-          line(transformableProduct, "SEAU", 5, 2500)
-        ]
-      });
-      const movements = listProductMovements(transformableProduct.id).filter(
-        (movement) => movement.movementType === "APPROVISIONNEMENT"
-      );
-      assert2.equal(movements.length, 2);
-      for (const movement of movements) {
-        assert2.equal(movement.direction, "IN");
-        assert2.equal(movement.reason, null);
-        assert2.ok(movement.quantity > 0);
-      }
-      assert2.deepEqual(
-        movements.map((movement) => [movement.form, movement.quantity, movement.signedQuantity]),
-        // Both movements share the same created_at: the id breaks the tie and the
-        // most recent insert comes first.
-        [
-          ["SEAU", 5, 5],
-          ["CARTON", 10, 10]
-        ]
-      );
-    });
-    it("conserve le prix d'achat r\xE9el de chaque document", () => {
-      createSupply({
-        date: "2026-10-04",
-        items: [line(transformableProduct, "CARTON", 10, 1e4)]
-      });
-      createSupply({
-        date: "2026-10-05",
-        items: [line(transformableProduct, "CARTON", 5, 10500)]
-      });
-      const [second, first] = listSupplies();
-      assert2.equal(second.totalAmount, 52500);
-      assert2.equal(first.totalAmount, 1e5);
-      const firstDetail = getSupplyById(first.id);
-      assert2.equal(firstDetail.items[0].purchaseUnitPrice, 1e4);
-      assert2.equal(firstDetail.items[0].lineTotal, 1e5);
-    });
-    it("cumule stock initial, approvisionnement et ajustement", () => {
-      createSupply({
-        date: "2026-10-04",
-        items: [line(transformableProduct, "CARTON", 5, 1e4)]
-      });
-      assert2.equal(balanceOf(transformableProduct.id, "CARTON"), 15);
-      adjustStock(transformableProduct.id, {
-        productId: transformableProduct.id,
-        form: "CARTON",
-        direction: "OUT",
-        quantity: 1,
-        reason: "Produit endommag\xE9"
-      });
-      assert2.equal(balanceOf(transformableProduct.id, "CARTON"), 14);
-      assert2.equal(movementCount(), 5);
-      const history = listProductMovements(transformableProduct.id);
-      assert2.deepEqual(
-        history.map((movement) => [movement.movementType, movement.signedQuantity]),
-        [
-          ["AJUSTEMENT", -1],
-          ["APPROVISIONNEMENT", 5],
-          ["STOCK_INITIAL", 2],
-          ["STOCK_INITIAL", 10]
-        ]
-      );
-    });
-    it("garde un stock positif apr\xE8s un approvisionnement sans initialisation", () => {
-      const product = seedSimpleProduct(category, "RIZ 25 KG");
-      createSupply({
-        date: "2026-10-04",
-        items: [line(product, "SAC", 20, 4e3)]
-      });
-      expectStockError(
-        "insufficientStock",
-        () => adjustStock(product.id, {
-          productId: product.id,
-          form: "SAC",
-          direction: "OUT",
-          quantity: 21,
-          reason: "Sortie excessive"
-        })
-      );
-      adjustStock(product.id, {
-        productId: product.id,
-        form: "SAC",
-        direction: "OUT",
-        quantity: 20,
-        reason: "Rupture de stock"
-      });
-      assert2.equal(balanceOf(product.id, "SAC"), 0);
-      assert2.deepEqual(
-        listProductMovements(product.id).map((movement) => [
-          movement.movementType,
-          movement.direction,
-          movement.signedQuantity
-        ]),
-        [
-          ["AJUSTEMENT", "OUT", -20],
-          ["APPROVISIONNEMENT", "IN", 20]
-        ]
-      );
-    });
-    it("ne modifie jamais le prix d'achat du produit", () => {
-      createSupply({
-        date: "2026-10-04",
-        items: [line(transformableProduct, "CARTON", 10, 1e4)]
-      });
-      assert2.equal(getProductById(transformableProduct.id).purchasePrice, 12e3);
-      assert2.equal(getSupplyById(1).items[0].purchaseUnitPrice, 1e4);
-    });
-    it("refuse un mouvement APPROVISIONNEMENT sortant au niveau SQL", () => {
-      assert2.throws(
-        () => getDb().insert(stockMovements).values({
-          productId: transformableProduct.id,
-          form: "CARTON",
-          movementType: "APPROVISIONNEMENT",
-          direction: "OUT",
-          quantity: 1
-        }).run()
-      );
-      assert2.throws(
-        () => getDb().insert(stockMovements).values({
-          productId: transformableProduct.id,
-          form: "CARTON",
-          // A type of a module that does not exist yet: only the SQL CHECK can
-          // refuse it, the TypeScript union already does.
-          movementType: "VENTE",
-          direction: "OUT",
-          quantity: 1
-        }).run()
-      );
-      assert2.equal(balanceOf(transformableProduct.id, "CARTON"), 10);
-    });
+  it("d\xE9tecte un doublon de nom \xE0 la cr\xE9ation", () => {
+    seedSimpleSupplier("Grossiste Sokna");
+    assert2.equal(
+      expectFailure("suppliers:create", { name: "grossiste sokna", phone: "770000001" }),
+      SUPPLIER_ERRORS.duplicateName
+    );
+    assert2.equal(
+      expectFailure("suppliers:create", { name: "  GROSSISTE  SOKNA ", phone: "770000002" }),
+      SUPPLIER_ERRORS.duplicateName
+    );
   });
-  describe3("transaction", () => {
-    it("annule tout si un mouvement de stock \xE9choue", () => {
-      execSql(`
-        CREATE TRIGGER test_fail_second_supply_movement
-        BEFORE INSERT ON stock_movements
-        WHEN (SELECT count(*) FROM stock_movements) > 2
-        BEGIN
-          SELECT RAISE(ABORT, 'injected failure');
-        END;
-      `);
-      try {
-        assert2.throws(
-          () => createSupply({
-            date: "2026-10-04",
-            items: [
-              line(transformableProduct, "CARTON", 5, 1e4),
-              line(transformableProduct, "SEAU", 5, 2500)
-            ]
-          })
-        );
-      } finally {
-        execSql("DROP TRIGGER test_fail_second_supply_movement");
-      }
-      assert2.equal(supplyCount(), 0);
-      assert2.equal(itemCount(), 0);
-      assert2.equal(movementCount(), 3);
-      assert2.equal(balanceOf(transformableProduct.id, "CARTON"), 10);
-      assert2.equal(balanceOf(transformableProduct.id, "SEAU"), 2);
-      const supply = createSupply({
-        date: "2026-10-04",
-        items: [line(transformableProduct, "CARTON", 5, 1e4)]
-      });
-      assert2.equal(supply.reference, "APP-000001");
-      assert2.equal(balanceOf(transformableProduct.id, "CARTON"), 15);
-    });
-    it("annule tout si une ligne \xE9choue", () => {
-      execSql(`
-        CREATE TRIGGER test_fail_second_supply_item
-        BEFORE INSERT ON supply_items
-        WHEN (SELECT count(*) FROM supply_items) > 0
-        BEGIN
-          SELECT RAISE(ABORT, 'injected failure');
-        END;
-      `);
-      try {
-        assert2.throws(
-          () => createSupply({
-            date: "2026-10-04",
-            items: [
-              line(transformableProduct, "CARTON", 5, 1e4),
-              line(transformableProduct, "SEAU", 5, 2500)
-            ]
-          })
-        );
-      } finally {
-        execSql("DROP TRIGGER test_fail_second_supply_item");
-      }
-      assert2.equal(supplyCount(), 0);
-      assert2.equal(itemCount(), 0);
-      assert2.equal(movementCount(), 3);
-      assert2.equal(balanceOf(transformableProduct.id, "CARTON"), 10);
-    });
-    it("n'\xE9crit ni approvisionnement ni mouvement si un produit est inactif", () => {
-      const other = seedSimpleProduct(category, "SAVON");
-      initializeStock(other.id, {
-        productId: other.id,
-        quantities: [{ form: "SAC", quantity: 5 }]
-      });
-      setProductActive(other.id, false);
-      expectSupplyError(
-        "productInactive",
-        () => createSupply({
-          date: "2026-10-04",
-          items: [
-            line(simpleProduct, "SAC", 5, 2e3),
-            line(other, "SAC", 5, 1e3)
-          ]
-        })
-      );
-      assert2.equal(supplyCount(), 0);
-      assert2.equal(itemCount(), 0);
-      assert2.equal(movementCount(), 4);
-      assert2.equal(balanceOf(simpleProduct.id, "SAC"), 20);
-    });
+  it("d\xE9tecte un doublon de t\xE9l\xE9phone \xE0 la cr\xE9ation", () => {
+    seedSimpleSupplier("Grossiste Sokna", "771234567");
+    assert2.equal(
+      expectFailure("suppliers:create", { name: "Autre Fournisseur", phone: "+221771234567" }),
+      SUPPLIER_ERRORS.duplicatePhone
+    );
   });
-  describe3("lecture", () => {
-    it("liste les documents du plus r\xE9cent au plus ancien", () => {
-      createSupply({
-        date: "2026-10-03",
-        items: [line(simpleProduct, "SAC", 2, 1e3)]
-      });
-      createSupply({
-        date: "2026-10-04",
-        items: [
-          line(transformableProduct, "CARTON", 10, 1e4),
-          line(simpleProduct, "SAC", 5, 2e3)
-        ]
-      });
-      const list = listSupplies();
-      assert2.deepEqual(
-        list.map((supply) => [supply.reference, supply.itemCount, supply.totalAmount]),
-        [
-          ["APP-000002", 2, 11e4],
-          ["APP-000001", 1, 2e3]
-        ]
-      );
-    });
-    it("filtre la liste par r\xE9f\xE9rence et par fournisseur", () => {
-      createSupply({
-        date: "2026-10-03",
-        supplierName: "Grossiste Sokna",
-        items: [line(simpleProduct, "SAC", 2, 1e3)]
-      });
-      createSupply({
-        date: "2026-10-04",
-        supplierName: "D\xE9p\xF4t Lat Dior",
-        items: [line(transformableProduct, "CARTON", 10, 1e4)]
-      });
-      assert2.deepEqual(
-        listSupplies({ search: "app-000002" }).map((supply) => supply.reference),
-        ["APP-000002"]
-      );
-      assert2.deepEqual(
-        listSupplies({ supplierSearch: "sokna" }).map((supply) => supply.reference),
-        ["APP-000001"]
-      );
-      assert2.deepEqual(
-        listSupplies({ supplierSearch: "zzz" }),
-        []
-      );
-    });
-    it("relit un document par identifiant et par r\xE9f\xE9rence", () => {
-      const created = createSupply({
-        date: "2026-10-04",
-        items: [line(simpleProduct, "SAC", 2, 1e3)]
-      });
-      assert2.deepEqual(getSupplyById(created.id).items, created.items);
-      assert2.deepEqual(
-        getSupplyByReference("app-000001").items,
-        created.items
-      );
-      expectSupplyError("notFound", () => getSupplyById(4242));
-      expectSupplyError("notFound", () => getSupplyById(0));
-      expectSupplyError("notFound", () => getSupplyByReference("APP-999999"));
-    });
-    it("affiche la date de r\xE9ception choisie", () => {
-      const supply = createSupply({
-        date: "2026-10-04",
-        items: [line(simpleProduct, "SAC", 1, 100)]
-      });
-      const listed = listSupplies()[0];
-      assert2.equal(supply.date.getFullYear(), 2026);
-      assert2.equal(supply.date.getMonth(), 9);
-      assert2.equal(supply.date.getDate(), 4);
-      assert2.equal(listed.date.getTime(), supply.date.getTime());
-    });
+  it("valide les champs obligatoires et le format de t\xE9l\xE9phone", () => {
+    assert2.equal(
+      expectFailure("suppliers:create", { name: "", phone: "771234567" }),
+      SUPPLIER_ERRORS.nameRequired
+    );
+    assert2.equal(
+      expectFailure("suppliers:create", { name: "AB", phone: "" }),
+      SUPPLIER_ERRORS.phoneRequired
+    );
+    assert2.equal(
+      expectFailure("suppliers:create", { name: "ABC", phone: "123" }),
+      SUPPLIER_ERRORS.phoneInvalid
+    );
   });
-  describe3("persistance", () => {
-    it("conserve le document, ses lignes et le stock apr\xE8s r\xE9ouverture", () => {
-      createSupply({
-        date: "2026-10-04",
-        supplierName: "Grossiste Sokna",
-        items: [
-          line(transformableProduct, "CARTON", 10, 1e4),
-          line(simpleProduct, "SAC", 4, 2500)
-        ]
-      });
-      reopenTestDatabase();
-      const supply = getSupplyByReference("APP-000001");
-      assert2.equal(supply.reference, "APP-000001");
-      assert2.equal(supply.supplierName, "Grossiste Sokna");
-      assert2.equal(supply.items.length, 2);
-      assert2.equal(supply.totalAmount, 11e4);
-      assert2.equal(balanceOf(transformableProduct.id, "CARTON"), 20);
-      assert2.equal(balanceOf(simpleProduct.id, "SAC"), 24);
-      const history = listProductMovements(transformableProduct.id);
-      assert2.equal(
-        history.filter((movement) => movement.movementType === "APPROVISIONNEMENT").length,
-        1
-      );
-      const next = createSupply({
-        date: "2026-10-05",
-        items: [line(simpleProduct, "SAC", 1, 2500)]
-      });
-      assert2.equal(next.reference, "APP-000002");
+  it("refuse de cr\xE9er un fournisseur nomm\xE9 comme le fournisseur syst\xE8me", () => {
+    assert2.equal(
+      expectFailure("suppliers:create", { name: SYSTEM_SUPPLIER_NAME, phone: "770000003" }),
+      SUPPLIER_ERRORS.duplicateName
+    );
+  });
+  it("active et d\xE9sactive un fournisseur", () => {
+    const supplier = seedSimpleSupplier();
+    const deactivated = invokeSupplier("suppliers:set-active", supplier.id, false);
+    assert2.equal(deactivated.success, true);
+    assert2.equal(deactivated.success ? deactivated.data.isActive : true, false);
+    const inactive = invokeSupplier("suppliers:list", { isActive: false });
+    assert2.equal(inactive.success, true);
+    assert2.equal(inactive.success ? inactive.data.length : 0, 1);
+    assert2.equal(inactive.success ? inactive.data[0].id : 0, supplier.id);
+    const reactivated = invokeSupplier("suppliers:set-active", supplier.id, true);
+    assert2.equal(reactivated.success, true);
+    assert2.equal(reactivated.success ? reactivated.data.isActive : false, true);
+  });
+  it("filtre la liste par statut et par recherche", () => {
+    seedSimpleSupplier("Grossiste Sokna", "771112233");
+    const other = seedSimpleSupplier("D\xE9p\xF4t Lat Dior", "772223344");
+    const active = invokeSupplier("suppliers:list", { isActive: true });
+    assert2.equal(active.success, true);
+    assert2.equal(active.success ? active.data.length : 0, 3);
+    const found = invokeSupplier("suppliers:list", { search: "lat dior" });
+    assert2.equal(found.success, true);
+    assert2.deepEqual(
+      found.success ? found.data.map((s) => s.id) : [],
+      [other.id]
+    );
+    const phoneSearch = invokeSupplier("suppliers:list", { phoneSearch: "7711" });
+    assert2.equal(phoneSearch.success, true);
+    assert2.equal(phoneSearch.success ? phoneSearch.data.length : 0, 1);
+  });
+  it("modifie un fournisseur existant", () => {
+    const supplier = seedSimpleSupplier("Grossiste Sokna", "771112233");
+    const updated = invokeSupplier("suppliers:update", supplier.id, {
+      name: "Grossiste Sokna SARL",
+      phone: "771234567",
+      address: "Pikine"
     });
+    assert2.equal(updated.success, true);
+    assert2.equal(updated.success ? updated.data.name : "", "GROSSISTE SOKNA SARL");
+    assert2.equal(updated.success ? updated.data.phone : "", "+221771234567");
+    assert2.equal(updated.success ? updated.data.address : "", "Pikine");
+  });
+  it("conserve son nom propre lors d\u2019une modification sans conflit", () => {
+    const supplier = seedSimpleSupplier("Grossiste Sokna");
+    assert2.equal(isAvailable("suppliers:is-name-available", "GROSSISTE SOKNA", supplier.id), true);
+    assert2.equal(isAvailable("suppliers:is-name-available", "Autre Nom", supplier.id), true);
+    assert2.equal(isAvailable("suppliers:is-name-available", "autre nom"), true);
+    assert2.equal(isAvailable("suppliers:is-name-available", "grossiste sokna"), false);
+    assert2.equal(
+      isAvailable("suppliers:is-name-available", "grossiste sokna", supplier.id),
+      true
+    );
+  });
+  it("v\xE9rifie la disponibilit\xE9 du t\xE9l\xE9phone", () => {
+    assert2.equal(isAvailable("suppliers:is-phone-available", "771234567"), true);
+    assert2.equal(isAvailable("suppliers:is-phone-available", "77 123 45 67"), true);
+    assert2.equal(isAvailable("suppliers:is-phone-available", "+221771234567"), true);
+    const supplier = seedSimpleSupplier("Grossiste Sokna", "771234567");
+    assert2.equal(isAvailable("suppliers:is-phone-available", "771234567"), false);
+    assert2.equal(
+      isAvailable("suppliers:is-phone-available", "771234567", supplier.id),
+      true
+    );
+  });
+  it("refuse de modifier ou d\xE9sactiver le fournisseur syst\xE8me", () => {
+    const system = seedSystemSupplier();
+    assert2.equal(
+      expectFailure("suppliers:update", system.id, { name: "Autre", phone: "7700000001" }),
+      SUPPLIER_ERRORS.systemSupplierImmutable
+    );
+    assert2.equal(
+      expectFailure("suppliers:set-active", system.id, false),
+      SUPPLIER_ERRORS.systemSupplierCannotDeactivate
+    );
+  });
+  it("ne casse pas les canaux existants", () => {
+    const suppliers2 = invokeSupplier("suppliers:list");
+    const supplies2 = invokeSupplier("supplies:list");
+    assert2.equal(suppliers2.success, true);
+    assert2.equal(supplies2.success, true);
+  });
+});
+describe3("service supplier backend", () => {
+  it("SupplierError porte le code et le message m\xE9tier", () => {
+    const error62 = new SupplierError("duplicateName");
+    assert2.equal(error62.code, "duplicateName");
+    assert2.equal(error62.message, SUPPLIER_ERRORS.duplicateName);
+    assert2.equal(error62.name, "SupplierError");
   });
 });

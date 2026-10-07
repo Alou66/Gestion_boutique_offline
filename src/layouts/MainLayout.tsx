@@ -9,8 +9,10 @@ interface MainLayoutProps {
 
 const NAV_LINKS = [
   { to: '/dashboard', label: 'Tableau de bord' },
+  { to: '/caisse', label: 'Journal de caisse' },
   { to: '/categories', label: 'Catégories' },
   { to: '/clients', label: 'Mes Clients' },
+  { to: '/fournisseurs', label: 'Mes Fournisseurs' },
   { to: '/factures', label: 'Mes Factures' },
   { to: '/products', label: 'Produits' },
   { to: '/stock', label: 'Stock' },

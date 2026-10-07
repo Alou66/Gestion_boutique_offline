@@ -8,9 +8,9 @@ import {
 } from '../src/pages/supplies/supply-draft'
 import type { SupplyDraft } from '../src/pages/supplies/supply-draft'
 import {
+  CASH_SUPPLIER_VALUE,
   createEmptyDraft,
   SUPPLY_ITEMS_MAX,
-  SUPPLY_SUPPLIER_MAX_LENGTH,
   todayInputValue,
 } from '../src/pages/supplies/schemas/supply.schema'
 import type {
@@ -85,7 +85,7 @@ function buildEditor(overrides: Partial<SupplyItemDraft> = {}): SupplyItemDraft 
 function buildDraft(overrides: Partial<SupplyDraft> = {}): SupplyDraft {
   return {
     date: '2026-10-05',
-    supplierName: 'DISTRIB SAHEL',
+    supplierId: '1',
     lines: [buildLine()],
     editor: createEmptyDraft(),
     editingKey: null,
@@ -116,7 +116,7 @@ describe('brouillon d’approvisionnement en cours', () => {
       [STORAGE_KEY]: JSON.stringify(
         buildDraft({
           lines: [],
-          supplierName: '',
+          supplierId: '',
           editor: createEmptyDraft(),
         }),
       ),
@@ -137,7 +137,7 @@ describe('brouillon d’approvisionnement en cours', () => {
     const restored = readSupplyDraft()
 
     assert.equal(restored?.date, '2026-10-05')
-    assert.equal(restored?.supplierName, 'DISTRIB SAHEL')
+    assert.equal(restored?.supplierId, '1')
     assert.equal(restored?.editingKey, null)
     // lineTotal est recalculé, jamais cru tel quel.
     assert.deepEqual(restored?.lines, [
@@ -183,12 +183,11 @@ describe('brouillon d’approvisionnement en cours', () => {
     assert.equal(readSupplyDraft()?.lines.length, SUPPLY_ITEMS_MAX)
   })
 
-  it('élage un fournisseur trop long et ramène une date invalide au jour du jour', () => {
+  it('ramène une date invalide au jour du jour', () => {
     stubStorage({
       [STORAGE_KEY]: JSON.stringify(
         buildDraft({
           date: '2026-13-01',
-          supplierName: 'X'.repeat(SUPPLY_SUPPLIER_MAX_LENGTH + 10),
         }),
       ),
     })
@@ -196,7 +195,7 @@ describe('brouillon d’approvisionnement en cours', () => {
     const restored = readSupplyDraft()
 
     assert.equal(restored?.date, todayInputValue())
-    assert.equal(restored?.supplierName.length, SUPPLY_SUPPLIER_MAX_LENGTH)
+    assert.equal(restored?.supplierId, '1')
   })
 
   it('garde la ligne en cours de modification quand elle existe encore', () => {
@@ -239,7 +238,7 @@ describe('brouillon d’approvisionnement en cours', () => {
       [STORAGE_KEY]: JSON.stringify(
         buildDraft({
           lines: [],
-          supplierName: '',
+          supplierId: '',
           editor: buildEditor({
             productId: '1',
             form: '',
@@ -261,20 +260,20 @@ describe('brouillon d’approvisionnement en cours', () => {
       [STORAGE_KEY]: JSON.stringify(
         buildDraft({
           lines: [],
-          supplierName: 'MAGASIN CENTRAL',
+          supplierId: '7',
           editor: createEmptyDraft(),
         }),
       ),
     })
 
-    assert.equal(readSupplyDraft()?.supplierName, 'MAGASIN CENTRAL')
+    assert.equal(readSupplyDraft()?.supplierId, '7')
   })
 
   it('ignore les valeurs d’un type inattendu', () => {
     stubStorage({
       [STORAGE_KEY]: JSON.stringify({
         date: '2026-10-05',
-        supplierName: 42,
+        supplierId: 42,
         lines: [buildLine()],
         editor: createEmptyDraft(),
       }),
@@ -282,7 +281,7 @@ describe('brouillon d’approvisionnement en cours', () => {
 
     const restored = readSupplyDraft()
 
-    assert.equal(restored?.supplierName, '')
+    assert.equal(restored?.supplierId, CASH_SUPPLIER_VALUE)
     assert.equal(restored?.lines.length, 1)
   })
 
@@ -303,13 +302,13 @@ describe('contenu digne d’être restauré', () => {
     assert.equal(isMeaningfulSupplyDraft(null), false)
     assert.equal(
       isMeaningfulSupplyDraft(
-        buildDraft({ lines: [], supplierName: '' }),
+        buildDraft({ lines: [], supplierId: '' }),
       ),
       false,
     )
     assert.equal(
       isMeaningfulSupplyDraft(
-        buildDraft({ lines: [], supplierName: 'DISTRIB SAHEL' }),
+        buildDraft({ lines: [], supplierId: '1' }),
       ),
       true,
     )
@@ -317,7 +316,7 @@ describe('contenu digne d’être restauré', () => {
       isMeaningfulSupplyDraft(
         buildDraft({
           lines: [],
-          supplierName: '',
+          supplierId: '',
           editor: buildEditor({ quantity: '2' }),
         }),
       ),

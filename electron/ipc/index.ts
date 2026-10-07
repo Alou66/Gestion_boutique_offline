@@ -11,6 +11,7 @@ import { registerInvoiceIpcHandlers } from './invoices'
 import { registerPrintIpcHandlers } from './print'
 import { registerProductIpcHandlers } from './products'
 import { registerStockIpcHandlers } from './stock'
+import { registerSupplierIpcHandlers } from './suppliers'
 import { registerSupplyIpcHandlers } from './supplies'
 import { registerTransformationIpcHandlers } from './transformations'
 import type { SettingsInput } from '../types'
@@ -39,6 +40,7 @@ export function registerIpcHandlers(): void {
   registerSupplyIpcHandlers()
   registerTransformationIpcHandlers()
   registerClientIpcHandlers()
+  registerSupplierIpcHandlers()
   registerInvoiceIpcHandlers()
   registerPrintIpcHandlers()
 }

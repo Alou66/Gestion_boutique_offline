@@ -160,7 +160,7 @@ function CategoryForm({
             onChange={(event) => handleNameChange(event.target.value)}
             style={{ textTransform: 'uppercase' }}
             disabled={isSubmitting}
-            className="flex-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+            className="flex-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
           />
           {nameStatusIcon()}
         </div>

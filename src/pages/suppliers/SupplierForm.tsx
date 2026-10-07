@@ -1,48 +1,48 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import type { Client, ClientInput, ClientUpdateInput } from '@/types'
-import { clientService } from '@/services'
+import type { Supplier, SupplierInput, SupplierUpdateInput } from '@/types'
+import { supplierService } from '@/services'
 import {
-  CLIENT_MESSAGES,
-  CLIENT_NAME_MAX_LENGTH,
-  CLIENT_PHONE_MAX_LENGTH,
-  CLIENT_ADDRESS_MAX_LENGTH,
-  CLIENT_NAME_MIN_LENGTH,
-  CLIENT_PHONE_MIN_DIGITS,
-  clientSchema,
+  SUPPLIER_ADDRESS_MAX_LENGTH,
+  SUPPLIER_MESSAGES,
+  SUPPLIER_NAME_MAX_LENGTH,
+  SUPPLIER_NAME_MIN_LENGTH,
+  SUPPLIER_PHONE_MAX_LENGTH,
+  SUPPLIER_PHONE_MIN_DIGITS,
   isValidSenegalesePhone,
-} from './schemas/client.schema'
-import type { ClientFieldErrors } from './schemas/client.schema'
+  supplierSchema,
+} from './schemas/supplier.schema'
+import type { SupplierFieldErrors } from './schemas/supplier.schema'
 
-interface ClientFormProps {
+interface SupplierFormProps {
   title: string
   submitLabel: string
-  initialClient?: Client | null
+  initialSupplier?: Supplier | null
   isSubmitting: boolean
   error: string | null
-  onSubmit: (input: ClientInput | ClientUpdateInput) => void
+  onSubmit: (input: SupplierInput | SupplierUpdateInput) => void
   onCancel: () => void
 }
 
 const DEBOUNCE_MS = 400
 
-// Server-side duplicate error messages (from CLIENT_ERRORS in electron/services/clientService.ts)
-const SERVER_DUPLICATE_NAME = 'Ce nom de client existe déjà.'
+// Server-side duplicate error messages (from SUPPLIER_ERRORS in electron/services/supplierService.ts)
+const SERVER_DUPLICATE_NAME = 'Ce nom de fournisseur existe déjà.'
 const SERVER_DUPLICATE_PHONE = 'Ce numéro de téléphone est déjà utilisé.'
 
-function ClientForm({
+function SupplierForm({
   title,
   submitLabel,
-  initialClient = null,
+  initialSupplier = null,
   isSubmitting,
   error,
   onSubmit,
   onCancel,
-}: ClientFormProps) {
-  const [name, setName] = useState(initialClient?.name ?? '')
-  const [phone, setPhone] = useState(initialClient?.phone ?? '')
-  const [address, setAddress] = useState(initialClient?.address ?? '')
-  const [fieldErrors, setFieldErrors] = useState<ClientFieldErrors>({})
+}: SupplierFormProps) {
+  const [name, setName] = useState(initialSupplier?.name ?? '')
+  const [phone, setPhone] = useState(initialSupplier?.phone ?? '')
+  const [address, setAddress] = useState(initialSupplier?.address ?? '')
+  const [fieldErrors, setFieldErrors] = useState<SupplierFieldErrors>({})
   const [nameAvailability, setNameAvailability] = useState<'idle' | 'checking' | 'available' | 'taken' | 'error'>('idle')
   const [phoneAvailability, setPhoneAvailability] = useState<'idle' | 'checking' | 'available' | 'taken' | 'error'>('idle')
   const [formError, setFormError] = useState<string | null>(null)
@@ -51,7 +51,7 @@ function ClientForm({
   const phoneDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const checkNameAvailability = useCallback(async (value: string, excludeId?: number) => {
-    if (!value || value.trim().length < CLIENT_NAME_MIN_LENGTH) {
+    if (!value || value.trim().length < SUPPLIER_NAME_MIN_LENGTH) {
       setNameAvailability('idle')
       return
     }
@@ -59,8 +59,7 @@ function ClientForm({
     setNameAvailability('checking')
 
     try {
-      const available = await clientService.isNameAvailable(value.trim(), excludeId)
-      console.log('[ClientForm] available =', available, typeof available)
+      const available = await supplierService.isNameAvailable(value.trim(), excludeId)
       setNameAvailability(available ? 'available' : 'taken')
     } catch {
       setNameAvailability('error')
@@ -68,7 +67,7 @@ function ClientForm({
   }, [])
 
   const checkPhoneAvailability = useCallback(async (value: string, excludeId?: number) => {
-    if (!value || value.trim().length < CLIENT_PHONE_MIN_DIGITS) {
+    if (!value || value.trim().length < SUPPLIER_PHONE_MIN_DIGITS) {
       setPhoneAvailability('idle')
       return
     }
@@ -81,7 +80,7 @@ function ClientForm({
     setPhoneAvailability('checking')
 
     try {
-      const available = await clientService.isPhoneAvailable(value.trim(), excludeId)
+      const available = await supplierService.isPhoneAvailable(value.trim(), excludeId)
       setPhoneAvailability(available ? 'available' : 'taken')
     } catch {
       setPhoneAvailability('error')
@@ -97,7 +96,7 @@ function ClientForm({
     }
 
     nameDebounceRef.current = setTimeout(() => {
-      checkNameAvailability(value, initialClient?.id)
+      checkNameAvailability(value, initialSupplier?.id)
     }, DEBOUNCE_MS)
   }
 
@@ -110,7 +109,7 @@ function ClientForm({
     }
 
     phoneDebounceRef.current = setTimeout(() => {
-      checkPhoneAvailability(value, initialClient?.id)
+      checkPhoneAvailability(value, initialSupplier?.id)
     }, DEBOUNCE_MS)
   }
 
@@ -123,15 +122,15 @@ function ClientForm({
     event.preventDefault()
 
     const rawData = { name, phone, address }
-    const parsed = clientSchema.safeParse(rawData)
+    const parsed = supplierSchema.safeParse(rawData)
 
     if (!parsed.success) {
-      const nextErrors: ClientFieldErrors = {}
+      const nextErrors: SupplierFieldErrors = {}
 
       for (const issue of parsed.error.issues) {
         const field = issue.path[0]
-        if (typeof field === 'string' && !nextErrors[field as keyof ClientFieldErrors]) {
-          nextErrors[field as keyof ClientFieldErrors] = issue.message
+        if (typeof field === 'string' && !nextErrors[field as keyof SupplierFieldErrors]) {
+          nextErrors[field as keyof SupplierFieldErrors] = issue.message
         }
       }
 
@@ -140,12 +139,12 @@ function ClientForm({
     }
 
     if (nameAvailability === 'taken') {
-      setFieldErrors((prev) => ({ ...prev, name: CLIENT_MESSAGES.nameTaken }))
+      setFieldErrors((prev) => ({ ...prev, name: SUPPLIER_MESSAGES.nameTaken }))
       return
     }
 
     if (phoneAvailability === 'taken') {
-      setFieldErrors((prev) => ({ ...prev, phone: CLIENT_MESSAGES.phoneTaken }))
+      setFieldErrors((prev) => ({ ...prev, phone: SUPPLIER_MESSAGES.phoneTaken }))
       return
     }
 
@@ -189,13 +188,13 @@ function ClientForm({
   const nameStatusText = () => {
     switch (nameAvailability) {
       case 'checking':
-        return <span className="text-blue-600">{CLIENT_MESSAGES.checking}</span>
+        return <span className="text-blue-600">{SUPPLIER_MESSAGES.checking}</span>
       case 'available':
-        return <span className="text-green-600">{CLIENT_MESSAGES.nameAvailable}</span>
+        return <span className="text-green-600">{SUPPLIER_MESSAGES.nameAvailable}</span>
       case 'taken':
-        return <span className="text-amber-600">{CLIENT_MESSAGES.nameTaken}</span>
+        return <span className="text-amber-600">{SUPPLIER_MESSAGES.nameTaken}</span>
       case 'error':
-        return <span className="text-gray-500">{CLIENT_MESSAGES.checkFailed}</span>
+        return <span className="text-gray-500">{SUPPLIER_MESSAGES.checkFailed}</span>
       default:
         return null
     }
@@ -204,13 +203,13 @@ function ClientForm({
   const phoneStatusText = () => {
     switch (phoneAvailability) {
       case 'checking':
-        return <span className="text-blue-600">{CLIENT_MESSAGES.checking}</span>
+        return <span className="text-blue-600">{SUPPLIER_MESSAGES.checking}</span>
       case 'available':
-        return <span className="text-green-600">{CLIENT_MESSAGES.phoneAvailable}</span>
+        return <span className="text-green-600">{SUPPLIER_MESSAGES.phoneAvailable}</span>
       case 'taken':
-        return <span className="text-amber-600">{CLIENT_MESSAGES.phoneTaken}</span>
+        return <span className="text-amber-600">{SUPPLIER_MESSAGES.phoneTaken}</span>
       case 'error':
-        return <span className="text-gray-500">{CLIENT_MESSAGES.checkFailed}</span>
+        return <span className="text-gray-500">{SUPPLIER_MESSAGES.checkFailed}</span>
       default:
         return null
     }
@@ -235,9 +234,9 @@ function ClientForm({
     if (!error) return
 
     if (error === SERVER_DUPLICATE_NAME) {
-      setFieldErrors((prev) => ({ ...prev, name: CLIENT_MESSAGES.nameTaken }))
+      setFieldErrors((prev) => ({ ...prev, name: SUPPLIER_MESSAGES.nameTaken }))
     } else if (error === SERVER_DUPLICATE_PHONE) {
-      setFieldErrors((prev) => ({ ...prev, phone: CLIENT_MESSAGES.phoneTaken }))
+      setFieldErrors((prev) => ({ ...prev, phone: SUPPLIER_MESSAGES.phoneTaken }))
     }
   }, [error])
 
@@ -246,15 +245,15 @@ function ClientForm({
       <h2 className="text-lg font-semibold">{title}</h2>
 
       <div>
-        <label htmlFor="client-name" className="block text-sm font-medium text-gray-700">
+        <label htmlFor="supplier-name" className="block text-sm font-medium text-gray-700">
           Nom <span className="text-red-500">*</span>
         </label>
         <div className="mt-1 flex items-center gap-2">
           <input
-            id="client-name"
+            id="supplier-name"
             name="name"
             type="text"
-            maxLength={CLIENT_NAME_MAX_LENGTH}
+            maxLength={SUPPLIER_NAME_MAX_LENGTH}
             value={name}
             onChange={(event) => handleNameChange(event.target.value)}
             style={{ textTransform: 'uppercase' }}
@@ -270,15 +269,15 @@ function ClientForm({
       </div>
 
       <div>
-        <label htmlFor="client-phone" className="block text-sm font-medium text-gray-700">
+        <label htmlFor="supplier-phone" className="block text-sm font-medium text-gray-700">
           Téléphone <span className="text-red-500">*</span>
         </label>
         <div className="mt-1 flex items-center gap-2">
           <input
-            id="client-phone"
+            id="supplier-phone"
             name="phone"
             type="tel"
-            maxLength={CLIENT_PHONE_MAX_LENGTH}
+            maxLength={SUPPLIER_PHONE_MAX_LENGTH}
             value={phone}
             onChange={(event) => handlePhoneChange(event.target.value)}
             placeholder="77 123 45 67"
@@ -297,14 +296,14 @@ function ClientForm({
       </div>
 
       <div>
-        <label htmlFor="client-address" className="block text-sm font-medium text-gray-700">
+        <label htmlFor="supplier-address" className="block text-sm font-medium text-gray-700">
           Adresse
         </label>
         <textarea
-          id="client-address"
+          id="supplier-address"
           name="address"
-          maxLength={CLIENT_ADDRESS_MAX_LENGTH}
-          value={address}
+          maxLength={SUPPLIER_ADDRESS_MAX_LENGTH}
+          value={address ?? ''}
           onChange={(event) => handleAddressChange(event.target.value)}
           placeholder="Pikine, Dakar"
           rows={3}
@@ -339,4 +338,4 @@ function ClientForm({
   )
 }
 
-export default ClientForm
+export default SupplierForm

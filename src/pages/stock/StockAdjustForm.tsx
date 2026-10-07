@@ -99,7 +99,7 @@ function StockAdjustForm({
             value={form}
             onChange={(event) => setForm(event.target.value)}
             disabled={isSubmitting}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+            className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
           >
             {forms.map((availableForm) => (
               <option key={availableForm} value={availableForm}>
@@ -126,7 +126,7 @@ function StockAdjustForm({
             value={direction}
             onChange={(event) => setDirection(event.target.value as StockDirection)}
             disabled={isSubmitting}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+            className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
           >
             <option value="IN">{STOCK_DIRECTION_LABELS.IN}</option>
             <option value="OUT">{STOCK_DIRECTION_LABELS.OUT}</option>
@@ -154,7 +154,7 @@ function StockAdjustForm({
             value={quantity}
             onChange={(event) => setQuantity(event.target.value)}
             disabled={isSubmitting}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+            className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
           />
           {fieldErrors.quantity && (
             <p className="mt-1 text-sm text-red-600">{fieldErrors.quantity}</p>
@@ -175,7 +175,7 @@ function StockAdjustForm({
           value={reason}
           onChange={(event) => setReason(event.target.value)}
           disabled={isSubmitting}
-          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+          className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
         />
         {fieldErrors.reason && <p className="mt-1 text-sm text-red-600">{fieldErrors.reason}</p>}
       </div>

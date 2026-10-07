@@ -19742,11 +19742,15 @@ var SUPPLY_QUANTITY_MAX = 1e6;
 var SUPPLY_UNIT_PRICE_MAX = 1e9;
 var SUPPLY_SUPPLIER_MAX_LENGTH = 120;
 var SUPPLY_ITEMS_MAX = 100;
+var CASH_SUPPLIER_VALUE = "comptant";
 var SUPPLY_MESSAGES = {
   dateRequired: "La date de l'approvisionnement est obligatoire.",
   dateInvalid: "La date doit \xEAtre au format AAAA-MM-JJ.",
   dateOutOfRange: "La date doit \xEAtre comprise entre le 01/01/2000 et le 31/12/2099.",
   supplierTooLong: `Le fournisseur ne peut pas d\xE9passer ${SUPPLY_SUPPLIER_MAX_LENGTH} caract\xE8res.`,
+  supplierRequired: "Choisissez un fournisseur actif.",
+  supplierNotFound: "Ce fournisseur n'existe plus.",
+  supplierInactive: "Fournisseur inactif : choisissez un fournisseur actif ou le fournisseur comptant.",
   itemsRequired: "Un approvisionnement doit contenir au moins un produit.",
   tooManyItems: `Un approvisionnement ne peut pas d\xE9passer ${SUPPLY_ITEMS_MAX} lignes.`,
   productRequired: "Le produit est obligatoire.",
@@ -19778,6 +19782,7 @@ var supplyDateSchema = external_exports.string({ error: SUPPLY_MESSAGES.dateRequ
 );
 var productIdSchema = external_exports.number({ error: SUPPLY_MESSAGES.productRequired }).int(SUPPLY_MESSAGES.productRequired).positive(SUPPLY_MESSAGES.productRequired);
 var formSchema = external_exports.string({ error: SUPPLY_MESSAGES.formRequired }).trim().min(1, SUPPLY_MESSAGES.formRequired).transform(normalizeFormLabel);
+var supplierIdSchema = external_exports.number({ error: SUPPLY_MESSAGES.supplierRequired }).int(SUPPLY_MESSAGES.supplierRequired).positive(SUPPLY_MESSAGES.supplierRequired).nullable();
 var quantitySchema = external_exports.number({ error: SUPPLY_MESSAGES.quantityRequired }).int(SUPPLY_MESSAGES.quantityInvalid).positive(SUPPLY_MESSAGES.quantityInvalid).max(SUPPLY_QUANTITY_MAX, SUPPLY_MESSAGES.quantityTooHigh);
 var unitPriceSchema = external_exports.number({ error: SUPPLY_MESSAGES.unitPriceRequired }).int(SUPPLY_MESSAGES.unitPriceInvalid).min(0, SUPPLY_MESSAGES.unitPriceInvalid).max(SUPPLY_UNIT_PRICE_MAX, SUPPLY_MESSAGES.unitPriceTooHigh);
 var supplyItemFormSchema = external_exports.object({
@@ -19788,7 +19793,7 @@ var supplyItemFormSchema = external_exports.object({
 });
 var supplyFormSchema = external_exports.object({
   date: supplyDateSchema,
-  supplierName: external_exports.string({ error: SUPPLY_MESSAGES.supplierTooLong }).trim().max(SUPPLY_SUPPLIER_MAX_LENGTH, SUPPLY_MESSAGES.supplierTooLong),
+  supplierId: supplierIdSchema,
   items: external_exports.array(supplyItemFormSchema).min(1, SUPPLY_MESSAGES.itemsRequired).max(SUPPLY_ITEMS_MAX, SUPPLY_MESSAGES.tooManyItems)
 }).superRefine((values, ctx) => {
   const seen = /* @__PURE__ */ new Set();
@@ -19899,7 +19904,7 @@ function parseSupplyDraft(raw) {
   }
   return {
     date: date5.success ? date5.data : todayInputValue(),
-    supplierName: typeof source.supplierName === "string" ? source.supplierName.trim().slice(0, SUPPLY_SUPPLIER_MAX_LENGTH) : "",
+    supplierId: typeof source.supplierId === "string" && source.supplierId.trim() !== "" ? source.supplierId.trim() : CASH_SUPPLIER_VALUE,
     lines,
     editor,
     editingKey
@@ -19912,7 +19917,7 @@ function isMeaningfulSupplyDraft(draft) {
   if (draft.lines.length > 0) {
     return true;
   }
-  if (draft.supplierName.trim() !== "") {
+  if (draft.supplierId !== CASH_SUPPLIER_VALUE && draft.supplierId.trim() !== "") {
     return true;
   }
   return draft.editor.productId.trim() !== "" || draft.editor.form.trim() !== "" || draft.editor.quantity.trim() !== "" || draft.editor.purchaseUnitPrice.trim() !== "";
@@ -20007,7 +20012,7 @@ function buildEditor(overrides = {}) {
 function buildDraft(overrides = {}) {
   return {
     date: "2026-10-05",
-    supplierName: "DISTRIB SAHEL",
+    supplierId: "1",
     lines: [buildLine()],
     editor: createEmptyDraft(),
     editingKey: null,
@@ -20032,7 +20037,7 @@ describe3("brouillon d\u2019approvisionnement en cours", () => {
       [STORAGE_KEY2]: JSON.stringify(
         buildDraft({
           lines: [],
-          supplierName: "",
+          supplierId: "",
           editor: createEmptyDraft()
         })
       )
@@ -20050,7 +20055,7 @@ describe3("brouillon d\u2019approvisionnement en cours", () => {
     });
     const restored = readSupplyDraft();
     assert2.equal(restored?.date, "2026-10-05");
-    assert2.equal(restored?.supplierName, "DISTRIB SAHEL");
+    assert2.equal(restored?.supplierId, "1");
     assert2.equal(restored?.editingKey, null);
     assert2.deepEqual(restored?.lines, [
       {
@@ -20089,18 +20094,17 @@ describe3("brouillon d\u2019approvisionnement en cours", () => {
     stubStorage({ [STORAGE_KEY2]: JSON.stringify(buildDraft({ lines })) });
     assert2.equal(readSupplyDraft()?.lines.length, SUPPLY_ITEMS_MAX);
   });
-  it("\xE9lage un fournisseur trop long et ram\xE8ne une date invalide au jour du jour", () => {
+  it("ram\xE8ne une date invalide au jour du jour", () => {
     stubStorage({
       [STORAGE_KEY2]: JSON.stringify(
         buildDraft({
-          date: "2026-13-01",
-          supplierName: "X".repeat(SUPPLY_SUPPLIER_MAX_LENGTH + 10)
+          date: "2026-13-01"
         })
       )
     });
     const restored = readSupplyDraft();
     assert2.equal(restored?.date, todayInputValue());
-    assert2.equal(restored?.supplierName.length, SUPPLY_SUPPLIER_MAX_LENGTH);
+    assert2.equal(restored?.supplierId, "1");
   });
   it("garde la ligne en cours de modification quand elle existe encore", () => {
     stubStorage({
@@ -20136,7 +20140,7 @@ describe3("brouillon d\u2019approvisionnement en cours", () => {
       [STORAGE_KEY2]: JSON.stringify(
         buildDraft({
           lines: [],
-          supplierName: "",
+          supplierId: "",
           editor: buildEditor({
             productId: "1",
             form: "",
@@ -20155,24 +20159,24 @@ describe3("brouillon d\u2019approvisionnement en cours", () => {
       [STORAGE_KEY2]: JSON.stringify(
         buildDraft({
           lines: [],
-          supplierName: "MAGASIN CENTRAL",
+          supplierId: "7",
           editor: createEmptyDraft()
         })
       )
     });
-    assert2.equal(readSupplyDraft()?.supplierName, "MAGASIN CENTRAL");
+    assert2.equal(readSupplyDraft()?.supplierId, "7");
   });
   it("ignore les valeurs d\u2019un type inattendu", () => {
     stubStorage({
       [STORAGE_KEY2]: JSON.stringify({
         date: "2026-10-05",
-        supplierName: 42,
+        supplierId: 42,
         lines: [buildLine()],
         editor: createEmptyDraft()
       })
     });
     const restored = readSupplyDraft();
-    assert2.equal(restored?.supplierName, "");
+    assert2.equal(restored?.supplierId, CASH_SUPPLIER_VALUE);
     assert2.equal(restored?.lines.length, 1);
   });
   it("m\xE9morise puis oublie le brouillon", () => {
@@ -20189,13 +20193,13 @@ describe3("contenu digne d\u2019\xEAtre restaur\xE9", () => {
     assert2.equal(isMeaningfulSupplyDraft(null), false);
     assert2.equal(
       isMeaningfulSupplyDraft(
-        buildDraft({ lines: [], supplierName: "" })
+        buildDraft({ lines: [], supplierId: "" })
       ),
       false
     );
     assert2.equal(
       isMeaningfulSupplyDraft(
-        buildDraft({ lines: [], supplierName: "DISTRIB SAHEL" })
+        buildDraft({ lines: [], supplierId: "1" })
       ),
       true
     );
@@ -20203,7 +20207,7 @@ describe3("contenu digne d\u2019\xEAtre restaur\xE9", () => {
       isMeaningfulSupplyDraft(
         buildDraft({
           lines: [],
-          supplierName: "",
+          supplierId: "",
           editor: buildEditor({ quantity: "2" })
         })
       ),

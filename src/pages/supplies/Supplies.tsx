@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { Product, Supply, SupplyCreateInput } from '@/types'
-import { productService, supplyService } from '@/services'
+import type { Product, Supply, SupplyCreateInput, Supplier } from '@/types'
+import { productService, supplyService, supplierService } from '@/services'
 import ConfirmDialog from '../categories/ConfirmDialog'
 import {
   clearSupplyDraft,
@@ -21,6 +21,7 @@ import {
 function Supplies() {
   const [supplies, setSupplies] = useState<Supply[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -71,7 +72,12 @@ function Supplies() {
     setActionError(null)
 
     try {
-      setProducts(await productService.list({ isActive: true }))
+      const [activeProducts, activeSuppliers] = await Promise.all([
+        productService.list({ isActive: true }),
+        supplierService.list({ isActive: true }),
+      ])
+      setProducts(activeProducts)
+      setSuppliers(activeSuppliers)
     } catch {
       setActionError(SUPPLY_MESSAGES.unexpected)
     }
@@ -181,7 +187,7 @@ function Supplies() {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="APP-000001"
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500"
           />
         </div>
 
@@ -198,7 +204,7 @@ function Supplies() {
             value={supplierSearch}
             onChange={(event) => setSupplierSearch(event.target.value)}
             placeholder="Nom du fournisseur"
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500"
           />
         </div>
       </div>
@@ -228,6 +234,7 @@ function Supplies() {
           <SupplyForm
             key={formEpoch}
             products={products}
+            suppliers={suppliers}
             draft={restoredDraft}
             isSubmitting={isSubmitting}
             error={formError}
@@ -323,7 +330,12 @@ function Supplies() {
       {pendingValidation && (
         <ConfirmDialog
           title="Valider l'approvisionnement ?"
-          message={buildValidationMessage(pendingValidation)}
+          message={buildValidationMessage(
+            pendingValidation,
+            pendingValidation.supplierId
+              ? suppliers.find((supplier) => supplier.id === pendingValidation.supplierId)?.name ?? null
+              : null,
+          )}
           confirmLabel="Valider"
           confirmingLabel="Validation…"
           confirmTone="primary"

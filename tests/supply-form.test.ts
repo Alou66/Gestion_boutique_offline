@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 import type { Product } from '../electron/types'
 import {
   buildValidationMessage,
+  CASH_SUPPLIER_VALUE,
   computeLineTotal,
   createEmptyDraft,
   formatAmount,
@@ -12,6 +13,7 @@ import {
   isSameLine,
   parseNumberField,
   readDraftLineTotal,
+  resolveSupplierSelection,
   sumLineTotals,
   SUPPLY_MESSAGES,
   supplyFormSchema,
@@ -64,7 +66,7 @@ describe('formulaire d\'approvisionnement', () => {
   it('accepte un document valide avec plusieurs lignes', () => {
     const parsed = supplyFormSchema.safeParse({
       date: '2026-10-04',
-      supplierName: '  Grossiste Sokna  ',
+      supplierId: 1,
       items: [
         { productId: 1, form: 'SAC', quantity: 10, purchaseUnitPrice: 2_500 },
         { productId: 2, form: 'CARTON', quantity: 4, purchaseUnitPrice: 10_000 },
@@ -76,17 +78,31 @@ describe('formulaire d\'approvisionnement', () => {
     const payload = parsed.success ? toSupplyInput(parsed.data) : null
 
     assert.equal(payload?.date, '2026-10-04')
-    assert.equal(payload?.supplierName, 'Grossiste Sokna')
+    assert.equal(payload?.supplierId, 1)
     assert.deepEqual(payload?.items, [
       { productId: 1, form: 'SAC', quantity: 10, purchaseUnitPrice: 2_500 },
       { productId: 2, form: 'CARTON', quantity: 4, purchaseUnitPrice: 10_000 },
     ])
   })
 
+  it('accepte un document sans fournisseur (fournisseur comptant)', () => {
+    const parsed = supplyFormSchema.safeParse({
+      date: '2026-10-04',
+      supplierId: null,
+      items: [{ productId: 1, form: 'SAC', quantity: 1, purchaseUnitPrice: 100 }],
+    })
+
+    assert.equal(parsed.success, true)
+
+    const payload = parsed.success ? toSupplyInput(parsed.data) : null
+
+    assert.equal(payload?.supplierId, null)
+  })
+
   it('refuse un document sans ligne', () => {
     const parsed = supplyFormSchema.safeParse({
       date: '2026-10-04',
-      supplierName: '',
+      supplierId: null,
       items: [],
     })
 
@@ -106,7 +122,7 @@ describe('formulaire d\'approvisionnement', () => {
     for (const [date, expected] of cases) {
       const parsed = supplyFormSchema.safeParse({
         date,
-        supplierName: '',
+        supplierId: null,
         items: [{ productId: 1, form: 'SAC', quantity: 1, purchaseUnitPrice: 100 }],
       })
 
@@ -119,7 +135,7 @@ describe('formulaire d\'approvisionnement', () => {
     for (const quantity of [0, -1, 1.5]) {
       const parsed = supplyFormSchema.safeParse({
         date: '2026-10-04',
-        supplierName: '',
+        supplierId: null,
         items: [{ productId: 1, form: 'SAC', quantity, purchaseUnitPrice: 100 }],
       })
 
@@ -135,7 +151,7 @@ describe('formulaire d\'approvisionnement', () => {
     for (const purchaseUnitPrice of [-1, 1.5]) {
       const parsed = supplyFormSchema.safeParse({
         date: '2026-10-04',
-        supplierName: '',
+        supplierId: null,
         items: [{ productId: 1, form: 'SAC', quantity: 1, purchaseUnitPrice }],
       })
 
@@ -144,7 +160,7 @@ describe('formulaire d\'approvisionnement', () => {
 
     const free = supplyFormSchema.safeParse({
       date: '2026-10-04',
-      supplierName: '',
+      supplierId: null,
       items: [{ productId: 1, form: 'SAC', quantity: 1, purchaseUnitPrice: 0 }],
     })
 
@@ -154,7 +170,7 @@ describe('formulaire d\'approvisionnement', () => {
   it('refuse deux lignes du même produit dans la même forme', () => {
     const parsed = supplyFormSchema.safeParse({
       date: '2026-10-04',
-      supplierName: '',
+      supplierId: null,
       items: [
         { productId: 1, form: 'SAC', quantity: 10, purchaseUnitPrice: 2_500 },
         { productId: 1, form: 'SAC', quantity: 5, purchaseUnitPrice: 2_500 },
@@ -171,7 +187,7 @@ describe('formulaire d\'approvisionnement', () => {
   it('accepte le même produit dans deux formes différentes', () => {
     const parsed = supplyFormSchema.safeParse({
       date: '2026-10-04',
-      supplierName: '',
+      supplierId: null,
       items: [
         { productId: 2, form: 'CARTON', quantity: 10, purchaseUnitPrice: 10_000 },
         { productId: 2, form: 'SEAU', quantity: 5, purchaseUnitPrice: 2_500 },
@@ -372,14 +388,17 @@ describe('saisie des lignes d\'approvisionnement', () => {
   })
 
 it('résume le document avant la confirmation', () => {
-    const message = buildValidationMessage({
-      date: '2026-10-04',
-      supplierName: 'Grossiste Sokna',
-      items: [
-        { productId: 1, form: 'SAC', quantity: 10, purchaseUnitPrice: 2_500 },
-        { productId: 2, form: 'CARTON', quantity: 5, purchaseUnitPrice: 10_000 },
-      ],
-    })
+    const message = buildValidationMessage(
+      {
+        date: '2026-10-04',
+        supplierId: null,
+        items: [
+          { productId: 1, form: 'SAC', quantity: 10, purchaseUnitPrice: 2_500 },
+          { productId: 2, form: 'CARTON', quantity: 5, purchaseUnitPrice: 10_000 },
+        ],
+      },
+      'Grossiste Sokna',
+    )
 
     // 25 000 + 50 000
     assert.equal(message.includes('2 lignes'), true)
@@ -387,13 +406,74 @@ it('résume le document avant la confirmation', () => {
     assert.equal(message.includes(new Intl.NumberFormat('fr-FR').format(75_000)), true)
     assert.equal(message.includes('ne pourra plus être modifié'), true)
 
-    const single = buildValidationMessage({
-      date: '2026-10-04',
-      supplierName: null,
-      items: [{ productId: 1, form: 'SAC', quantity: 10, purchaseUnitPrice: 2_500 }],
-    })
+    const single = buildValidationMessage(
+      {
+        date: '2026-10-04',
+        supplierId: null,
+        items: [{ productId: 1, form: 'SAC', quantity: 10, purchaseUnitPrice: 2_500 }],
+      },
+      null,
+    )
 
     assert.equal(single.includes('1 ligne '), true)
     assert.equal(single.includes('fournisseur'), false)
+  })
+})
+
+describe('résolution de la sélection fournisseur', () => {
+  const buildSupplier = (overrides: Partial<{
+    id: number
+    name: string
+    phone: string
+    isActive: boolean
+    isSystem: boolean
+  }> = {}) => ({
+    id: 1,
+    name: 'Grossiste Sokna',
+    phone: '+221770000001',
+    address: null,
+    isActive: true,
+    isSystem: false,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
+  })
+
+  it('accepte le fournisseur comptant quand aucun système n’existe', () => {
+    const result = resolveSupplierSelection(CASH_SUPPLIER_VALUE, [])
+
+    assert.equal(result.ok, true)
+    if (result.ok) {
+      assert.equal(result.supplierId, null)
+    }
+  })
+
+  it('résout un fournisseur actif par son identifiant', () => {
+    const supplier = buildSupplier({ id: 7 })
+    const result = resolveSupplierSelection('7', [supplier])
+
+    assert.equal(result.ok, true)
+    if (result.ok) {
+      assert.equal(result.supplierId, 7)
+    }
+  })
+
+  it('refuse un fournisseur inactif', () => {
+    const supplier = buildSupplier({ id: 5, isActive: false })
+    const result = resolveSupplierSelection('5', [supplier])
+
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.error, SUPPLY_MESSAGES.supplierInactive)
+    }
+  })
+
+  it('refuse un fournisseur introuvable', () => {
+    const result = resolveSupplierSelection('42', [buildSupplier()])
+
+    assert.equal(result.ok, false)
+    if (!result.ok) {
+      assert.equal(result.error, SUPPLY_MESSAGES.supplierNotFound)
+    }
   })
 })

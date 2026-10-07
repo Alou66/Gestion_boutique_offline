@@ -524,7 +524,7 @@ function InvoiceForm({
             value={date}
             onChange={(event) => setDate(event.target.value)}
             disabled={isSubmitting}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+            className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
           />
           {fieldErrors.date && <p className="mt-1 text-sm text-red-600">{fieldErrors.date}</p>}
         </div>
@@ -540,6 +540,7 @@ function InvoiceForm({
             options={clientOptions}
             placeholder="Choisir un client"
             disabled={isSubmitting}
+            // className="border border-gray-500"
             onChange={(value) => {
               setFieldErrors((current) => ({ ...current, clientId: undefined }))
               setClientId(value)
@@ -592,7 +593,7 @@ function InvoiceForm({
                 value={editor.form}
                 onChange={(event) => handleFormChange(event.target.value)}
                 disabled={isSubmitting}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+                className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
               >
                 {editorForms.map((availableForm) => (
                   <option key={availableForm} value={availableForm}>
@@ -615,11 +616,11 @@ function InvoiceForm({
             {draftErrors.form && (
               <p className="mt-1 text-sm text-red-600">{draftErrors.form}</p>
             )}
-            {editorProduct && (
+            {/* {editorProduct && (
               <p className="mt-1 text-xs text-gray-500">
                 Stock disponible : {editorAvailableStock}
               </p>
-            )}
+            )} */}
           </div>
 
           <div>
@@ -638,7 +639,7 @@ function InvoiceForm({
               value={editor.quantity}
               onChange={(event) => updateEditor({ quantity: event.target.value })}
               disabled={isSubmitting}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+              className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
             />
             {draftErrors.quantity && (
               <p className="mt-1 text-sm text-red-600">{draftErrors.quantity}</p>
@@ -661,16 +662,16 @@ function InvoiceForm({
               value={editor.unitPrice}
               onChange={(event) => updateEditor({ unitPrice: event.target.value })}
               disabled={isSubmitting}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+              className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
             />
             {draftErrors.unitPrice && (
               <p className="mt-1 text-sm text-red-600">{draftErrors.unitPrice}</p>
             )}
-            {configuredPrice !== null && (
+            {/* {configuredPrice !== null && (
               <p className="mt-1 text-xs text-gray-500">
                 Prix configuré : {formatAmount(configuredPrice)}
               </p>
-            )}
+            )} */}
             {configuredPrice === null && editorProduct && (
               <p className="mt-1 text-xs text-amber-700">
                 {INVOICE_MESSAGES.unitPriceNotConfigured}

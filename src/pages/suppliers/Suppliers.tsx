@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { Client, ClientInput, ClientUpdateInput } from '@/types'
-import { clientService } from '@/services'
+import type { Supplier, SupplierInput, SupplierUpdateInput } from '@/types'
+import { supplierService } from '@/services'
 import ConfirmDialog from '../categories/ConfirmDialog'
-import ClientForm from './ClientForm'
-import { CLIENT_MESSAGES } from './schemas/client.schema'
+import SupplierForm from './SupplierForm'
+import { SUPPLIER_MESSAGES } from './schemas/supplier.schema'
 
-const CLIENTS_PER_PAGE = 20
+const SUPPLIERS_PER_PAGE = 20
 
 type StatusFilter = 'all' | 'active' | 'inactive'
 
@@ -17,8 +17,8 @@ function formatPhone(phone: string): string {
   return phone
 }
 
-function Clients() {
-  const [clients, setClients] = useState<Client[]>([])
+function Suppliers() {
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -27,47 +27,47 @@ function Clients() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
-  const [totalClients, setTotalClients] = useState(0)
+  const [totalSuppliers, setTotalSuppliers] = useState(0)
   const [isFormOpen, setIsFormOpen] = useState(false)
-  const [editing, setEditing] = useState<Client | null>(null)
+  const [editing, setEditing] = useState<Supplier | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [pendingStatusChange, setPendingStatusChange] = useState<{
-    client: Client
+    supplier: Supplier
     isActive: boolean
   } | null>(null)
   const [isChangingStatus, setIsChangingStatus] = useState(false)
 
-  const loadClients = useCallback(async () => {
+  const loadSuppliers = useCallback(async () => {
     setIsLoading(true)
     setLoadError(null)
 
     try {
-      const allClients = await clientService.list({
+      const allSuppliers = await supplierService.list({
         search: search.trim() || undefined,
         phoneSearch: phoneSearch.trim() || undefined,
         isActive: statusFilter === 'all' ? undefined : statusFilter === 'active',
       })
 
-      setTotalClients(allClients.length)
-      setTotalPages(Math.ceil(allClients.length / CLIENTS_PER_PAGE) || 1)
+      setTotalSuppliers(allSuppliers.length)
+      setTotalPages(Math.ceil(allSuppliers.length / SUPPLIERS_PER_PAGE) || 1)
 
       // Simple client-side pagination
-      const start = (currentPage - 1) * CLIENTS_PER_PAGE
-      const end = start + CLIENTS_PER_PAGE
-      setClients(allClients.slice(start, end))
+      const start = (currentPage - 1) * SUPPLIERS_PER_PAGE
+      const end = start + SUPPLIERS_PER_PAGE
+      setSuppliers(allSuppliers.slice(start, end))
     } catch {
-      setLoadError(CLIENT_MESSAGES.unexpected)
+      setLoadError(SUPPLIER_MESSAGES.unexpected)
     } finally {
       setIsLoading(false)
     }
   }, [search, phoneSearch, statusFilter, currentPage])
 
   useEffect(() => {
-    const timer = setTimeout(loadClients, 200)
+    const timer = setTimeout(loadSuppliers, 200)
 
     return () => clearTimeout(timer)
-  }, [loadClients])
+  }, [loadSuppliers])
 
   // Reset to page 1 when search or filter changes
   useEffect(() => {
@@ -87,32 +87,32 @@ function Clients() {
     setIsFormOpen(true)
   }
 
-  const openEditForm = (client: Client) => {
-    // Don't allow editing the system client
-    if (client.isSystem) {
+  const openEditForm = (supplier: Supplier) => {
+    // Don't allow editing the system supplier
+    if (supplier.isSystem) {
       return
     }
-    setEditing(client)
+    setEditing(supplier)
     setFormError(null)
     setActionError(null)
     setIsFormOpen(true)
   }
 
-  const handleSubmit = async (input: ClientInput | ClientUpdateInput) => {
+  const handleSubmit = async (input: SupplierInput | SupplierUpdateInput) => {
     setIsSubmitting(true)
     setFormError(null)
 
     try {
       if (editing) {
-        await clientService.update(editing.id, input)
+        await supplierService.update(editing.id, input)
       } else {
-        await clientService.create(input)
+        await supplierService.create(input)
       }
 
       closeForm()
-      await loadClients()
+      await loadSuppliers()
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : CLIENT_MESSAGES.unexpected)
+      setFormError(err instanceof Error ? err.message : SUPPLIER_MESSAGES.unexpected)
     } finally {
       setIsSubmitting(false)
     }
@@ -123,29 +123,29 @@ function Clients() {
       return
     }
 
-    const { client, isActive } = pendingStatusChange
+    const { supplier, isActive } = pendingStatusChange
 
     setIsChangingStatus(true)
     setActionError(null)
 
     try {
-      await clientService.setActive(client.id, isActive)
+      await supplierService.setActive(supplier.id, isActive)
       setPendingStatusChange(null)
-      await loadClients()
+      await loadSuppliers()
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : CLIENT_MESSAGES.unexpected)
+      setActionError(err instanceof Error ? err.message : SUPPLIER_MESSAGES.unexpected)
     } finally {
       setIsChangingStatus(false)
     }
   }
 
-  const canEdit = (client: Client) => !client.isSystem
-  const canToggleStatus = (client: Client) => !client.isSystem || client.isActive
+  const canEdit = (supplier: Supplier) => !supplier.isSystem
+  const canToggleStatus = (supplier: Supplier) => !supplier.isSystem || supplier.isActive
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold">Clients</h1>
+        <h1 className="text-2xl font-bold">Fournisseurs</h1>
         <button
           type="button"
           onClick={openCreateForm}
@@ -161,42 +161,42 @@ function Clients() {
 
       <div className="grid gap-3 sm:grid-cols-3">
         <div>
-          <label htmlFor="client-search" className="block text-sm font-medium text-gray-700">
+          <label htmlFor="supplier-search" className="block text-sm font-medium text-gray-700">
             Rechercher par nom
           </label>
           <input
-            id="client-search"
+            id="supplier-search"
             type="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Nom du client"
-            className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            placeholder="Nom du fournisseur"
+            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
           />
         </div>
 
         <div>
-          <label htmlFor="client-phone-search" className="block text-sm font-medium text-gray-700">
+          <label htmlFor="supplier-phone-search" className="block text-sm font-medium text-gray-700">
             Rechercher par téléphone
           </label>
           <input
-            id="client-phone-search"
+            id="supplier-phone-search"
             type="search"
             value={phoneSearch}
             onChange={(event) => setPhoneSearch(event.target.value)}
             placeholder="77 123 45 67"
-            className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
           />
         </div>
 
         <div>
-          <label htmlFor="client-filter-status" className="block text-sm font-medium text-gray-700">
+          <label htmlFor="supplier-filter-status" className="block text-sm font-medium text-gray-700">
             Statut
           </label>
           <select
-            id="client-filter-status"
+            id="supplier-filter-status"
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
-            className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
           >
             <option value="all">Tous</option>
             <option value="active">Actifs</option>
@@ -206,11 +206,11 @@ function Clients() {
       </div>
 
       {isFormOpen && (
-        <ClientForm
+        <SupplierForm
           key={editing ? editing.id : 'new'}
-          title={editing ? 'Modifier le client' : 'Nouveau client'}
+          title={editing ? 'Modifier le fournisseur' : 'Nouveau fournisseur'}
           submitLabel="Enregistrer"
-          initialClient={editing}
+          initialSupplier={editing}
           isSubmitting={isSubmitting}
           error={formError}
           onSubmit={handleSubmit}
@@ -256,63 +256,63 @@ function Clients() {
               </tr>
             )}
 
-            {!isLoading && !loadError && clients.length === 0 && (
+            {!isLoading && !loadError && suppliers.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-6 py-6 text-center text-sm text-gray-500">
-                  Aucun client pour le moment.
+                  Aucun fournisseur pour le moment.
                 </td>
               </tr>
             )}
 
             {!isLoading &&
               !loadError &&
-              clients.map((client) => {
-                const isSystem = client.isSystem
+              suppliers.map((supplier) => {
+                const isSystem = supplier.isSystem
 
                 return (
-                  <tr key={client.id} className="hover:bg-gray-50">
+                  <tr key={supplier.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 text-sm font-medium text-gray-900">
-                      {client.name}
+                      {supplier.name}
                       {isSystem && (
                         <span className="ml-2 inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
                           Système
                         </span>
                       )}
                     </td>
-                    <td className="px-6 py-4 text-sm text-gray-600">{formatPhone(client.phone)}</td>
-                    <td className="px-6 py-4 text-sm text-gray-600">{client.address ?? '—'}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{formatPhone(supplier.phone)}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{supplier.address ?? '—'}</td>
                     <td className="px-6 py-4 text-sm">
                       <span
                         className={
-                          client.isActive
+                          supplier.isActive
                             ? 'rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-700'
                             : 'rounded-full bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600'
                         }
                       >
-                        {client.isActive ? 'Actif' : 'Inactif'}
+                        {supplier.isActive ? 'Actif' : 'Inactif'}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right text-sm">
                       <div className="flex justify-end gap-3">
-                        {canEdit(client) && (
+                        {canEdit(supplier) && (
                           <button
                             type="button"
-                            onClick={() => openEditForm(client)}
+                            onClick={() => openEditForm(supplier)}
                             className="font-medium text-blue-600 hover:text-blue-800"
                           >
                             Modifier
                           </button>
                         )}
-                        {canToggleStatus(client) && (
+                        {canToggleStatus(supplier) && (
                           <button
                             type="button"
                             onClick={() => {
                               setActionError(null)
-                              setPendingStatusChange({ client, isActive: !client.isActive })
+                              setPendingStatusChange({ supplier, isActive: !supplier.isActive })
                             }}
                             className="font-medium text-red-600 hover:text-red-800"
                           >
-                            {client.isActive ? 'Désactiver' : 'Activer'}
+                            {supplier.isActive ? 'Désactiver' : 'Activer'}
                           </button>
                         )}
                       </div>
@@ -328,7 +328,7 @@ function Clients() {
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
           <p className="text-sm text-gray-600">
-            Page {currentPage} / {totalPages} — {totalClients} client{totalClients > 1 ? 's' : ''}
+            Page {currentPage} / {totalPages} — {totalSuppliers} fournisseur{totalSuppliers > 1 ? 's' : ''}
           </p>
           <div className="flex gap-2">
             <button
@@ -353,11 +353,11 @@ function Clients() {
 
       {pendingStatusChange && (
         <ConfirmDialog
-          title={pendingStatusChange.isActive ? 'Activer le client ?' : 'Désactiver le client ?'}
+          title={pendingStatusChange.isActive ? 'Activer le fournisseur ?' : 'Désactiver le fournisseur ?'}
           message={
             pendingStatusChange.isActive
-              ? `Le client « ${pendingStatusChange.client.name} » sera de nouveau proposé dans les futurs modules.`
-              : `Le client « ${pendingStatusChange.client.name} » ne sera plus proposé dans les futurs modules.`
+              ? `Le fournisseur « ${pendingStatusChange.supplier.name} » sera de nouveau disponible lors des approvisionnements.`
+              : `Le fournisseur « ${pendingStatusChange.supplier.name} » ne sera plus disponible lors des approvisionnements.`
           }
           confirmLabel={pendingStatusChange.isActive ? 'Activer' : 'Désactiver'}
           confirmingLabel={pendingStatusChange.isActive ? 'Activation…' : 'Désactivation…'}
@@ -371,4 +371,4 @@ function Clients() {
   )
 }
 
-export default Clients
+export default Suppliers

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import type { Product, SupplyCreateInput } from '@/types'
+import type { Product, SupplyCreateInput, Supplier } from '@/types'
 import { SearchableSelect } from '@/components'
 import type { SearchableSelectOption } from '@/components'
 import type { SupplyDraft } from './supply-draft'
@@ -14,11 +14,11 @@ import {
   isSameLine,
   parseNumberField,
   readDraftLineTotal,
+  resolveSupplierSelection,
   sumLineTotals,
   SUPPLY_ITEMS_MAX,
   SUPPLY_MESSAGES,
   SUPPLY_QUANTITY_MAX,
-  SUPPLY_SUPPLIER_MAX_LENGTH,
   SUPPLY_UNIT_PRICE_MAX,
   supplyFormSchema,
   supplyItemFormSchema,
@@ -26,6 +26,7 @@ import {
   toSupplyInput,
   todayInputValue,
   validateDraftLine,
+  CASH_SUPPLIER_VALUE,
 } from './schemas/supply.schema'
 import type {
   SupplyFormErrors,
@@ -37,6 +38,8 @@ import type {
 interface SupplyFormProps {
   /** Active products of the shop, already loaded by the page. */
   products: Product[]
+  /** Active suppliers, already loaded by the page. */
+  suppliers: Supplier[]
   /**
    * Brouillon d'un approvisionnement en cours : la saisie
    * reprend là où le commerçant l'a quittée, même après un
@@ -176,6 +179,7 @@ function LinesTable({
  */
 function SupplyForm({
   products,
+  suppliers,
   draft = null,
   isSubmitting,
   error,
@@ -183,9 +187,14 @@ function SupplyForm({
   onDraftChange,
   onCancel,
 }: SupplyFormProps) {
+  const systemSupplier = suppliers.find((supplier) => supplier.isSystem) ?? null
   const [date, setDate] = useState(draft ? draft.date : todayInputValue())
-  const [supplierName, setSupplierName] = useState(
-    draft ? draft.supplierName : '',
+  const [supplierId, setSupplierId] = useState(
+    draft
+      ? draft.supplierId
+      : systemSupplier
+        ? String(systemSupplier.id)
+        : CASH_SUPPLIER_VALUE,
   )
   const [lines, setLines] = useState<SupplyLineDraft[]>(
     draft ? draft.lines : [],
@@ -208,12 +217,12 @@ function SupplyForm({
   useEffect(() => {
     onDraftChange?.({
       date,
-      supplierName,
+      supplierId,
       lines,
       editor,
       editingKey,
     })
-  }, [date, supplierName, lines, editor, editingKey, onDraftChange])
+  }, [date, supplierId, lines, editor, editingKey, onDraftChange])
 
   const productsById = useMemo(
     () => new Map(products.map((product) => [product.id, product])),
@@ -235,6 +244,25 @@ function SupplyForm({
       })),
     [products],
   )
+
+  /** Options du champ fournisseur : le fournisseur comptant n'apparaît que si le système ne l'a pas encore, l'inactivité sert d'indice. */
+  const supplierOptions = useMemo<SearchableSelectOption[]>(() => {
+    const options: SearchableSelectOption[] = []
+
+    if (!systemSupplier) {
+      options.push({ value: CASH_SUPPLIER_VALUE, label: 'FOURNISSEUR COMPTANT' })
+    }
+
+    for (const supplier of suppliers) {
+      options.push({
+        value: String(supplier.id),
+        label: supplier.name,
+        hint: supplier.isActive ? undefined : 'inactif',
+      })
+    }
+
+    return options
+  }, [suppliers, systemSupplier])
 
   const editorProduct = productsById.get(Number(editor.productId)) ?? null
   const editorForms = getProductForms(editorProduct)
@@ -386,9 +414,17 @@ function SupplyForm({
       return
     }
 
+    const selection = resolveSupplierSelection(supplierId, suppliers)
+
+    if (!selection.ok) {
+      setFieldErrors({ supplierId: selection.error })
+
+      return
+    }
+
     const parsed = supplyFormSchema.safeParse({
       date,
-      supplierName,
+      supplierId: selection.supplierId,
       items: lines.map((line) => ({
         productId: line.productId,
         form: line.form,
@@ -435,32 +471,34 @@ function SupplyForm({
             value={date}
             onChange={(event) => setDate(event.target.value)}
             disabled={isSubmitting}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+            className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
           />
           {fieldErrors.date && <p className="mt-1 text-sm text-red-600">{fieldErrors.date}</p>}
         </div>
 
         <div>
-          <label
-            htmlFor="supply-supplier"
-            className="block text-sm font-medium text-gray-700"
-          >
+          <label htmlFor="supply-supplier" className="block text-sm font-medium text-gray-700">
             Fournisseur
           </label>
-          <input
+          <SearchableSelect
             id="supply-supplier"
-            name="supplierName"
-            type="text"
-            maxLength={SUPPLY_SUPPLIER_MAX_LENGTH}
-            placeholder="Optionnel"
-            value={supplierName}
-            onChange={(event) => setSupplierName(event.target.value)}
+            name="supplierId"
+            value={supplierId}
+            options={supplierOptions}
+            placeholder="Choisir un fournisseur"
             disabled={isSubmitting}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+            onChange={(value) => {
+              setFieldErrors((current) => ({ ...current, supplierId: undefined }))
+              setSupplierId(value)
+            }}
           />
-          {fieldErrors.supplierName && (
-            <p className="mt-1 text-sm text-red-600">{fieldErrors.supplierName}</p>
+          {fieldErrors.supplierId && (
+            <p className="mt-1 text-sm text-red-600">{fieldErrors.supplierId}</p>
           )}
+          <p className="mt-1 text-xs text-gray-500">
+            Seul un fournisseur actif peut être choisi. Sans fournisseur, l'approvisionnement est
+            enregistré pour FOURNISSEUR COMPTANT.
+          </p>
         </div>
       </div>
 
@@ -502,7 +540,7 @@ function SupplyForm({
                 value={editor.form}
                 onChange={(event) => updateEditor({ form: event.target.value })}
                 disabled={isSubmitting}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+                className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
               >
                 {editorForms.map((availableForm) => (
                   <option key={availableForm} value={availableForm}>
@@ -546,7 +584,7 @@ function SupplyForm({
               value={editor.quantity}
               onChange={(event) => updateEditor({ quantity: event.target.value })}
               disabled={isSubmitting}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+              className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
             />
             {draftErrors.quantity && (
               <p className="mt-1 text-sm text-red-600">{draftErrors.quantity}</p>
@@ -572,7 +610,7 @@ function SupplyForm({
               value={editor.purchaseUnitPrice}
               onChange={(event) => updateEditor({ purchaseUnitPrice: event.target.value })}
               disabled={isSubmitting}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+              className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
             />
             {draftErrors.purchaseUnitPrice && (
               <p className="mt-1 text-sm text-red-600">{draftErrors.purchaseUnitPrice}</p>

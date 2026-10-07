@@ -1741,6 +1741,30 @@ describe('module Facturation', () => {
       )
     })
 
+    it('filtre la liste par date de facture', () => {
+      const first = createInvoice({
+        date: '2026-10-04',
+        items: [line(simpleProduct, 'SAC', 1, 1_000)],
+      })
+      const second = createInvoice({
+        date: '2026-10-07',
+        items: [line(simpleProduct, 'SAC', 1, 1_000)],
+      })
+
+      assert.deepEqual(
+        listInvoices({ dateFrom: '2026-10-07', dateTo: '2026-10-07' }).map((invoice) => invoice.reference),
+        [second.reference],
+      )
+      assert.deepEqual(
+        listInvoices({ dateFrom: '2026-10-04', dateTo: '2026-10-06' }).map((invoice) => invoice.reference),
+        [first.reference],
+      )
+      assert.deepEqual(
+        listInvoices({ dateFrom: '2026-10-01' }).map((invoice) => invoice.reference),
+        [second.reference, first.reference],
+      )
+    })
+
     it('relit une facture par identifiant et par référence', () => {
       const created = createInvoice({ items: [line(simpleProduct, 'SAC', 2, 1_000)] })
 

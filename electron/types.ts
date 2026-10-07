@@ -283,7 +283,17 @@ export interface SupplyItemInput {
 export interface SupplyCreateInput {
   /** Reception date as `YYYY-MM-DD`, defaults to today. */
   date?: string | null
-  /** Optional free text: there is no supplier table in this version. */
+  /**
+   * Optional supplier id. When provided, the `supplierName` snapshot is copied
+   * from the supplier row. When omitted, the system supplier
+   * "FOURNISSEUR COMPTANT" is used.
+   */
+  supplierId?: number | null
+  /**
+   * @deprecated Kept for backward compatibility with the free-text form.
+   * When `supplierId` is set, this value is ignored (the name comes from the
+   * supplier row). New code should pass `supplierId` only.
+   */
   supplierName?: string | null
   items: SupplyItemInput[]
 }
@@ -292,6 +302,8 @@ export interface SupplyCreateInput {
 export interface Supply {
   id: number
   reference: string
+  /** FK to the suppliers table, NULL when the document has no supplier. */
+  supplierId: number | null
   supplierName: string | null
   date: Date
   /** Sum of the line totals, never typed by the shopkeeper. */
@@ -434,6 +446,55 @@ export interface ClientAPI {
 }
 
 /**
+ * A supplier provides goods to the shop. Suppliers are never deleted physically:
+ * `isActive` is the only "removal" mechanism. The system supplier
+ * "FOURNISSEUR COMPTANT" is created automatically and cannot be modified,
+ * deactivated or deleted.
+ */
+export interface Supplier {
+  id: number
+  name: string
+  phone: string
+  address: string | null
+  isActive: boolean
+  isSystem: boolean
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface SupplierInput {
+  name: string
+  phone: string
+  address?: string | null
+}
+
+export type SupplierUpdateInput = SupplierInput
+
+export interface SupplierFilters {
+  /** Case-insensitive partial match on the supplier name. */
+  search?: string
+  /** Case-insensitive partial match on the phone number. */
+  phoneSearch?: string
+  isActive?: boolean | null
+}
+
+export type SupplierResult<T> =
+  | { success: true; data: T }
+  | { success: false; error: string }
+
+export interface SupplierAPI {
+  list: (filters?: SupplierFilters) => Promise<SupplierResult<Supplier[]>>
+  get: (id: number) => Promise<SupplierResult<Supplier | null>>
+  create: (input: SupplierInput) => Promise<SupplierResult<Supplier>>
+  update: (id: number, input: SupplierUpdateInput) => Promise<SupplierResult<Supplier>>
+  setActive: (id: number, isActive: boolean) => Promise<SupplierResult<Supplier>>
+  /** excludeId ignores the supplier being edited: its own name stays available. */
+  isNameAvailable: (name: string, excludeSupplierId?: number) => Promise<SupplierResult<boolean>>
+  isPhoneAvailable: (phone: string, excludeSupplierId?: number) => Promise<SupplierResult<boolean>>
+  ensureSystem: () => Promise<SupplierResult<Supplier>>
+}
+
+/**
  * A sale (a facture) is the commercial document of a sale. Its header carries
  * the automatic reference (VTE-000001), the sale date, the client (always
  * present: the system client "CLIENT COMPTANT" is used when none is selected),
@@ -546,6 +607,10 @@ export interface SaleFilters {
   clientId?: number | null
   /** Filter on the status. */
   status?: SaleStatus | null
+  /** Filter by sale date (YYYY-MM-DD). */
+  dateFrom?: string | null
+  /** Filter by sale date (YYYY-MM-DD). */
+  dateTo?: string | null
 }
 
 /**
@@ -626,6 +691,7 @@ export interface ElectronAPI {
   supplies: SupplyAPI
   transformations: TransformationAPI
   clients: ClientAPI
+  suppliers: SupplierAPI
   invoices: SaleAPI
   print: PrintAPI
 }

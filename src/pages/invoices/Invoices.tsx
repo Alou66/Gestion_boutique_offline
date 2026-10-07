@@ -29,6 +29,8 @@ function Invoices() {
   const [search, setSearch] = useState('')
   const [clientSearch, setClientSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<InvoiceStatusFilter>('all')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
 
   const loadInvoices = useCallback(async () => {
@@ -36,13 +38,13 @@ function Invoices() {
     setLoadError(null)
 
     try {
-      setInvoices(await invoiceService.list(buildInvoiceFilters(search, clientSearch, statusFilter)))
+      setInvoices(await invoiceService.list(buildInvoiceFilters(search, clientSearch, statusFilter, dateFrom, dateTo)))
     } catch {
       setLoadError(INVOICE_MESSAGES.unexpected)
     } finally {
       setIsLoading(false)
     }
-  }, [search, clientSearch, statusFilter])
+  }, [search, clientSearch, statusFilter, dateFrom, dateTo])
 
   useEffect(() => {
     const timer = setTimeout(loadInvoices, 200)
@@ -53,7 +55,7 @@ function Invoices() {
   // Un changement de filtre ou de recherche ramène à la première page.
   useEffect(() => {
     setCurrentPage(1)
-  }, [search, clientSearch, statusFilter])
+  }, [search, clientSearch, statusFilter, dateFrom, dateTo])
 
   const page = useMemo(() => paginateInvoices(invoices, currentPage), [invoices, currentPage])
 
@@ -63,7 +65,7 @@ function Invoices() {
         <h1 className="text-2xl font-bold">Liste des factures</h1>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <div>
           <label htmlFor="invoice-search" className="block text-sm font-medium text-gray-700">
             Référence
@@ -74,7 +76,7 @@ function Invoices() {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="VTE-000001"
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500"
           />
         </div>
 
@@ -91,7 +93,7 @@ function Invoices() {
             value={clientSearch}
             onChange={(event) => setClientSearch(event.target.value)}
             placeholder="Nom du client"
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500"
           />
         </div>
 
@@ -106,12 +108,38 @@ function Invoices() {
             id="invoice-status-filter"
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value as InvoiceStatusFilter)}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500"
           >
             <option value="all">Toutes</option>
             <option value="VALIDEE">Validées</option>
             <option value="ANNULEE">Annulées</option>
           </select>
+        </div>
+
+        <div>
+          <label htmlFor="invoice-date-from" className="block text-sm font-medium text-gray-700">
+            Date début
+          </label>
+          <input
+            id="invoice-date-from"
+            type="date"
+            value={dateFrom}
+            onChange={(event) => setDateFrom(event.target.value)}
+            className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+          />
+        </div>
+
+        <div>
+          <label htmlFor="invoice-date-to" className="block text-sm font-medium text-gray-700">
+            Date fin
+          </label>
+          <input
+            id="invoice-date-to"
+            type="date"
+            value={dateTo}
+            onChange={(event) => setDateTo(event.target.value)}
+            className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+          />
         </div>
       </div>
 

@@ -19756,11 +19756,15 @@ var SUPPLY_QUANTITY_MAX = 1e6;
 var SUPPLY_UNIT_PRICE_MAX = 1e9;
 var SUPPLY_SUPPLIER_MAX_LENGTH = 120;
 var SUPPLY_ITEMS_MAX = 100;
+var CASH_SUPPLIER_VALUE = "comptant";
 var SUPPLY_MESSAGES = {
   dateRequired: "La date de l'approvisionnement est obligatoire.",
   dateInvalid: "La date doit \xEAtre au format AAAA-MM-JJ.",
   dateOutOfRange: "La date doit \xEAtre comprise entre le 01/01/2000 et le 31/12/2099.",
   supplierTooLong: `Le fournisseur ne peut pas d\xE9passer ${SUPPLY_SUPPLIER_MAX_LENGTH} caract\xE8res.`,
+  supplierRequired: "Choisissez un fournisseur actif.",
+  supplierNotFound: "Ce fournisseur n'existe plus.",
+  supplierInactive: "Fournisseur inactif : choisissez un fournisseur actif ou le fournisseur comptant.",
   itemsRequired: "Un approvisionnement doit contenir au moins un produit.",
   tooManyItems: `Un approvisionnement ne peut pas d\xE9passer ${SUPPLY_ITEMS_MAX} lignes.`,
   productRequired: "Le produit est obligatoire.",
@@ -19792,6 +19796,7 @@ var supplyDateSchema = external_exports.string({ error: SUPPLY_MESSAGES.dateRequ
 );
 var productIdSchema = external_exports.number({ error: SUPPLY_MESSAGES.productRequired }).int(SUPPLY_MESSAGES.productRequired).positive(SUPPLY_MESSAGES.productRequired);
 var formSchema = external_exports.string({ error: SUPPLY_MESSAGES.formRequired }).trim().min(1, SUPPLY_MESSAGES.formRequired).transform(normalizeFormLabel);
+var supplierIdSchema = external_exports.number({ error: SUPPLY_MESSAGES.supplierRequired }).int(SUPPLY_MESSAGES.supplierRequired).positive(SUPPLY_MESSAGES.supplierRequired).nullable();
 var quantitySchema = external_exports.number({ error: SUPPLY_MESSAGES.quantityRequired }).int(SUPPLY_MESSAGES.quantityInvalid).positive(SUPPLY_MESSAGES.quantityInvalid).max(SUPPLY_QUANTITY_MAX, SUPPLY_MESSAGES.quantityTooHigh);
 var unitPriceSchema = external_exports.number({ error: SUPPLY_MESSAGES.unitPriceRequired }).int(SUPPLY_MESSAGES.unitPriceInvalid).min(0, SUPPLY_MESSAGES.unitPriceInvalid).max(SUPPLY_UNIT_PRICE_MAX, SUPPLY_MESSAGES.unitPriceTooHigh);
 var supplyItemFormSchema = external_exports.object({
@@ -19802,7 +19807,7 @@ var supplyItemFormSchema = external_exports.object({
 });
 var supplyFormSchema = external_exports.object({
   date: supplyDateSchema,
-  supplierName: external_exports.string({ error: SUPPLY_MESSAGES.supplierTooLong }).trim().max(SUPPLY_SUPPLIER_MAX_LENGTH, SUPPLY_MESSAGES.supplierTooLong),
+  supplierId: supplierIdSchema,
   items: external_exports.array(supplyItemFormSchema).min(1, SUPPLY_MESSAGES.itemsRequired).max(SUPPLY_ITEMS_MAX, SUPPLY_MESSAGES.tooManyItems)
 }).superRefine((values, ctx) => {
   const seen = /* @__PURE__ */ new Set();
@@ -19874,13 +19879,13 @@ function formatAmount(value) {
 function formatReceivedQuantity(form, quantity) {
   return `${quantity} ${pluralizeFormLabel(form)}`;
 }
-function buildValidationMessage(input2) {
+function buildValidationMessage(input2, supplierName) {
   const total = input2.items.reduce(
     (sum, item) => sum + item.quantity * item.purchaseUnitPrice,
     0
   );
   const lines = `${input2.items.length} ${input2.items.length > 1 ? "lignes" : "ligne"}`;
-  const supplier = input2.supplierName ? ` du fournisseur \xAB ${input2.supplierName} \xBB` : "";
+  const supplier = supplierName ? ` du fournisseur \xAB ${supplierName} \xBB` : "";
   return `${lines}${supplier} pour un total de ${formatAmount(total)}. Le stock sera augment\xE9 imm\xE9diatement et l'approvisionnement ne pourra plus \xEAtre modifi\xE9.`;
 }
 function getProductForms(product) {
@@ -19904,10 +19909,27 @@ function validateDraftLine(productId, form, products) {
   }
   return null;
 }
+function resolveSupplierSelection(rawValue, suppliers) {
+  if (rawValue === CASH_SUPPLIER_VALUE || rawValue.trim() === "") {
+    return { ok: true, supplierId: null };
+  }
+  const supplierId = parseNumberField(rawValue);
+  if (supplierId === void 0 || !Number.isInteger(supplierId) || supplierId <= 0) {
+    return { ok: false, error: SUPPLY_MESSAGES.supplierRequired };
+  }
+  const supplier = suppliers.find((candidate) => candidate.id === supplierId);
+  if (!supplier) {
+    return { ok: false, error: SUPPLY_MESSAGES.supplierNotFound };
+  }
+  if (!supplier.isActive) {
+    return { ok: false, error: SUPPLY_MESSAGES.supplierInactive };
+  }
+  return { ok: true, supplierId };
+}
 function toSupplyInput(values) {
   return {
     date: values.date,
-    supplierName: values.supplierName === "" ? null : values.supplierName,
+    supplierId: values.supplierId ?? null,
     items: values.items.map((item) => ({
       productId: item.productId,
       form: item.form,
@@ -19953,7 +19975,7 @@ describe3("formulaire d'approvisionnement", () => {
   it("accepte un document valide avec plusieurs lignes", () => {
     const parsed = supplyFormSchema.safeParse({
       date: "2026-10-04",
-      supplierName: "  Grossiste Sokna  ",
+      supplierId: 1,
       items: [
         { productId: 1, form: "SAC", quantity: 10, purchaseUnitPrice: 2500 },
         { productId: 2, form: "CARTON", quantity: 4, purchaseUnitPrice: 1e4 }
@@ -19962,16 +19984,26 @@ describe3("formulaire d'approvisionnement", () => {
     assert2.equal(parsed.success, true);
     const payload = parsed.success ? toSupplyInput(parsed.data) : null;
     assert2.equal(payload?.date, "2026-10-04");
-    assert2.equal(payload?.supplierName, "Grossiste Sokna");
+    assert2.equal(payload?.supplierId, 1);
     assert2.deepEqual(payload?.items, [
       { productId: 1, form: "SAC", quantity: 10, purchaseUnitPrice: 2500 },
       { productId: 2, form: "CARTON", quantity: 4, purchaseUnitPrice: 1e4 }
     ]);
   });
+  it("accepte un document sans fournisseur (fournisseur comptant)", () => {
+    const parsed = supplyFormSchema.safeParse({
+      date: "2026-10-04",
+      supplierId: null,
+      items: [{ productId: 1, form: "SAC", quantity: 1, purchaseUnitPrice: 100 }]
+    });
+    assert2.equal(parsed.success, true);
+    const payload = parsed.success ? toSupplyInput(parsed.data) : null;
+    assert2.equal(payload?.supplierId, null);
+  });
   it("refuse un document sans ligne", () => {
     const parsed = supplyFormSchema.safeParse({
       date: "2026-10-04",
-      supplierName: "",
+      supplierId: null,
       items: []
     });
     assert2.equal(parsed.success, false);
@@ -19988,7 +20020,7 @@ describe3("formulaire d'approvisionnement", () => {
     for (const [date5, expected] of cases) {
       const parsed = supplyFormSchema.safeParse({
         date: date5,
-        supplierName: "",
+        supplierId: null,
         items: [{ productId: 1, form: "SAC", quantity: 1, purchaseUnitPrice: 100 }]
       });
       assert2.equal(parsed.success, false, `${String(date5)} must be refused`);
@@ -19999,7 +20031,7 @@ describe3("formulaire d'approvisionnement", () => {
     for (const quantity of [0, -1, 1.5]) {
       const parsed = supplyFormSchema.safeParse({
         date: "2026-10-04",
-        supplierName: "",
+        supplierId: null,
         items: [{ productId: 1, form: "SAC", quantity, purchaseUnitPrice: 100 }]
       });
       assert2.equal(parsed.success, false, `${quantity} must be refused`);
@@ -20013,14 +20045,14 @@ describe3("formulaire d'approvisionnement", () => {
     for (const purchaseUnitPrice of [-1, 1.5]) {
       const parsed = supplyFormSchema.safeParse({
         date: "2026-10-04",
-        supplierName: "",
+        supplierId: null,
         items: [{ productId: 1, form: "SAC", quantity: 1, purchaseUnitPrice }]
       });
       assert2.equal(parsed.success, false, `${purchaseUnitPrice} must be refused`);
     }
     const free = supplyFormSchema.safeParse({
       date: "2026-10-04",
-      supplierName: "",
+      supplierId: null,
       items: [{ productId: 1, form: "SAC", quantity: 1, purchaseUnitPrice: 0 }]
     });
     assert2.equal(free.success, true);
@@ -20028,7 +20060,7 @@ describe3("formulaire d'approvisionnement", () => {
   it("refuse deux lignes du m\xEAme produit dans la m\xEAme forme", () => {
     const parsed = supplyFormSchema.safeParse({
       date: "2026-10-04",
-      supplierName: "",
+      supplierId: null,
       items: [
         { productId: 1, form: "SAC", quantity: 10, purchaseUnitPrice: 2500 },
         { productId: 1, form: "SAC", quantity: 5, purchaseUnitPrice: 2500 }
@@ -20043,7 +20075,7 @@ describe3("formulaire d'approvisionnement", () => {
   it("accepte le m\xEAme produit dans deux formes diff\xE9rentes", () => {
     const parsed = supplyFormSchema.safeParse({
       date: "2026-10-04",
-      supplierName: "",
+      supplierId: null,
       items: [
         { productId: 2, form: "CARTON", quantity: 10, purchaseUnitPrice: 1e4 },
         { productId: 2, form: "SEAU", quantity: 5, purchaseUnitPrice: 2500 }
@@ -20207,24 +20239,73 @@ describe3("saisie des lignes d'approvisionnement", () => {
     assert2.equal(SUPPLY_MESSAGES.lineNotCommitted.length > 0, true);
   });
   it("r\xE9sume le document avant la confirmation", () => {
-    const message = buildValidationMessage({
-      date: "2026-10-04",
-      supplierName: "Grossiste Sokna",
-      items: [
-        { productId: 1, form: "SAC", quantity: 10, purchaseUnitPrice: 2500 },
-        { productId: 2, form: "CARTON", quantity: 5, purchaseUnitPrice: 1e4 }
-      ]
-    });
+    const message = buildValidationMessage(
+      {
+        date: "2026-10-04",
+        supplierId: null,
+        items: [
+          { productId: 1, form: "SAC", quantity: 10, purchaseUnitPrice: 2500 },
+          { productId: 2, form: "CARTON", quantity: 5, purchaseUnitPrice: 1e4 }
+        ]
+      },
+      "Grossiste Sokna"
+    );
     assert2.equal(message.includes("2 lignes"), true);
     assert2.equal(message.includes("Grossiste Sokna"), true);
     assert2.equal(message.includes(new Intl.NumberFormat("fr-FR").format(75e3)), true);
     assert2.equal(message.includes("ne pourra plus \xEAtre modifi\xE9"), true);
-    const single = buildValidationMessage({
-      date: "2026-10-04",
-      supplierName: null,
-      items: [{ productId: 1, form: "SAC", quantity: 10, purchaseUnitPrice: 2500 }]
-    });
+    const single = buildValidationMessage(
+      {
+        date: "2026-10-04",
+        supplierId: null,
+        items: [{ productId: 1, form: "SAC", quantity: 10, purchaseUnitPrice: 2500 }]
+      },
+      null
+    );
     assert2.equal(single.includes("1 ligne "), true);
     assert2.equal(single.includes("fournisseur"), false);
+  });
+});
+describe3("r\xE9solution de la s\xE9lection fournisseur", () => {
+  const buildSupplier = (overrides = {}) => ({
+    id: 1,
+    name: "Grossiste Sokna",
+    phone: "+221770000001",
+    address: null,
+    isActive: true,
+    isSystem: false,
+    createdAt: /* @__PURE__ */ new Date(),
+    updatedAt: /* @__PURE__ */ new Date(),
+    ...overrides
+  });
+  it("accepte le fournisseur comptant quand aucun syst\xE8me n\u2019existe", () => {
+    const result = resolveSupplierSelection(CASH_SUPPLIER_VALUE, []);
+    assert2.equal(result.ok, true);
+    if (result.ok) {
+      assert2.equal(result.supplierId, null);
+    }
+  });
+  it("r\xE9sout un fournisseur actif par son identifiant", () => {
+    const supplier = buildSupplier({ id: 7 });
+    const result = resolveSupplierSelection("7", [supplier]);
+    assert2.equal(result.ok, true);
+    if (result.ok) {
+      assert2.equal(result.supplierId, 7);
+    }
+  });
+  it("refuse un fournisseur inactif", () => {
+    const supplier = buildSupplier({ id: 5, isActive: false });
+    const result = resolveSupplierSelection("5", [supplier]);
+    assert2.equal(result.ok, false);
+    if (!result.ok) {
+      assert2.equal(result.error, SUPPLY_MESSAGES.supplierInactive);
+    }
+  });
+  it("refuse un fournisseur introuvable", () => {
+    const result = resolveSupplierSelection("42", [buildSupplier()]);
+    assert2.equal(result.ok, false);
+    if (!result.ok) {
+      assert2.equal(result.error, SUPPLY_MESSAGES.supplierNotFound);
+    }
   });
 });

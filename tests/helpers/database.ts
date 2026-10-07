@@ -5,7 +5,8 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { closeDatabase, getDb, initializeDatabase } from '../../electron/database/client'
 import { createCategory } from '../../electron/services/categoryService'
 import { createProduct, setProductActive } from '../../electron/services/productService'
-import type { Category, Product, ProductInput } from '../../electron/types'
+import { createSupplier, ensureSystemSupplier } from '../../electron/services/supplierService'
+import type { Category, Product, ProductInput, Supplier } from '../../electron/types'
 
 /**
  * The tests exercise the real main process services against a real SQLite file,
@@ -93,3 +94,11 @@ export function seedTransformableProduct(
 }
 
 export { setProductActive }
+
+export function seedSimpleSupplier(name = 'FOURNISSEUR SAHEL', phone = '+221771112233'): Supplier {
+  return createSupplier({ name, phone })
+}
+
+export function seedSystemSupplier(): Supplier {
+  return ensureSystemSupplier()
+}

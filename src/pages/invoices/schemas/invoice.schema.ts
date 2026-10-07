@@ -580,11 +580,15 @@ export function buildInvoiceFilters(
   search: string,
   clientSearch: string,
   status: InvoiceStatusFilter,
+  dateFrom?: string,
+  dateTo?: string,
 ): SaleFilters {
   return {
     search: search.trim() || undefined,
     clientSearch: clientSearch.trim() || undefined,
     status: status === 'all' ? null : status,
+    dateFrom: dateFrom?.trim() || undefined,
+    dateTo: dateTo?.trim() || undefined,
   }
 }
 

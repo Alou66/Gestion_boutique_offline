@@ -2,8 +2,8 @@ import {
   computeLineTotal,
   createDraftKey,
   createEmptyDraft,
+  CASH_SUPPLIER_VALUE,
   SUPPLY_ITEMS_MAX,
-  SUPPLY_SUPPLIER_MAX_LENGTH,
   supplyDateSchema,
   supplyItemFormSchema,
   todayInputValue,
@@ -24,8 +24,8 @@ import type {
  */
 export interface SupplyDraft {
   date: string
-  /** Nom du fournisseur, tel que tapé. */
-  supplierName: string
+  /** Identifiant textuel du fournisseur choisi (« comptant » pour le fournisseur système). */
+  supplierId: string
   /** Lignes déjà ajoutées au document. */
   lines: SupplyLineDraft[]
   /** Contenu de l'éditeur de ligne, même incomplet. */
@@ -141,10 +141,10 @@ function parseSupplyDraft(raw: unknown): SupplyDraft {
 
   return {
     date: date.success ? date.data : todayInputValue(),
-    supplierName:
-      typeof source.supplierName === 'string'
-        ? source.supplierName.trim().slice(0, SUPPLY_SUPPLIER_MAX_LENGTH)
-        : '',
+    supplierId:
+      typeof source.supplierId === 'string' && source.supplierId.trim() !== ''
+        ? source.supplierId.trim()
+        : CASH_SUPPLIER_VALUE,
     lines,
     editor,
     editingKey,
@@ -165,7 +165,7 @@ export function isMeaningfulSupplyDraft(draft: SupplyDraft | null): boolean {
     return true
   }
 
-  if (draft.supplierName.trim() !== '') {
+  if (draft.supplierId !== CASH_SUPPLIER_VALUE && draft.supplierId.trim() !== '') {
     return true
   }
 

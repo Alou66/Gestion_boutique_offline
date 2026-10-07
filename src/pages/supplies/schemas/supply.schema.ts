@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { Product, SupplyCreateInput } from '@/types'
+import type { Product, SupplyCreateInput, Supplier } from '@/types'
 import { normalizeFormLabel, parseNumberField, pluralizeFormLabel } from '../../products/schemas/product.schema'
 
 export const SUPPLY_QUANTITY_MAX = 1_000_000
@@ -7,12 +7,23 @@ export const SUPPLY_UNIT_PRICE_MAX = 1_000_000_000
 export const SUPPLY_SUPPLIER_MAX_LENGTH = 120
 export const SUPPLY_ITEMS_MAX = 100
 
+/**
+ * Valeur du sélecteur fournisseur quand le fournisseur comptant
+ * (« FOURNISSEUR COMPTANT ») n'a pas encore été créé : l'approvisionnement
+ * sera alors enregistré sans fournisseur choisi, et c'est le service qui
+ * utilisera le fournisseur système par défaut.
+ */
+export const CASH_SUPPLIER_VALUE = 'comptant'
+
 /** Display messages, identical to electron/services/supplyService.ts. */
 export const SUPPLY_MESSAGES = {
   dateRequired: "La date de l'approvisionnement est obligatoire.",
   dateInvalid: 'La date doit être au format AAAA-MM-JJ.',
   dateOutOfRange: 'La date doit être comprise entre le 01/01/2000 et le 31/12/2099.',
   supplierTooLong: `Le fournisseur ne peut pas dépasser ${SUPPLY_SUPPLIER_MAX_LENGTH} caractères.`,
+  supplierRequired: 'Choisissez un fournisseur actif.',
+  supplierNotFound: "Ce fournisseur n'existe plus.",
+  supplierInactive: 'Fournisseur inactif : choisissez un fournisseur actif ou le fournisseur comptant.',
   itemsRequired: 'Un approvisionnement doit contenir au moins un produit.',
   tooManyItems: `Un approvisionnement ne peut pas dépasser ${SUPPLY_ITEMS_MAX} lignes.`,
   productRequired: 'Le produit est obligatoire.',
@@ -76,6 +87,13 @@ const formSchema = z
   .min(1, SUPPLY_MESSAGES.formRequired)
   .transform(normalizeFormLabel)
 
+/** null : le fournisseur comptant du système (« FOURNISSEUR COMPTANT »), jamais un fournisseur inactif. */
+const supplierIdSchema = z
+  .number({ error: SUPPLY_MESSAGES.supplierRequired })
+  .int(SUPPLY_MESSAGES.supplierRequired)
+  .positive(SUPPLY_MESSAGES.supplierRequired)
+  .nullable()
+
 const quantitySchema = z
   .number({ error: SUPPLY_MESSAGES.quantityRequired })
   .int(SUPPLY_MESSAGES.quantityInvalid)
@@ -102,10 +120,7 @@ export const supplyItemFormSchema = z.object({
 export const supplyFormSchema = z
   .object({
     date: supplyDateSchema,
-    supplierName: z
-      .string({ error: SUPPLY_MESSAGES.supplierTooLong })
-      .trim()
-      .max(SUPPLY_SUPPLIER_MAX_LENGTH, SUPPLY_MESSAGES.supplierTooLong),
+    supplierId: supplierIdSchema,
     items: z
       .array(supplyItemFormSchema)
       .min(1, SUPPLY_MESSAGES.itemsRequired)
@@ -133,7 +148,7 @@ export const supplyFormSchema = z
 export type SupplyFormData = z.infer<typeof supplyFormSchema>
 
 export type SupplyFormErrors = Partial<
-  Record<'date' | 'supplierName' | 'items', string>
+  Record<'date' | 'supplierId' | 'items', string>
 >
 
 export type SupplyItemDraftErrors = Partial<
@@ -270,13 +285,13 @@ export function formatSupplyDate(date: Date): string {
  * exactly what the validation changes. The amounts are recomputed from the lines
  * because the shopkeeper never types the total.
  */
-export function buildValidationMessage(input: SupplyCreateInput): string {
+export function buildValidationMessage(input: SupplyCreateInput, supplierName?: string | null): string {
   const total = input.items.reduce(
     (sum, item) => sum + item.quantity * item.purchaseUnitPrice,
     0,
   )
   const lines = `${input.items.length} ${input.items.length > 1 ? 'lignes' : 'ligne'}`
-  const supplier = input.supplierName ? ` du fournisseur « ${input.supplierName} »` : ''
+  const supplier = supplierName ? ` du fournisseur « ${supplierName} »` : ''
 
   return `${lines}${supplier} pour un total de ${formatAmount(total)}. Le stock sera augmenté immédiatement et l'approvisionnement ne pourra plus être modifié.`
 }
@@ -321,6 +336,39 @@ export function validateDraftLine(
 }
 
 /**
+ * Résout la sélection du SearchableSelect (une chaîne) en identifiant le
+ * fournisseur choisi, ou null pour le fournisseur comptant système.
+ * Le fournisseur inactif ou introuvable est refusé avant l'aller-retour.
+ */
+export type SupplierSelection =
+  | { ok: true; supplierId: number | null }
+  | { ok: false; error: string }
+
+export function resolveSupplierSelection(rawValue: string, suppliers: Supplier[]): SupplierSelection {
+  if (rawValue === CASH_SUPPLIER_VALUE || rawValue.trim() === '') {
+    return { ok: true, supplierId: null }
+  }
+
+  const supplierId = parseNumberField(rawValue)
+
+  if (supplierId === undefined || !Number.isInteger(supplierId) || supplierId <= 0) {
+    return { ok: false, error: SUPPLY_MESSAGES.supplierRequired }
+  }
+
+  const supplier = suppliers.find((candidate) => candidate.id === supplierId)
+
+  if (!supplier) {
+    return { ok: false, error: SUPPLY_MESSAGES.supplierNotFound }
+  }
+
+  if (!supplier.isActive) {
+    return { ok: false, error: SUPPLY_MESSAGES.supplierInactive }
+  }
+
+  return { ok: true, supplierId }
+}
+
+/**
  * Shapes the validated form data into the payload expected by the main process.
  * The amounts are not sent: the service recomputes them from the quantity and
  * the unit price, so the renderer is never the source of truth for the money.
@@ -328,7 +376,7 @@ export function validateDraftLine(
 export function toSupplyInput(values: SupplyFormData): SupplyCreateInput {
   return {
     date: values.date,
-    supplierName: values.supplierName === '' ? null : values.supplierName,
+    supplierId: values.supplierId ?? null,
     items: values.items.map((item) => ({
       productId: item.productId,
       form: item.form,

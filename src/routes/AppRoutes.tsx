@@ -2,6 +2,7 @@ import { HashRouter, Routes, Route } from 'react-router-dom'
 import { MainLayout } from '@/layouts'
 import { Login, Setup } from '@/pages/auth'
 import { Categories } from '@/pages/categories'
+import { CashJournal } from '@/pages/caisse'
 import { Clients } from '@/pages/clients'
 import { Dashboard } from '@/pages/dashboard'
 import {
@@ -14,6 +15,7 @@ import { Products } from '@/pages/products'
 import SettingsPage from '@/pages/Settings'
 import { Stock } from '@/pages/stock'
 import { SupplyDetail, Supplies } from '@/pages/supplies'
+import { Suppliers } from '@/pages/suppliers'
 import { TransformationDetail, Transformations } from '@/pages/transformations'
 import AuthProvider from '@/context/AuthProvider'
 import {
@@ -56,6 +58,16 @@ function AppRoutes() {
             }
           />
           <Route
+            path="/caisse"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <CashJournal />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/categories"
             element={
               <ProtectedRoute>
@@ -71,6 +83,16 @@ function AppRoutes() {
               <ProtectedRoute>
                 <MainLayout>
                   <Clients />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/fournisseurs"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <Suppliers />
                 </MainLayout>
               </ProtectedRoute>
             }

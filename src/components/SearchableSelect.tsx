@@ -13,6 +13,7 @@ interface SearchableSelectProps {
   options: SearchableSelectOption[]
   placeholder?: string
   disabled?: boolean
+  className?: string
   /** Valeur de l'option retenue, jamais le texte tapé. */
   onChange: (value: string) => void
 }
@@ -31,6 +32,7 @@ function SearchableSelect({
   options,
   placeholder = '',
   disabled = false,
+  className = '',
   onChange,
 }: SearchableSelectProps) {
   const [query, setQuery] = useState<string | null>(null)
@@ -140,7 +142,7 @@ function SearchableSelect({
         onFocus={() => setIsOpen(true)}
         onBlur={() => setIsOpen(false)}
         onKeyDown={handleKeyDown}
-        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+        className={`mt-1 block w-full rounded-md border ${className} shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60`}
       />
       {isOpen && (
         <ul

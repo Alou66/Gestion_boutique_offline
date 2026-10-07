@@ -10,6 +10,10 @@ import {
   getProductById,
   normalizeFormName,
 } from './productService'
+import {
+  ensureSystemSupplier,
+  getSupplierById,
+} from './supplierService'
 import type {
   Product,
   Supply,
@@ -42,6 +46,8 @@ export const SUPPLY_ERRORS = {
   duplicateLine:
     'Un même produit ne peut pas apparaître deux fois avec la même forme. Regroupez les quantités sur une seule ligne.',
   notFound: 'Approvisionnement introuvable.',
+  supplierNotFound: 'Ce fournisseur n’existe pas.',
+  supplierInactive: 'Fournisseur inactif : choisissez un fournisseur actif.',
   referenceConflict: "La référence de l'approvisionnement est déjà utilisée.",
   totalInvalid: "Le total de l'approvisionnement est invalide.",
   unexpected: 'Une erreur inattendue est survenue.',
@@ -253,6 +259,7 @@ function assertNoDuplicateLines(lines: SupplyItemInput[]): void {
 const supplyColumns = {
   id: supplies.id,
   reference: supplies.reference,
+  supplierId: supplies.supplierId,
   supplierName: supplies.supplierName,
   date: supplies.date,
   totalAmount: supplies.totalAmount,
@@ -262,6 +269,7 @@ const supplyColumns = {
 type SupplyRow = {
   id: number
   reference: string
+  supplierId: number | null
   supplierName: string | null
   date: Date
   totalAmount: number
@@ -272,6 +280,7 @@ function toSupply(row: SupplyRow, itemCount: number): Supply {
   return {
     id: row.id,
     reference: row.reference,
+    supplierId: row.supplierId,
     supplierName: row.supplierName,
     date: row.date,
     totalAmount: row.totalAmount,
@@ -472,6 +481,7 @@ function withMappedErrors<T>(operation: () => T): T {
 /** Structural validation of the payload: no database access yet. */
 function parsePayload(input: SupplyCreateInput): {
   lines: SupplyItemInput[]
+  supplierId: number | null
   supplierName: string | null
   date: Date
 } {
@@ -482,21 +492,6 @@ function parsePayload(input: SupplyCreateInput): {
     throw new SupplyError(toErrorCode(parsed.error, 'itemsRequired'))
   }
 
-  const rawSupplierName =
-    typeof rawInput.supplierName === 'string' ? rawInput.supplierName : ''
-
-  if (rawSupplierName.trim()) {
-    const parsedSupplier = supplierNameSchema.safeParse(rawSupplierName)
-
-    if (!parsedSupplier.success) {
-      throw new SupplyError('supplierTooLong')
-    }
-
-    if (parsedSupplier.data.length > SUPPLY_SUPPLIER_MAX_LENGTH) {
-      throw new SupplyError('supplierTooLong')
-    }
-  }
-
   const date = parseSupplyDate(
     typeof rawInput.date === 'string' && rawInput.date.trim()
       ? rawInput.date
@@ -505,9 +500,43 @@ function parsePayload(input: SupplyCreateInput): {
 
   assertNoDuplicateLines(parsed.data.items)
 
+  // Resolve the supplier: by id when a real supplier is chosen, or by the
+  // deprecated free-text name, or the system "FOURNISSEUR COMPTANT" last resort.
+  let supplierId: number | null = null
+  let supplierName: string | null = null
+
+  if (rawInput.supplierId !== undefined && rawInput.supplierId !== null) {
+    const supplier = getSupplierById(rawInput.supplierId)
+
+    if (!supplier) {
+      throw new SupplyError('supplierNotFound')
+    }
+
+    if (!supplier.isActive) {
+      throw new SupplyError('supplierInactive')
+    }
+
+    supplierId = supplier.id
+    supplierName = normalizeSupplierName(supplier.name)
+  } else if (typeof rawInput.supplierName === 'string' && rawInput.supplierName.trim()) {
+    const parsedSupplier = supplierNameSchema.safeParse(rawInput.supplierName)
+
+    if (!parsedSupplier.success) {
+      throw new SupplyError('supplierTooLong')
+    }
+
+    supplierName = parsedSupplier.data
+    supplierId = null
+  } else {
+    const systemSupplier = ensureSystemSupplier()
+    supplierId = systemSupplier.id
+    supplierName = normalizeSupplierName(systemSupplier.name)
+  }
+
   return {
     lines: parsed.data.items,
-    supplierName: rawSupplierName.trim() ? normalizeSupplierName(rawSupplierName) : null,
+    supplierId,
+    supplierName,
     date,
   }
 }
@@ -531,7 +560,7 @@ function parsePayload(input: SupplyCreateInput): {
  * movement at all (a logical stock of 0).
  */
 export function createSupply(input: SupplyCreateInput): SupplyDetail {
-  const { lines, supplierName, date } = parsePayload(input)
+  const { lines, supplierId, supplierName, date } = parsePayload(input)
   const db = getDb()
 
   return withMappedErrors(() =>
@@ -557,6 +586,7 @@ export function createSupply(input: SupplyCreateInput): SupplyDetail {
         .insert(supplies)
         .values({
           reference,
+          supplierId,
           supplierName,
           date,
           // Placeholder: the real total is the sum of the persisted lines,

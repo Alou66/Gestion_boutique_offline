@@ -618,6 +618,18 @@ export function listInvoices(filters: SaleFilters = {}): Sale[] {
     conditions.push(eq(sales.status, filters.status))
   }
 
+  if (typeof filters?.dateFrom === 'string' && filters.dateFrom.trim()) {
+    conditions.push(
+      sql`${sales.saleDate} >= ${Math.floor(parseInvoiceDate(filters.dateFrom).getTime() / 1000)}`,
+    )
+  }
+
+  if (typeof filters?.dateTo === 'string' && filters.dateTo.trim()) {
+    conditions.push(
+      sql`${sales.saleDate} <= ${Math.floor(parseInvoiceDate(filters.dateTo).getTime() / 1000)}`,
+    )
+  }
+
   const db = getDb()
   const rows = db
     .select(saleColumns)

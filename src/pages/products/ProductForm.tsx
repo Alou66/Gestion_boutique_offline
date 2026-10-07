@@ -241,7 +241,7 @@ function ProductForm({
             onChange={(event) => handleNameChange(event.target.value)}
             style={{ textTransform: 'uppercase' }}
             disabled={isSubmitting}
-            className="flex-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+            className="flex-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
           />
           {nameStatusIcon()}
         </div>
@@ -262,7 +262,7 @@ function ProductForm({
           value={categoryId}
           onChange={(event) => setCategoryId(event.target.value)}
           disabled={isSubmitting}
-          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+          className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
         >
           <option value="">Choisir une catégorie</option>
           {categories.map((category) => (
@@ -295,7 +295,7 @@ function ProductForm({
             value={purchasePrice}
             onChange={(event) => setPurchasePrice(event.target.value)}
             disabled={isSubmitting}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+            className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
           />
           {fieldErrors.purchasePrice && (
             <p className="mt-1 text-sm text-red-600">{fieldErrors.purchasePrice}</p>
@@ -320,7 +320,7 @@ function ProductForm({
             value={salePrice}
             onChange={(event) => setSalePrice(event.target.value)}
             disabled={isSubmitting}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+            className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
           />
           {fieldErrors.salePrice && (
             <p className="mt-1 text-sm text-red-600">{fieldErrors.salePrice}</p>
@@ -344,7 +344,7 @@ function ProductForm({
           value={primaryForm}
           onChange={(event) => setPrimaryForm(event.target.value)}
           disabled={isSubmitting}
-          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+          className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
         />
         {fieldErrors.primaryForm && (
           <p className="mt-1 text-sm text-red-600">{fieldErrors.primaryForm}</p>
@@ -358,7 +358,7 @@ function ProductForm({
           checked={isTransformable}
           onChange={handleToggleTransformable}
           disabled={isSubmitting}
-          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          className="h-4 w-4 rounded border border-gray-500 text-blue-600 focus:ring-blue-500"
         />
         Produit transformable ?
       </label>
@@ -381,7 +381,7 @@ function ProductForm({
               value={secondaryForm}
               onChange={(event) => setSecondaryForm(event.target.value)}
               disabled={isSubmitting}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+              className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
             />
             {fieldErrors.secondaryForm && (
               <p className="mt-1 text-sm text-red-600">{fieldErrors.secondaryForm}</p>
@@ -407,7 +407,7 @@ function ProductForm({
               value={conversionQuantity}
               onChange={(event) => setConversionQuantity(event.target.value)}
               disabled={isSubmitting}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+              className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
             />
             {fieldErrors.conversionQuantity && (
               <p className="mt-1 text-sm text-red-600">{fieldErrors.conversionQuantity}</p>
@@ -434,7 +434,7 @@ function ProductForm({
               value={secondarySalePrice}
               onChange={(event) => setSecondarySalePrice(event.target.value)}
               disabled={isSubmitting}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+              className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
             />
             {fieldErrors.secondarySalePrice && (
               <p className="mt-1 text-sm text-red-600">{fieldErrors.secondarySalePrice}</p>

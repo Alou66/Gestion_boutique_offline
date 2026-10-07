@@ -171,7 +171,7 @@ function TransformationForm({
             value={productId}
             onChange={(event) => handleProductChange(event.target.value)}
             disabled={isSubmitting}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+            className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
           >
             <option value="">Sélectionner un produit</option>
             {products.map((availableProduct) => (
@@ -196,7 +196,7 @@ function TransformationForm({
             value={date}
             onChange={(event) => setDate(event.target.value)}
             disabled={isSubmitting}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+            className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
           />
           {fieldErrors.date && <p className="mt-1 text-sm text-red-600">{fieldErrors.date}</p>}
         </div>
@@ -223,7 +223,7 @@ function TransformationForm({
               setSourceForm(event.target.value)
             }}
             disabled={isSubmitting || !hasProduct}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+            className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
           >
             {forms.length === 0 && <option value="">—</option>}
             {forms.map((availableForm) => (
@@ -247,7 +247,7 @@ function TransformationForm({
             value={destinationForm ?? ''}
             placeholder="—"
             disabled={isSubmitting}
-            className="mt-1 block w-full rounded-md border-gray-200 bg-gray-100 text-gray-600 shadow-sm"
+            className="mt-1 block w-full rounded-md border border-gray-500 bg-gray-100 text-gray-600 shadow-sm"
           />
         </div>
 
@@ -273,7 +273,7 @@ function TransformationForm({
               setSourceQuantity(event.target.value)
             }}
             disabled={isSubmitting || !hasProduct}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
+            className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
           />
           {fieldErrors.sourceQuantity && (
             <p className="mt-1 text-sm text-red-600">{fieldErrors.sourceQuantity}</p>

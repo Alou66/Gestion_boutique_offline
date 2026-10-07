@@ -68,6 +68,18 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('clients:is-phone-available', phone, excludeClientId),
     ensureSystem: () => ipcRenderer.invoke('clients:ensure-system'),
   },
+  suppliers: {
+    list: (filters) => ipcRenderer.invoke('suppliers:list', filters),
+    get: (id) => ipcRenderer.invoke('suppliers:get', id),
+    create: (input) => ipcRenderer.invoke('suppliers:create', input),
+    update: (id, input) => ipcRenderer.invoke('suppliers:update', id, input),
+    setActive: (id, isActive) => ipcRenderer.invoke('suppliers:set-active', id, isActive),
+    isNameAvailable: (name, excludeSupplierId) =>
+      ipcRenderer.invoke('suppliers:is-name-available', name, excludeSupplierId),
+    isPhoneAvailable: (phone, excludeSupplierId) =>
+      ipcRenderer.invoke('suppliers:is-phone-available', phone, excludeSupplierId),
+    ensureSystem: () => ipcRenderer.invoke('suppliers:ensure-system'),
+  },
   invoices: {
     create: (input) => ipcRenderer.invoke('invoices:create', input),
     getById: (id) => ipcRenderer.invoke('invoices:get-by-id', id),

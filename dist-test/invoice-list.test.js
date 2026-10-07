@@ -19847,11 +19847,13 @@ function paymentStatusTone(status) {
 function saleStatusTone(status) {
   return status === "VALIDEE" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700";
 }
-function buildInvoiceFilters(search, clientSearch, status) {
+function buildInvoiceFilters(search, clientSearch, status, dateFrom, dateTo) {
   return {
     search: search.trim() || void 0,
     clientSearch: clientSearch.trim() || void 0,
-    status: status === "all" ? null : status
+    status: status === "all" ? null : status,
+    dateFrom: dateFrom?.trim() || void 0,
+    dateTo: dateTo?.trim() || void 0
   };
 }
 function paginateInvoices(sales, page) {
