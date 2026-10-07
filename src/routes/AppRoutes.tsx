@@ -4,7 +4,14 @@ import { Login, Setup } from '@/pages/auth'
 import { Categories } from '@/pages/categories'
 import { Clients } from '@/pages/clients'
 import { Dashboard } from '@/pages/dashboard'
+import {
+  InvoiceCreate,
+  InvoiceDetail,
+  InvoiceEdit,
+  Invoices,
+} from '@/pages/invoices'
 import { Products } from '@/pages/products'
+import SettingsPage from '@/pages/Settings'
 import { Stock } from '@/pages/stock'
 import { SupplyDetail, Supplies } from '@/pages/supplies'
 import { TransformationDetail, Transformations } from '@/pages/transformations'
@@ -124,6 +131,56 @@ function AppRoutes() {
               <ProtectedRoute>
                 <MainLayout>
                   <TransformationDetail />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/factures"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <Invoices />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/factures/nouveau"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <InvoiceCreate />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/factures/:id/modifier"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <InvoiceEdit />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/factures/:id"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <InvoiceDetail />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/parametres"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <SettingsPage />
                 </MainLayout>
               </ProtectedRoute>
             }

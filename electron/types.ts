@@ -7,7 +7,10 @@ export interface DatabaseStatus {
 export interface Settings {
   id: number
   shopName: string
+  address?: string | null
   phone: string | null
+  phone2?: string | null
+  ninea?: string | null
   ownerName: string | null
   createdAt: Date
   updatedAt: Date
@@ -55,7 +58,10 @@ export interface AuthStatus {
 
 export interface AuthSetupInput {
   shopName: string
+  address?: string | null
   phone?: string | null
+  phone2?: string | null
+  ninea?: string | null
   ownerName?: string | null
   username: string
   password: string
@@ -114,20 +120,22 @@ export interface Product {
  * Stock is never stored on `products`: it is always the sum of the movements of
  * `stock_movements`. TRANSFORMATION is the transfer between the two forms of a
  * transformable product (OUT on the source form, IN on the destination form);
- * VENTE will be added by its own module.
+ * SALE is the OUT movement created by a facture (VTE-000001) when it takes stock
+ * out, and its reason always names that facture.
  */
 export type StockMovementType =
   | 'STOCK_INITIAL'
   | 'AJUSTEMENT'
   | 'APPROVISIONNEMENT'
   | 'TRANSFORMATION'
+  | 'SALE'
 
 /**
  * Sense of a movement. `quantity` is always a positive integer: the direction
  * carries the sign, so a STOCK_INITIAL is always IN, an APPROVISIONNEMENT is
- * always IN and an AJUSTEMENT is explicitly IN (entrée) or OUT (sortie). A
- * TRANSFORMATION is the only type that exists in both directions on the same
- * product: it is OUT on the source form and IN on the destination form.
+ * always IN, a SALE is always OUT and an AJUSTEMENT is explicitly IN (entrée) or
+ * OUT (sortie). TRANSFORMATION is the only type that exists in both directions on
+ * the same product: it is OUT on the source form and IN on the destination form.
  */
 export type StockDirection = 'IN' | 'OUT'
 
@@ -143,7 +151,7 @@ export interface StockMovement {
   signedQuantity: number
   /**
    * NULL for STOCK_INITIAL, APPROVISIONNEMENT and TRANSFORMATION, mandatory for
-   * AJUSTEMENT.
+   * AJUSTEMENT and for SALE (the reference of the facture, "Facture VTE-000001").
    */
   reason: string | null
   createdAt: Date
@@ -425,6 +433,189 @@ export interface ClientAPI {
   ensureSystem: () => Promise<ClientResult<Client>>
 }
 
+/**
+ * A sale (a facture) is the commercial document of a sale. Its header carries
+ * the automatic reference (VTE-000001), the sale date, the client (always
+ * present: the system client "CLIENT COMPTANT" is used when none is selected),
+ * the status (VALIDEE at creation, ANNULEE after a cancellation) and the total
+ * recomputed from its lines. A sale is never physically deleted: it is cancelled
+ * (ANNULEE) and then optionally physically removed, and only when it carries no
+ * payment at all.
+ */
+export interface Sale {
+  id: number
+  reference: string
+  clientId: number
+  clientName: string
+  saleDate: Date
+  status: SaleStatus
+  totalAmount: number
+  /** Sum of the payments, recomputed on every read, never stored. */
+  paidAmount: number
+  /** totalAmount - paidAmount, never negative. */
+  remainingAmount: number
+  /** Derived from totalAmount and paidAmount, never stored. */
+  paymentStatus: PaymentStatus
+  createdAt: Date
+  updatedAt: Date
+}
+
+/** VALIDEE at creation, ANNULEE after a cancellation. */
+export type SaleStatus = 'VALIDEE' | 'ANNULEE'
+
+/**
+ * The payment status is always recomputed from the sum of the payments against
+ * the total of the sale, never stored: it is a derived value, not a column.
+ */
+export type PaymentStatus = 'NON_PAYEE' | 'PARTIELLEMENT_PAYEE' | 'PAYEE'
+
+/** One line typed by the shopkeeper: the amounts are recomputed by the service. */
+export interface SaleItemInput {
+  productId: number
+  /** Must be one of the forms of the product (SAC, CARTON, SEAU…). */
+  form: string
+  /** Strictly positive whole number of sold units of that form. */
+  quantity: number
+  /**
+   * Real sale price of one unit on this document, in whole FCFA. Omitted: the
+   * price configured on the product for that form is copied into the line.
+   */
+  unitPrice?: number | null
+}
+
+export interface SaleCreateInput {
+  /** Sale date as `YYYY-MM-DD`, defaults to today. */
+  date?: string | null
+  /** Optional client id. When omitted, the system client is used. */
+  clientId?: number | null
+  /** The lines of the sale. */
+  items: SaleItemInput[]
+}
+
+export interface SaleUpdateInput {
+  /** Optional new client id. */
+  clientId?: number | null
+  /** Optional new sale date as `YYYY-MM-DD`. */
+  date?: string | null
+  /** The new lines of the sale (replace the previous ones). */
+  items: SaleItemInput[]
+}
+
+/** One line of a sale, joined with the product name for display. */
+export interface SaleItem {
+  id: number
+  saleId: number
+  productId: number
+  productName: string
+  form: string
+  quantity: number
+  unitPrice: number
+  /** quantity * unitPrice, recomputed by the service. */
+  lineTotal: number
+}
+
+/** A facture and its lines, with its payments always recomputed. */
+export interface SaleDetail extends Sale {
+  items: SaleItem[]
+  paymentSummary: SalePaymentSummary
+}
+
+/** One payment of a sale. */
+export interface Payment {
+  id: number
+  saleId: number
+  amount: number
+  paymentDate: Date
+  createdAt: Date
+  updatedAt: Date
+}
+
+/** Recomputed payment summary of a sale, always derived from the payments. */
+export interface SalePaymentSummary {
+  paidAmount: number
+  remainingAmount: number
+  status: PaymentStatus
+}
+
+export interface SaleFilters {
+  /** Case-insensitive partial match on the reference (VTE-000001…). */
+  search?: string
+  /** Case-insensitive partial match on the client name. */
+  clientSearch?: string
+  /** Filter on the client id. */
+  clientId?: number | null
+  /** Filter on the status. */
+  status?: SaleStatus | null
+}
+
+/**
+ * One payment typed by the shopkeeper, sent to the IPC layer. There is no payment
+ * method in this version: only the amount and the date.
+ */
+export interface SalePaymentInput {
+  /** Strictly positive whole number of FCFA received. */
+  amount: number
+  /** Payment date as `YYYY-MM-DD`, defaults to today. */
+  date?: string | null
+}
+
+export type SaleResult<T> =
+  | { success: true; data: T }
+  | { success: false; error: string }
+
+/**
+ * Facturation API exposed to the renderer by the preload bridge. Every method is
+ * a thin pass-through to `electron/services/invoiceService`: the business rules
+ * (stock, totals, payment status, cancellation, deletion) never live here.
+ */
+export interface SaleAPI {
+  list: (filters?: SaleFilters) => Promise<SaleResult<Sale[]>>
+  getById: (id: number) => Promise<SaleResult<SaleDetail>>
+  getByReference: (reference: string) => Promise<SaleResult<SaleDetail>>
+  create: (input: SaleCreateInput) => Promise<SaleResult<SaleDetail>>
+  update: (id: number, input: SaleUpdateInput) => Promise<SaleResult<SaleDetail>>
+  cancel: (id: number) => Promise<SaleResult<Sale>>
+  delete: (id: number) => Promise<SaleResult<null>>
+  addPayment: (saleId: number, input: SalePaymentInput) => Promise<SaleResult<Payment>>
+  updatePayment: (
+    paymentId: number,
+    input: SalePaymentInput,
+  ) => Promise<SaleResult<Payment>>
+  deletePayment: (paymentId: number) => Promise<SaleResult<null>>
+  getPaymentSummary: (saleId: number) => Promise<SaleResult<SalePaymentSummary>>
+  listPayments: (saleId: number) => Promise<SaleResult<Payment[]>>
+}
+
+/**
+ * A printable document: a self contained HTML page, produced by the renderer and
+ * printed by the main process in an offline hidden window. Only the shopkeeper
+ * actions (imprimer, télécharger PDF) ever need it, no business rule lives here.
+ */
+export interface PrintRequest {
+  /** Complete HTML page: `<head>` with its styles, `<body>` and its content. */
+  html: string
+  /** Window title, and default file name for the PDF. */
+  title?: string
+}
+
+export type PrintResult<T> =
+  | { success: true; data: T }
+  | { success: false; error: string }
+
+/** `path` is null when the shopkeeper cancelled the save dialog. */
+export type PrintPdfResult = PrintResult<{ path: string | null }>
+
+/**
+ * Native printing bridge. `print` opens the system print dialog on the HTML
+ * document, `savePdf` generates the PDF offline and asks where to store it,
+ * `preview` opens a visible window so the document can be inspected first.
+ */
+export interface PrintAPI {
+  print: (request: PrintRequest) => Promise<PrintResult<null>>
+  savePdf: (request: PrintRequest) => Promise<PrintPdfResult>
+  preview: (request: PrintRequest) => Promise<PrintResult<null>>
+}
+
 export interface ElectronAPI {
   database: DatabaseAPI
   settings: SettingsAPI
@@ -435,4 +626,6 @@ export interface ElectronAPI {
   supplies: SupplyAPI
   transformations: TransformationAPI
   clients: ClientAPI
+  invoices: SaleAPI
+  print: PrintAPI
 }

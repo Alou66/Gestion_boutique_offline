@@ -5361,3 +5361,225 @@ describe("migration 0005", () => {
     sqlite.close();
   });
 });
+describe("migration 0007", () => {
+  let workDir;
+  let databasePath;
+  let clientMigrationsFolder;
+  before(() => {
+    workDir = mkdtempSync(path.join(os.tmpdir(), "gestion-boutique-migration-"));
+    databasePath = path.join(workDir, "database.sqlite");
+    clientMigrationsFolder = snapshotUpTo(workDir, 7);
+  });
+  after(() => {
+    rmSync(workDir, { recursive: true, force: true });
+  });
+  it("ajoute les factures sans perdre l'historique du stock", () => {
+    const sqlite = new Database(databasePath);
+    sqlite.pragma("foreign_keys = ON");
+    const db = drizzle(sqlite);
+    migrate(db, { migrationsFolder: clientMigrationsFolder });
+    sqlite.prepare(
+      "insert into categories (name, created_at, updated_at) values ('BOISSONS', 0, 0)"
+    ).run();
+    sqlite.prepare(
+      `insert into products (name, category_id, purchase_price, sale_price, is_transformable, primary_form, secondary_form, conversion_quantity, secondary_sale_price, is_active, created_at, updated_at)
+         values ('CHOCOPAIN 5 KG', 1, 12000, 15000, 1, 'CARTON', 'SEAU', 4, 4000, 1, 0, 0)`
+    ).run();
+    sqlite.prepare(
+      `insert into clients (name, phone, is_active, is_system, created_at, updated_at)
+         values ('CLIENT COMPTANT', '000-000-0000', 1, 1, 0, 0)`
+    ).run();
+    sqlite.prepare(
+      `insert into stock_movements (id, product_id, form, movement_type, direction, quantity, reason, created_at)
+         values (1, 1, 'CARTON', 'STOCK_INITIAL', 'IN', 10, null, 0)`
+    ).run();
+    sqlite.prepare(
+      `insert into stock_movements (id, product_id, form, movement_type, direction, quantity, reason, created_at)
+         values (2, 1, 'SEAU', 'TRANSFORMATION', 'IN', 8, null, 0)`
+    ).run();
+    migrate(db, { migrationsFolder: sourceMigrations });
+    const tables = sqlite.prepare("select name from sqlite_master where type='table' order by name").all();
+    const tableNames = tables.map((row) => row.name);
+    assert.ok(tableNames.includes("stock_movements"));
+    assert.ok(tableNames.includes("sales"));
+    assert.ok(tableNames.includes("sale_items"));
+    assert.ok(tableNames.includes("payments"));
+    assert.deepEqual(
+      sqlite.prepare(
+        "select id, product_id, form, movement_type, direction, quantity, reason from stock_movements order by id"
+      ).all(),
+      [
+        {
+          id: 1,
+          product_id: 1,
+          form: "CARTON",
+          movement_type: "STOCK_INITIAL",
+          direction: "IN",
+          quantity: 10,
+          reason: null
+        },
+        {
+          id: 2,
+          product_id: 1,
+          form: "SEAU",
+          movement_type: "TRANSFORMATION",
+          direction: "IN",
+          quantity: 8,
+          reason: null
+        }
+      ]
+    );
+    sqlite.prepare(
+      `insert into stock_movements (product_id, form, movement_type, direction, quantity, reason, created_at)
+         values (1, 'CARTON', 'SALE', 'OUT', 3, 'Facture VTE-000001', 0)`
+    ).run();
+    assert.throws(
+      () => sqlite.prepare(
+        `insert into stock_movements (product_id, form, movement_type, direction, quantity, reason, created_at)
+           values (1, 'CARTON', 'SALE', 'IN', 1, 'Facture VTE-000001', 0)`
+      ).run()
+    );
+    assert.throws(
+      () => sqlite.prepare(
+        `insert into stock_movements (product_id, form, movement_type, direction, quantity, created_at)
+           values (1, 'CARTON', 'SALE', 'OUT', 1, 0)`
+      ).run()
+    );
+    assert.throws(
+      () => sqlite.prepare(
+        `insert into stock_movements (product_id, form, movement_type, direction, quantity, reason, created_at)
+           values (1, 'CARTON', 'RETRAIT', 'OUT', 1, 'Facture VTE-000001', 0)`
+      ).run()
+    );
+    assert.throws(
+      () => sqlite.prepare(
+        `insert into stock_movements (product_id, form, movement_type, direction, quantity, reason, created_at)
+           values (1, 'CARTON', 'STOCK_INITIAL', 'IN', 7, null, 0)`
+      ).run()
+    );
+    assert.throws(
+      () => sqlite.prepare(
+        `insert into stock_movements (product_id, form, movement_type, direction, quantity, reason, created_at)
+           values (1, 'SEAU', 'TRANSFORMATION', 'OUT', 1, 'Conversion manuelle', 0)`
+      ).run()
+    );
+    sqlite.prepare(
+      `insert into sales (reference, client_id, sale_date, status, total_amount, created_at, updated_at)
+         values ('VTE-000001', 1, 0, 'VALIDEE', 75000, 0, 0)`
+    ).run();
+    assert.throws(
+      () => sqlite.prepare(
+        `insert into sales (reference, client_id, sale_date, status, total_amount, created_at, updated_at)
+           values ('VTE-000001', 1, 0, 'VALIDEE', 75000, 0, 0)`
+      ).run()
+    );
+    assert.throws(
+      () => sqlite.prepare(
+        `insert into sales (reference, client_id, sale_date, status, total_amount, created_at, updated_at)
+           values ('VTE-000002', 1, 0, 'SUPPRIMEE', 75000, 0, 0)`
+      ).run()
+    );
+    assert.throws(
+      () => sqlite.prepare(
+        `insert into sales (reference, client_id, sale_date, status, total_amount, created_at, updated_at)
+           values ('VTE-000002', 1, 0, 'VALIDEE', -1, 0, 0)`
+      ).run()
+    );
+    assert.throws(
+      () => sqlite.prepare(
+        `insert into sales (reference, client_id, sale_date, status, total_amount, created_at, updated_at)
+           values ('VTE-000002', null, 0, 'VALIDEE', 75000, 0, 0)`
+      ).run()
+    );
+    assert.throws(
+      () => sqlite.prepare(
+        `insert into sales (reference, client_id, sale_date, status, total_amount, created_at, updated_at)
+           values ('VTE-000002', 4242, 0, 'VALIDEE', 75000, 0, 0)`
+      ).run()
+    );
+    sqlite.prepare(
+      `insert into sale_items (sale_id, product_id, form, quantity, unit_price, line_total)
+         values (1, 1, 'CARTON', 3, 25000, 75000)`
+    ).run();
+    assert.throws(
+      () => sqlite.prepare(
+        `insert into sale_items (sale_id, product_id, form, quantity, unit_price, line_total)
+           values (1, 1, 'CARTON', 1, 25000, 25000)`
+      ).run()
+    );
+    sqlite.prepare(
+      `insert into sale_items (sale_id, product_id, form, quantity, unit_price, line_total)
+         values (1, 1, 'SEAU', 2, 5000, 10000)`
+    ).run();
+    assert.throws(
+      () => sqlite.prepare(
+        `insert into sale_items (sale_id, product_id, form, quantity, unit_price, line_total)
+           values (1, 1, 'BIDON', 0, 25000, 0)`
+      ).run()
+    );
+    assert.throws(
+      () => sqlite.prepare(
+        `insert into sale_items (sale_id, product_id, form, quantity, unit_price, line_total)
+           values (1, 1, 'BIDON', 1, -1, -1)`
+      ).run()
+    );
+    assert.throws(
+      () => sqlite.prepare(
+        `insert into sale_items (sale_id, product_id, form, quantity, unit_price, line_total)
+           values (4242, 1, 'BIDON', 1, 100, 100)`
+      ).run()
+    );
+    sqlite.prepare(
+      `insert into payments (sale_id, amount, payment_date, created_at, updated_at)
+         values (1, 30000, 0, 0, 0)`
+    ).run();
+    assert.throws(
+      () => sqlite.prepare(
+        `insert into payments (sale_id, amount, payment_date, created_at, updated_at)
+           values (1, 0, 0, 0, 0)`
+      ).run()
+    );
+    assert.throws(
+      () => sqlite.prepare(
+        `insert into payments (sale_id, amount, payment_date, created_at, updated_at)
+           values (1, -1, 0, 0, 0)`
+      ).run()
+    );
+    assert.throws(
+      () => sqlite.prepare(
+        `insert into payments (sale_id, amount, payment_date, created_at, updated_at)
+           values (4242, 1000, 0, 0, 0)`
+      ).run()
+    );
+    assert.throws(
+      () => sqlite.prepare(
+        `insert into payments (sale_id, amount, payment_method, payment_date, created_at, updated_at)
+           values (1, 1000, 'ESPECES', 0, 0, 0)`
+      ).run()
+    );
+    const salesColumns = sqlite.prepare("pragma table_info(sales)").all().map((row) => row.name);
+    const paymentsColumns = sqlite.prepare("pragma table_info(payments)").all().map((row) => row.name);
+    assert.equal(salesColumns.includes("payment_status"), false);
+    assert.equal(salesColumns.includes("paid_amount"), false);
+    assert.equal(paymentsColumns.includes("payment_method"), false);
+    sqlite.prepare("update sales set status = 'ANNULEE' where id = 1").run();
+    assert.deepEqual(
+      sqlite.prepare("select id, status, total_amount from sales order by id").all(),
+      [{ id: 1, status: "ANNULEE", total_amount: 75e3 }]
+    );
+    assert.equal(
+      sqlite.prepare("select count(*) as count from sale_items").get().count,
+      2
+    );
+    assert.equal(
+      sqlite.prepare("select count(*) as count from stock_movements").get().count,
+      3
+    );
+    migrate(db, { migrationsFolder: sourceMigrations });
+    assert.equal(
+      sqlite.prepare("select count(*) as count from sales").get().count,
+      1
+    );
+    sqlite.close();
+  });
+});

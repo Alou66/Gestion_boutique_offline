@@ -40,6 +40,7 @@ export const STOCK_MOVEMENT_LABELS = {
   AJUSTEMENT: 'Ajustement',
   APPROVISIONNEMENT: 'Approvisionnement',
   TRANSFORMATION: 'Transformation',
+  SALE: 'Facture',
 } as const
 
 /** Movement types already implemented: no other type can exist yet. */
@@ -48,6 +49,7 @@ export const VISIBLE_MOVEMENT_TYPES = [
   'AJUSTEMENT',
   'APPROVISIONNEMENT',
   'TRANSFORMATION',
+  'SALE',
 ] as const
 
 const formFieldSchema = z

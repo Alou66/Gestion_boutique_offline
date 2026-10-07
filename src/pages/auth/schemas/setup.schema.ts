@@ -9,10 +9,13 @@ export const setupSchema = z
       .trim()
       .min(1, 'Le nom de la boutique est requis')
       .max(120, 'Le nom de la boutique est trop long'),
+    address: z.string().trim().max(200, 'L\'adresse est trop longue'),
     phone: z
       .string()
       .trim()
       .max(40, 'Le numéro de téléphone est trop long'),
+    phone2: z.string().trim().max(40, 'Le deuxième numéro de téléphone est trop long'),
+    ninea: z.string().trim().max(40, 'Le NINEA est trop long'),
     ownerName: z.string().trim().max(120, 'Le nom est trop long'),
     username: z
       .string()

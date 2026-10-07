@@ -33,7 +33,10 @@ const credentialsSchema = z.object({
 
 const setupSchema = z.object({
   shopName: z.string().trim().min(1).max(120),
+  address: z.string().trim().max(200).optional(),
   phone: z.string().trim().max(40).optional(),
+  phone2: z.string().trim().max(40).optional(),
+  ninea: z.string().trim().max(40).optional(),
   ownerName: z.string().trim().max(120).optional(),
   username: z
     .string()
@@ -133,7 +136,10 @@ export function setupAccount(input: AuthSetupInput): PublicUser {
   const data = parsed.data
   const settingsInput: SettingsInput = {
     shopName: data.shopName,
+    address: data.address ?? null,
     phone: data.phone ?? null,
+    phone2: data.phone2 ?? null,
+    ninea: data.ninea ?? null,
     ownerName: data.ownerName ?? null,
   }
 

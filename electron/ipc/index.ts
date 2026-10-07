@@ -7,6 +7,8 @@ import {
 import { registerAuthIpcHandlers } from './auth'
 import { registerCategoryIpcHandlers } from './categories'
 import { registerClientIpcHandlers } from './clients'
+import { registerInvoiceIpcHandlers } from './invoices'
+import { registerPrintIpcHandlers } from './print'
 import { registerProductIpcHandlers } from './products'
 import { registerStockIpcHandlers } from './stock'
 import { registerSupplyIpcHandlers } from './supplies'
@@ -37,4 +39,6 @@ export function registerIpcHandlers(): void {
   registerSupplyIpcHandlers()
   registerTransformationIpcHandlers()
   registerClientIpcHandlers()
+  registerInvoiceIpcHandlers()
+  registerPrintIpcHandlers()
 }

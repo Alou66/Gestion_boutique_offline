@@ -68,6 +68,26 @@ const api: ElectronAPI = {
       ipcRenderer.invoke('clients:is-phone-available', phone, excludeClientId),
     ensureSystem: () => ipcRenderer.invoke('clients:ensure-system'),
   },
+  invoices: {
+    create: (input) => ipcRenderer.invoke('invoices:create', input),
+    getById: (id) => ipcRenderer.invoke('invoices:get-by-id', id),
+    getByReference: (reference) => ipcRenderer.invoke('invoices:get-by-reference', reference),
+    list: (filters) => ipcRenderer.invoke('invoices:list', filters),
+    update: (id, input) => ipcRenderer.invoke('invoices:update', id, input),
+    cancel: (id) => ipcRenderer.invoke('invoices:cancel', id),
+    delete: (id) => ipcRenderer.invoke('invoices:delete', id),
+    addPayment: (saleId, input) => ipcRenderer.invoke('invoices:add-payment', saleId, input),
+    updatePayment: (paymentId, input) =>
+      ipcRenderer.invoke('invoices:update-payment', paymentId, input),
+    deletePayment: (paymentId) => ipcRenderer.invoke('invoices:delete-payment', paymentId),
+    getPaymentSummary: (saleId) => ipcRenderer.invoke('invoices:get-payment-summary', saleId),
+    listPayments: (saleId) => ipcRenderer.invoke('invoices:list-payments', saleId),
+  },
+  print: {
+    print: (request) => ipcRenderer.invoke('print:html', request),
+    savePdf: (request) => ipcRenderer.invoke('print:pdf', request),
+    preview: (request) => ipcRenderer.invoke('print:preview', request),
+  },
 }
 
 contextBridge.exposeInMainWorld('api', api)

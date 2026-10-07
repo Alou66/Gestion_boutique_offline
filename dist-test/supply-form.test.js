@@ -19779,7 +19779,7 @@ var SUPPLY_MESSAGES = {
   notFound: "Approvisionnement introuvable.",
   unexpected: "Une erreur inattendue est survenue."
 };
-var dateSchema = external_exports.string({ error: SUPPLY_MESSAGES.dateRequired }).trim().min(1, SUPPLY_MESSAGES.dateRequired).refine((value) => {
+var supplyDateSchema = external_exports.string({ error: SUPPLY_MESSAGES.dateRequired }).trim().min(1, SUPPLY_MESSAGES.dateRequired).refine((value) => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) {
     return false;
@@ -19801,7 +19801,7 @@ var supplyItemFormSchema = external_exports.object({
   purchaseUnitPrice: unitPriceSchema
 });
 var supplyFormSchema = external_exports.object({
-  date: dateSchema,
+  date: supplyDateSchema,
   supplierName: external_exports.string({ error: SUPPLY_MESSAGES.supplierTooLong }).trim().max(SUPPLY_SUPPLIER_MAX_LENGTH, SUPPLY_MESSAGES.supplierTooLong),
   items: external_exports.array(supplyItemFormSchema).min(1, SUPPLY_MESSAGES.itemsRequired).max(SUPPLY_ITEMS_MAX, SUPPLY_MESSAGES.tooManyItems)
 }).superRefine((values, ctx) => {

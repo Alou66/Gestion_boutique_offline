@@ -35,7 +35,12 @@ export const SUPPLY_MESSAGES = {
   unexpected: 'Une erreur inattendue est survenue.',
 } as const
 
-const dateSchema = z
+/**
+ * Date de réception : `AAAA-MM-JJ`, un vrai jour du calendrier,
+ * entre 2000 et 2099. Exportée pour la restauration du brouillon,
+ * qui valide la date retrouvée avec les mêmes règles.
+ */
+export const supplyDateSchema = z
   .string({ error: SUPPLY_MESSAGES.dateRequired })
   .trim()
   .min(1, SUPPLY_MESSAGES.dateRequired)
@@ -96,7 +101,7 @@ export const supplyItemFormSchema = z.object({
  */
 export const supplyFormSchema = z
   .object({
-    date: dateSchema,
+    date: supplyDateSchema,
     supplierName: z
       .string({ error: SUPPLY_MESSAGES.supplierTooLong })
       .trim()

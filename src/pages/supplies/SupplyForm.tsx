@@ -1,7 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import type { Product, SupplyCreateInput } from '@/types'
+import { SearchableSelect } from '@/components'
+import type { SearchableSelectOption } from '@/components'
+import type { SupplyDraft } from './supply-draft'
 import {
   computeLineTotal,
   createEmptyDraft,
@@ -34,10 +37,18 @@ import type {
 interface SupplyFormProps {
   /** Active products of the shop, already loaded by the page. */
   products: Product[]
+  /**
+   * Brouillon d'un approvisionnement en cours : la saisie
+   * reprend là où le commerçant l'a quittée, même après un
+   * détour par les produits.
+   */
+  draft?: SupplyDraft | null
   isSubmitting: boolean
   error: string | null
   /** The validated lines are handed over for the confirmation step. */
   onValidate: (input: SupplyCreateInput) => void
+  /** Le contenu saisi est mémorisé pour retrouver la réception en cours. */
+  onDraftChange?: (draft: SupplyDraft) => void
   onCancel: () => void
 }
 
@@ -165,19 +176,44 @@ function LinesTable({
  */
 function SupplyForm({
   products,
+  draft = null,
   isSubmitting,
   error,
   onValidate,
+  onDraftChange,
   onCancel,
 }: SupplyFormProps) {
-  const [date, setDate] = useState(todayInputValue())
-  const [supplierName, setSupplierName] = useState('')
-  const [lines, setLines] = useState<SupplyLineDraft[]>([])
-  const [editor, setEditor] = useState<SupplyItemDraft>(createEmptyDraft)
-  const [editingKey, setEditingKey] = useState<string | null>(null)
+  const [date, setDate] = useState(draft ? draft.date : todayInputValue())
+  const [supplierName, setSupplierName] = useState(
+    draft ? draft.supplierName : '',
+  )
+  const [lines, setLines] = useState<SupplyLineDraft[]>(
+    draft ? draft.lines : [],
+  )
+  const [editor, setEditor] = useState<SupplyItemDraft>(
+    draft ? draft.editor : createEmptyDraft(),
+  )
+  const [editingKey, setEditingKey] = useState<string | null>(
+    draft ? draft.editingKey : null,
+  )
   const [formError, setFormError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<SupplyFormErrors>({})
   const [draftErrors, setDraftErrors] = useState<SupplyItemDraftErrors>({})
+
+  /**
+   * The content typed is memorized at every change: leaving the
+   * page to see the products or the list never loses the
+   * reception in progress.
+   */
+  useEffect(() => {
+    onDraftChange?.({
+      date,
+      supplierName,
+      lines,
+      editor,
+      editingKey,
+    })
+  }, [date, supplierName, lines, editor, editingKey, onDraftChange])
 
   const productsById = useMemo(
     () => new Map(products.map((product) => [product.id, product])),
@@ -186,6 +222,17 @@ function SupplyForm({
 
   const productNames = useMemo(
     () => new Map(products.map((product) => [product.id, product.name])),
+    [products],
+  )
+
+  /** Options du champ produit : la catégorie sert d'indice de recherche. */
+  const productOptions = useMemo<SearchableSelectOption[]>(
+    () =>
+      products.map((product) => ({
+        value: String(product.id),
+        label: product.name,
+        hint: product.categoryName || undefined,
+      })),
     [products],
   )
 
@@ -430,21 +477,15 @@ function SupplyForm({
             <label htmlFor="supply-product" className="block text-sm font-medium text-gray-700">
               Produit
             </label>
-            <select
+            <SearchableSelect
               id="supply-product"
               name="productId"
               value={editor.productId}
-              onChange={(event) => handleProductChange(event.target.value)}
+              options={productOptions}
+              placeholder="Choisir un produit"
               disabled={isSubmitting}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
-            >
-              <option value="">Choisir un produit</option>
-              {products.map((availableProduct) => (
-                <option key={availableProduct.id} value={availableProduct.id}>
-                  {availableProduct.name}
-                </option>
-              ))}
-            </select>
+              onChange={handleProductChange}
+            />
             {draftErrors.productId && (
               <p className="mt-1 text-sm text-red-600">{draftErrors.productId}</p>
             )}

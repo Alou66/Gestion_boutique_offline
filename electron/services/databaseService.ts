@@ -7,7 +7,10 @@ import type { DatabaseStatus, Settings, SettingsInput } from '../types'
 export function buildSettingsRow(input: SettingsInput, now: Date) {
   return {
     shopName: input.shopName.trim(),
+    address: input.address?.trim() || null,
     phone: input.phone?.trim() || null,
+    phone2: input.phone2?.trim() || null,
+    ninea: input.ninea?.trim() || null,
     ownerName: input.ownerName?.trim() || null,
     createdAt: now,
     updatedAt: now,
@@ -43,9 +46,10 @@ export function getDatabaseStatus(): DatabaseStatus {
 export async function getSettings(): Promise<Settings | null> {
   const db = getDb()
   try {
-    const rows = await db.select().from(settings).all()
-    return rows[0] ?? null
-  } catch {
+    const row = await db.select().from(settings).where(eq(settings.id, 1)).get()
+    return row ?? null
+  } catch (error) {
+    console.error('[settings] getSettings failed:', error)
     return null
   }
 }
@@ -64,7 +68,10 @@ export async function saveSettings(input: SettingsInput): Promise<Settings> {
       .update(settings)
       .set({
         shopName: values.shopName,
+        address: values.address,
         phone: values.phone,
+        phone2: values.phone2,
+        ninea: values.ninea,
         ownerName: values.ownerName,
         updatedAt: values.updatedAt,
       })

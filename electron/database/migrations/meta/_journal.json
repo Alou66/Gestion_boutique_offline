@@ -50,6 +50,13 @@
       "when": 1791147244000,
       "tag": "0006_add_clients",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1791147245000,
+      "tag": "0007_add_sales",
+      "breakpoints": true
     }
   ]
 }

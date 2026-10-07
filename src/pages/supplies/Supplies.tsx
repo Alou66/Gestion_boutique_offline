@@ -3,11 +3,18 @@ import { Link } from 'react-router-dom'
 import type { Product, Supply, SupplyCreateInput } from '@/types'
 import { productService, supplyService } from '@/services'
 import ConfirmDialog from '../categories/ConfirmDialog'
+import {
+  clearSupplyDraft,
+  readSupplyDraft,
+  saveSupplyDraft,
+} from './supply-draft'
+import type { SupplyDraft } from './supply-draft'
 import SupplyForm from './SupplyForm'
 import {
   buildValidationMessage,
   formatAmount,
   formatSupplyDate,
+  sumLineTotals,
   SUPPLY_MESSAGES,
 } from './schemas/supply.schema'
 
@@ -19,7 +26,13 @@ function Supplies() {
   const [actionError, setActionError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [supplierSearch, setSupplierSearch] = useState('')
-  const [isFormOpen, setIsFormOpen] = useState(false)
+  /** Réception en cours retrouvée à l'ouverture : le formulaire se rouvre. */
+  const [restoredDraft, setRestoredDraft] = useState<SupplyDraft | null>(() =>
+    readSupplyDraft(),
+  )
+  const [isFormOpen, setIsFormOpen] = useState(restoredDraft !== null)
+  /** Force le remount du formulaire après l'effacement du brouillon. */
+  const [formEpoch, setFormEpoch] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   /** Validated lines waiting for the confirmation, never written before it. */
@@ -80,6 +93,17 @@ function Supplies() {
     setPendingValidation(null)
   }
 
+  const handleDraftChange = useCallback((draft: SupplyDraft) => {
+    saveSupplyDraft(draft)
+  }, [])
+
+  /** Oublie le brouillon et repart d'une réception vide. */
+  const handleDiscardDraft = () => {
+    clearSupplyDraft()
+    setRestoredDraft(null)
+    setFormEpoch((epoch) => epoch + 1)
+  }
+
   /** The form hands over its validated lines: nothing is written yet. */
   const handleValidate = (input: SupplyCreateInput) => {
     setFormError(null)
@@ -97,6 +121,9 @@ function Supplies() {
     try {
       await supplyService.create(pendingValidation)
 
+      // Le document existe : le brouillon n'a plus de raison d'être.
+      clearSupplyDraft()
+      setRestoredDraft(null)
       closeForm()
       await loadSupplies()
 
@@ -177,13 +204,38 @@ function Supplies() {
       </div>
 
       {isFormOpen && (
-        <SupplyForm
-          products={products}
-          isSubmitting={isSubmitting}
-          error={formError}
-          onValidate={handleValidate}
-          onCancel={closeForm}
-        />
+        <div className="space-y-4">
+          {restoredDraft && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+              <p>
+                <span className="font-medium">Brouillon restauré :</span> la
+                réception en cours (
+                {restoredDraft.lines.length}{' '}
+                {restoredDraft.lines.length > 1 ? 'lignes' : 'ligne'}, total
+                de {formatAmount(sumLineTotals(restoredDraft.lines))}) a été
+                conservée. Vous pouvez continuer là où vous étiez.
+              </p>
+              <button
+                type="button"
+                onClick={handleDiscardDraft}
+                className="font-medium text-blue-900 underline"
+              >
+                Effacer le brouillon
+              </button>
+            </div>
+          )}
+
+          <SupplyForm
+            key={formEpoch}
+            products={products}
+            draft={restoredDraft}
+            isSubmitting={isSubmitting}
+            error={formError}
+            onValidate={handleValidate}
+            onDraftChange={handleDraftChange}
+            onCancel={closeForm}
+          />
+        </div>
       )}
 
       <div className="overflow-hidden rounded-lg border bg-white shadow">

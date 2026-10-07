@@ -560,3 +560,359 @@ describe('migration 0005', () => {
     sqlite.close()
   })
 })
+/**
+ * Upgrade path check: the 0007 migration must be applied on a database that
+ * already carries clients, supplies, transformations and a stock history,
+ * keeping every movement, opening movement_type to SALE and creating the
+ * sales / sale_items / payments tables of the facturation module.
+ */
+describe('migration 0007', () => {
+  let workDir: string
+  let databasePath: string
+  let clientMigrationsFolder: string
+
+  before(() => {
+    workDir = mkdtempSync(path.join(os.tmpdir(), 'gestion-boutique-migration-'))
+    databasePath = path.join(workDir, 'database.sqlite')
+    // Everything up to (and including) the clients migration, nothing after.
+    clientMigrationsFolder = snapshotUpTo(workDir, 7)
+  })
+
+  after(() => {
+    rmSync(workDir, { recursive: true, force: true })
+  })
+
+  it('ajoute les factures sans perdre l\'historique du stock', () => {
+    const sqlite = new Database(databasePath)
+    sqlite.pragma('foreign_keys = ON')
+    const db = drizzle(sqlite)
+
+    migrate(db, { migrationsFolder: clientMigrationsFolder })
+
+    sqlite
+      .prepare(
+        "insert into categories (name, created_at, updated_at) values ('BOISSONS', 0, 0)",
+      )
+      .run()
+    sqlite
+      .prepare(
+        `insert into products (name, category_id, purchase_price, sale_price, is_transformable, primary_form, secondary_form, conversion_quantity, secondary_sale_price, is_active, created_at, updated_at)
+         values ('CHOCOPAIN 5 KG', 1, 12000, 15000, 1, 'CARTON', 'SEAU', 4, 4000, 1, 0, 0)`,
+      )
+      .run()
+    sqlite
+      .prepare(
+        `insert into clients (name, phone, is_active, is_system, created_at, updated_at)
+         values ('CLIENT COMPTANT', '000-000-0000', 1, 1, 0, 0)`,
+      )
+      .run()
+    sqlite
+      .prepare(
+        `insert into stock_movements (id, product_id, form, movement_type, direction, quantity, reason, created_at)
+         values (1, 1, 'CARTON', 'STOCK_INITIAL', 'IN', 10, null, 0)`,
+      )
+      .run()
+    sqlite
+      .prepare(
+        `insert into stock_movements (id, product_id, form, movement_type, direction, quantity, reason, created_at)
+         values (2, 1, 'SEAU', 'TRANSFORMATION', 'IN', 8, null, 0)`,
+      )
+      .run()
+
+    // Upgrading to the facturation migration.
+    migrate(db, { migrationsFolder: sourceMigrations })
+
+    const tables = sqlite
+      .prepare("select name from sqlite_master where type='table' order by name")
+      .all() as { name: string }[]
+    const tableNames = tables.map((row) => row.name)
+
+    assert.ok(tableNames.includes('stock_movements'))
+    assert.ok(tableNames.includes('sales'))
+    assert.ok(tableNames.includes('sale_items'))
+    assert.ok(tableNames.includes('payments'))
+
+    // The stock history is copied as it was, ids included.
+    assert.deepEqual(
+      sqlite
+        .prepare(
+          'select id, product_id, form, movement_type, direction, quantity, reason from stock_movements order by id',
+        )
+        .all(),
+      [
+        {
+          id: 1,
+          product_id: 1,
+          form: 'CARTON',
+          movement_type: 'STOCK_INITIAL',
+          direction: 'IN',
+          quantity: 10,
+          reason: null,
+        },
+        {
+          id: 2,
+          product_id: 1,
+          form: 'SEAU',
+          movement_type: 'TRANSFORMATION',
+          direction: 'IN',
+          quantity: 8,
+          reason: null,
+        },
+      ],
+    )
+
+    // SALE is now accepted, always as an exit and always naming its facture.
+    sqlite
+      .prepare(
+        `insert into stock_movements (product_id, form, movement_type, direction, quantity, reason, created_at)
+         values (1, 'CARTON', 'SALE', 'OUT', 3, 'Facture VTE-000001', 0)`,
+      )
+      .run()
+
+    assert.throws(() =>
+      sqlite
+        .prepare(
+          `insert into stock_movements (product_id, form, movement_type, direction, quantity, reason, created_at)
+           values (1, 'CARTON', 'SALE', 'IN', 1, 'Facture VTE-000001', 0)`,
+        )
+        .run(),
+    )
+
+    assert.throws(() =>
+      sqlite
+        .prepare(
+          `insert into stock_movements (product_id, form, movement_type, direction, quantity, created_at)
+           values (1, 'CARTON', 'SALE', 'OUT', 1, 0)`,
+        )
+        .run(),
+    )
+
+    // A type that does not exist yet is still refused, and the previous
+    // constraints still hold: one initialization per form, and no reason on a
+    // transformation.
+    assert.throws(() =>
+      sqlite
+        .prepare(
+          `insert into stock_movements (product_id, form, movement_type, direction, quantity, reason, created_at)
+           values (1, 'CARTON', 'RETRAIT', 'OUT', 1, 'Facture VTE-000001', 0)`,
+        )
+        .run(),
+    )
+
+    assert.throws(() =>
+      sqlite
+        .prepare(
+          `insert into stock_movements (product_id, form, movement_type, direction, quantity, reason, created_at)
+           values (1, 'CARTON', 'STOCK_INITIAL', 'IN', 7, null, 0)`,
+        )
+        .run(),
+    )
+
+    assert.throws(() =>
+      sqlite
+        .prepare(
+          `insert into stock_movements (product_id, form, movement_type, direction, quantity, reason, created_at)
+           values (1, 'SEAU', 'TRANSFORMATION', 'OUT', 1, 'Conversion manuelle', 0)`,
+        )
+        .run(),
+    )
+
+    // The sales table carries its own constraints.
+    sqlite
+      .prepare(
+        `insert into sales (reference, client_id, sale_date, status, total_amount, created_at, updated_at)
+         values ('VTE-000001', 1, 0, 'VALIDEE', 75000, 0, 0)`,
+      )
+      .run()
+
+    assert.throws(() =>
+      sqlite
+        .prepare(
+          `insert into sales (reference, client_id, sale_date, status, total_amount, created_at, updated_at)
+           values ('VTE-000001', 1, 0, 'VALIDEE', 75000, 0, 0)`,
+        )
+        .run(),
+    )
+
+    assert.throws(() =>
+      sqlite
+        .prepare(
+          `insert into sales (reference, client_id, sale_date, status, total_amount, created_at, updated_at)
+           values ('VTE-000002', 1, 0, 'SUPPRIMEE', 75000, 0, 0)`,
+        )
+        .run(),
+    )
+
+    assert.throws(() =>
+      sqlite
+        .prepare(
+          `insert into sales (reference, client_id, sale_date, status, total_amount, created_at, updated_at)
+           values ('VTE-000002', 1, 0, 'VALIDEE', -1, 0, 0)`,
+        )
+        .run(),
+    )
+
+    // A facture always has a client.
+    assert.throws(() =>
+      sqlite
+        .prepare(
+          `insert into sales (reference, client_id, sale_date, status, total_amount, created_at, updated_at)
+           values ('VTE-000002', null, 0, 'VALIDEE', 75000, 0, 0)`,
+        )
+        .run(),
+    )
+
+    assert.throws(() =>
+      sqlite
+        .prepare(
+          `insert into sales (reference, client_id, sale_date, status, total_amount, created_at, updated_at)
+           values ('VTE-000002', 4242, 0, 'VALIDEE', 75000, 0, 0)`,
+        )
+        .run(),
+    )
+
+    // sale_items: one line per product and form, positive quantities.
+    sqlite
+      .prepare(
+        `insert into sale_items (sale_id, product_id, form, quantity, unit_price, line_total)
+         values (1, 1, 'CARTON', 3, 25000, 75000)`,
+      )
+      .run()
+
+    assert.throws(() =>
+      sqlite
+        .prepare(
+          `insert into sale_items (sale_id, product_id, form, quantity, unit_price, line_total)
+           values (1, 1, 'CARTON', 1, 25000, 25000)`,
+        )
+        .run(),
+    )
+
+    // The same product in its other form is a different line.
+    sqlite
+      .prepare(
+        `insert into sale_items (sale_id, product_id, form, quantity, unit_price, line_total)
+         values (1, 1, 'SEAU', 2, 5000, 10000)`,
+      )
+      .run()
+
+    assert.throws(() =>
+      sqlite
+        .prepare(
+          `insert into sale_items (sale_id, product_id, form, quantity, unit_price, line_total)
+           values (1, 1, 'BIDON', 0, 25000, 0)`,
+        )
+        .run(),
+    )
+
+    assert.throws(() =>
+      sqlite
+        .prepare(
+          `insert into sale_items (sale_id, product_id, form, quantity, unit_price, line_total)
+           values (1, 1, 'BIDON', 1, -1, -1)`,
+        )
+        .run(),
+    )
+
+    assert.throws(() =>
+      sqlite
+        .prepare(
+          `insert into sale_items (sale_id, product_id, form, quantity, unit_price, line_total)
+           values (4242, 1, 'BIDON', 1, 100, 100)`,
+        )
+        .run(),
+    )
+
+    // payments: strictly positive amounts, no payment method at all.
+    sqlite
+      .prepare(
+        `insert into payments (sale_id, amount, payment_date, created_at, updated_at)
+         values (1, 30000, 0, 0, 0)`,
+      )
+      .run()
+
+    assert.throws(() =>
+      sqlite
+        .prepare(
+          `insert into payments (sale_id, amount, payment_date, created_at, updated_at)
+           values (1, 0, 0, 0, 0)`,
+        )
+        .run(),
+    )
+
+    assert.throws(() =>
+      sqlite
+        .prepare(
+          `insert into payments (sale_id, amount, payment_date, created_at, updated_at)
+           values (1, -1, 0, 0, 0)`,
+        )
+        .run(),
+    )
+
+    assert.throws(() =>
+      sqlite
+        .prepare(
+          `insert into payments (sale_id, amount, payment_date, created_at, updated_at)
+           values (4242, 1000, 0, 0, 0)`,
+        )
+        .run(),
+    )
+
+    assert.throws(() =>
+      sqlite
+        .prepare(
+          `insert into payments (sale_id, amount, payment_method, payment_date, created_at, updated_at)
+           values (1, 1000, 'ESPECES', 0, 0, 0)`,
+        )
+        .run(),
+    )
+
+    // Neither the payment status nor the paid amount is stored.
+    const salesColumns = (
+      sqlite.prepare('pragma table_info(sales)').all() as { name: string }[]
+    ).map((row) => row.name)
+    const paymentsColumns = (
+      sqlite.prepare('pragma table_info(payments)').all() as { name: string }[]
+    ).map((row) => row.name)
+
+    assert.equal(salesColumns.includes('payment_status'), false)
+    assert.equal(salesColumns.includes('paid_amount'), false)
+    assert.equal(paymentsColumns.includes('payment_method'), false)
+
+    // A cancelled facture keeps its lines and its movements: they are only
+    // deleted by the service, on an explicit deletion of the document.
+    sqlite
+      .prepare('update sales set status = \'ANNULEE\' where id = 1')
+      .run()
+
+    assert.deepEqual(
+      sqlite
+        .prepare('select id, status, total_amount from sales order by id')
+        .all(),
+      [{ id: 1, status: 'ANNULEE', total_amount: 75000 }],
+    )
+    assert.equal(
+      (sqlite.prepare('select count(*) as count from sale_items').get() as {
+        count: number
+      }).count,
+      2,
+    )
+    assert.equal(
+      (sqlite.prepare('select count(*) as count from stock_movements').get() as {
+        count: number
+      }).count,
+      3,
+    )
+
+    // The migration is idempotent: running it again changes nothing.
+    migrate(db, { migrationsFolder: sourceMigrations })
+
+    assert.equal(
+      (sqlite.prepare('select count(*) as count from sales').get() as { count: number })
+        .count,
+      1,
+    )
+
+    sqlite.close()
+  })
+})

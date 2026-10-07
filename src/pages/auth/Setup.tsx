@@ -7,7 +7,10 @@ import type { SetupFormData } from './schemas/setup.schema'
 
 const initialForm: SetupFormData = {
   shopName: '',
+  address: '',
   phone: '',
+  phone2: '',
+  ninea: '',
   ownerName: '',
   username: '',
   password: '',
@@ -43,7 +46,10 @@ function Setup() {
     try {
       const response = await setup({
         shopName: result.data.shopName,
+        address: result.data.address,
         phone: result.data.phone,
+        phone2: result.data.phone2,
+        ninea: result.data.ninea,
         ownerName: result.data.ownerName,
         username: result.data.username,
         password: result.data.password,
@@ -66,10 +72,10 @@ function Setup() {
     <div className="flex min-h-screen items-center justify-center bg-gray-50 py-10">
       <div className="w-full max-w-lg space-y-8 rounded-lg bg-white p-8 shadow">
         <div className="space-y-2 text-center">
-          <h1 className="text-2xl font-bold">Configuration initiale</h1>
+          <h1 className="text-2xl font-bold">Créer ma boutique</h1>
           <p className="text-sm text-gray-600">
-            Créez votre boutique et votre compte. Ces informations restent
-            uniquement sur cet ordinateur.
+            Démarrez en quelques secondes. Ces informations restent uniquement sur
+            cet ordinateur.
           </p>
         </div>
 
@@ -90,7 +96,7 @@ function Setup() {
                 htmlFor="shopName"
                 className="block text-sm font-medium text-gray-700"
               >
-                Nom de la boutique
+                Nom de la boutique <span className="text-red-500">*</span>
               </label>
               <input
                 id="shopName"
@@ -105,10 +111,27 @@ function Setup() {
 
             <div>
               <label
+                htmlFor="address"
+                className="block text-sm font-medium text-gray-700"
+              >
+                Adresse
+              </label>
+              <input
+                id="address"
+                name="address"
+                type="text"
+                value={form.address}
+                onChange={update('address')}
+                className={inputClass}
+              />
+            </div>
+
+            <div>
+              <label
                 htmlFor="phone"
                 className="block text-sm font-medium text-gray-700"
               >
-                Téléphone
+                Téléphone 1 <span className="text-red-500">*</span>
               </label>
               <input
                 id="phone"
@@ -116,6 +139,41 @@ function Setup() {
                 type="tel"
                 value={form.phone}
                 onChange={update('phone')}
+                className={inputClass}
+                required
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="phone2"
+                className="block text-sm font-medium text-gray-700"
+              >
+                Téléphone 2
+              </label>
+              <input
+                id="phone2"
+                name="phone2"
+                type="tel"
+                value={form.phone2}
+                onChange={update('phone2')}
+                className={inputClass}
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="ninea"
+                className="block text-sm font-medium text-gray-700"
+              >
+                NINEA
+              </label>
+              <input
+                id="ninea"
+                name="ninea"
+                type="text"
+                value={form.ninea}
+                onChange={update('ninea')}
                 className={inputClass}
               />
             </div>
@@ -125,7 +183,7 @@ function Setup() {
                 htmlFor="ownerName"
                 className="block text-sm font-medium text-gray-700"
               >
-                Nom du propriétaire
+                Votre nom complet
               </label>
               <input
                 id="ownerName"
