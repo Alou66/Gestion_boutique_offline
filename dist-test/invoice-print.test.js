@@ -20342,6 +20342,8 @@ function buildShop(overrides = {}) {
     id: 1,
     shopName: "BOUTIQUE SOKNA",
     phone: "77 123 45 67",
+    address: "Rue 10, Dakar",
+    ninea: "12345678901",
     ownerName: "Awa Ndiaye",
     createdAt: /* @__PURE__ */ new Date(),
     updatedAt: /* @__PURE__ */ new Date(),
@@ -20421,7 +20423,8 @@ describe3("document imprimable de la facture", () => {
     assert2.equal(html.includes("<style>"), true);
     assert2.equal(html.includes("BOUTIQUE SOKNA"), true);
     assert2.equal(html.includes("77 123 45 67"), true);
-    assert2.equal(html.includes("Awa Ndiaye"), true);
+    assert2.equal(html.includes("Rue 10, Dakar"), true);
+    assert2.equal(html.includes("12345678901"), true);
     assert2.equal(html.includes("FACTURE"), true);
     assert2.equal(html.includes("VTE-000001"), true);
   });
@@ -20479,18 +20482,9 @@ describe3("document imprimable de la facture", () => {
     assert2.equal(html.includes(">Total facture<"), true);
     assert2.equal(html.includes(">D\xE9j\xE0 pay\xE9<"), true);
     assert2.equal(html.includes(">Reste \xE0 payer<"), true);
-    assert2.equal(
-      html.includes(`${grouped.format(28e3)} FCFA`),
-      true
-    );
-    assert2.equal(
-      html.includes(`${grouped.format(1e4)} FCFA`),
-      true
-    );
-    assert2.equal(
-      html.includes(`${grouped.format(18e3)} FCFA`),
-      true
-    );
+    assert2.equal(countOccurrences(html, grouped.format(28e3)), 2);
+    assert2.equal(countOccurrences(html, grouped.format(1e4)), 2);
+    assert2.equal(countOccurrences(html, grouped.format(18e3)), 2);
   });
   it("porte les trois cases de visa avec leur espace de signature", () => {
     const html = buildInvoicePrintHtml(buildContext());

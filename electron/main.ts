@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, dialog } from 'electron'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -21,7 +21,7 @@ let win: BrowserWindow | null
 
 function createWindow() {
   win = new BrowserWindow({
-    icon: path.join(process.env.VITE_PUBLIC, 'electron-vite.svg'),
+    icon: path.join(process.env.VITE_PUBLIC, 'icons', 'gestion-boutique.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
       contextIsolation: true,
@@ -56,10 +56,20 @@ async function startApp() {
   try {
     initDatabase(migrationsFolder)
   } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
     console.error(
-      `Failed to initialize database (migrations folder: ${migrationsFolder}):`,
-      error,
+      `[startup] Échec de l'initialisation de la base de données (dossier de migrations : ${migrationsFolder})`,
     )
+    console.error(
+      `[startup] L'application ne peut pas démarrer avec une base potentiellement incompatible.`,
+    )
+    console.error('[startup] Détails :', error)
+    dialog.showErrorBox(
+      'Gestion Boutique — erreur de base de données',
+      `La base de données n'a pas pu être initialisée.\n\nL'application va se fermer pour éviter toute corruption de vos données.\n\nDétails : ${detail}`,
+    )
+    app.exit(1)
+    return
   }
 
   registerIpcHandlers()

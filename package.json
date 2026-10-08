@@ -1,7 +1,7 @@
 {
   "name": "gestion-boutique",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "Application desktop de gestion de boutique",
   "author": "Alassane",
   "type": "module",

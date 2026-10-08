@@ -29,7 +29,6 @@ import {
   isSameLine,
   parseNumberField,
   resolveClientSelection,
-  readAvailableStock,
   readDraftLineTotal,
   sumLineTotals,
   todayInputValue,
@@ -301,9 +300,6 @@ function InvoiceForm({
   const editorForms = getProductForms(editorProduct)
   const isEditing = editingKey !== null
   const isListFull = !isEditing && lines.length >= INVOICE_ITEMS_MAX
-  const editorAvailableStock = editorProduct
-    ? readAvailableStock(availableStock, editorProduct.id, editor.form)
-    : 0
   const configuredPrice = getConfiguredSalePrice(editorProduct, editor.form)
   const totalAmount = sumLineTotals(lines)
 

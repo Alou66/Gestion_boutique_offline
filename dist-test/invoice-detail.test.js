@@ -20069,8 +20069,8 @@ describe3("affichage du d\xE9tail", () => {
   });
   it("formate les montants, les dates et les quantit\xE9s vendues", () => {
     const grouped = new Intl.NumberFormat("fr-FR");
-    assert2.equal(formatAmount(25e3), `${grouped.format(25e3)} FCFA`);
-    assert2.equal(formatAmount(0), `${grouped.format(0)} FCFA`);
+    assert2.equal(formatAmount(25e3), grouped.format(25e3));
+    assert2.equal(formatAmount(0), grouped.format(0));
     assert2.equal(formatInvoiceDate(new Date(2026, 9, 5)), "05/10/2026");
     assert2.equal(formatSoldQuantity("CARTON", 10), "10 CARTONS");
     assert2.equal(formatSoldQuantity("SEAU", 4), "4 SEAUX");

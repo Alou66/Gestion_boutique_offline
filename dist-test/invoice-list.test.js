@@ -19892,19 +19892,42 @@ describe3("filtres de la liste des factures", () => {
     assert2.deepEqual(buildInvoiceFilters("vte-000001", "Awa Diop", "all"), {
       search: "vte-000001",
       clientSearch: "Awa Diop",
-      status: null
+      status: null,
+      dateFrom: void 0,
+      dateTo: void 0
     });
+    assert2.deepEqual(
+      buildInvoiceFilters("vte-000001", "Awa Diop", "all", "2026-10-01", "2026-10-31"),
+      {
+        search: "vte-000001",
+        clientSearch: "Awa Diop",
+        status: null,
+        dateFrom: "2026-10-01",
+        dateTo: "2026-10-31"
+      }
+    );
   });
   it("enl\xE8ve les espaces superflus et les filtres vides", () => {
     assert2.deepEqual(buildInvoiceFilters("  VTE-000001  ", "   ", "all"), {
       search: "VTE-000001",
       clientSearch: void 0,
-      status: null
+      status: null,
+      dateFrom: void 0,
+      dateTo: void 0
     });
     assert2.deepEqual(buildInvoiceFilters("", "", "VALIDEE"), {
       search: void 0,
       clientSearch: void 0,
-      status: "VALIDEE"
+      status: "VALIDEE",
+      dateFrom: void 0,
+      dateTo: void 0
+    });
+    assert2.deepEqual(buildInvoiceFilters("", "", "VALIDEE", "  ", ""), {
+      search: void 0,
+      clientSearch: void 0,
+      status: "VALIDEE",
+      dateFrom: void 0,
+      dateTo: void 0
     });
   });
   it("permet de filtrer les factures annul\xE9es", () => {
@@ -19956,9 +19979,9 @@ describe3("affichage des colonnes de la liste", () => {
     assert2.equal(formatInvoiceDate(invoice.saleDate), "05/10/2026");
     assert2.equal(invoice.clientName, "CLIENT COMPTANT");
     const grouped = new Intl.NumberFormat("fr-FR");
-    assert2.equal(formatAmount(invoice.totalAmount), `${grouped.format(25e3)} FCFA`);
-    assert2.equal(formatAmount(invoice.paidAmount), `${grouped.format(1e4)} FCFA`);
-    assert2.equal(formatAmount(invoice.remainingAmount), `${grouped.format(15e3)} FCFA`);
+    assert2.equal(formatAmount(invoice.totalAmount), grouped.format(25e3));
+    assert2.equal(formatAmount(invoice.paidAmount), grouped.format(1e4));
+    assert2.equal(formatAmount(invoice.remainingAmount), grouped.format(15e3));
     assert2.equal(formatStatusLabel(invoice.paymentStatus), "PARTIELLEMENT PAYEE");
     assert2.equal(formatStatusLabel(invoice.status), "VALIDEE");
   });

@@ -26104,7 +26104,7 @@ var api = {
 contextBridge.exposeInMainWorld("api", api);
 
 // tests/print-ipc.test.ts
-var PRINT_CHANNELS = ["print:html", "print:pdf"];
+var PRINT_CHANNELS = ["print:html", "print:pdf", "print:preview"];
 var INVOICE_HTML = `<!DOCTYPE html><html><head><title>Facture VTE-000001</title></head><body><p>25 000 FCFA</p></body></html>`;
 function invoke(channel, request) {
   return Promise.resolve(invokeHandler(channel, request));
@@ -26157,12 +26157,13 @@ describe3("impression et PDF", () => {
       const channels = registeredChannels().filter((channel) => channel.startsWith("print:"));
       assert2.deepEqual(channels, [...PRINT_CHANNELS].sort());
     });
-    it("publie window.api.print avec ses deux m\xE9thodes", () => {
+    it("publie window.api.print avec ses trois m\xE9thodes", () => {
       const exposed = exposedToMainWorld.api;
       assert2.equal(typeof exposed.print, "object");
       assert2.equal(typeof exposed.print.print, "function");
       assert2.equal(typeof exposed.print.savePdf, "function");
-      assert2.equal(Object.keys(exposed.print).length, 2);
+      assert2.equal(typeof exposed.print.preview, "function");
+      assert2.equal(Object.keys(exposed.print).length, 3);
       assert2.equal(Object.keys(exposed.invoices).length, 12);
     });
     it("imprime le document dans une fen\xEAtre cach\xE9e puis la ferme", async () => {
@@ -26223,6 +26224,47 @@ describe3("impression et PDF", () => {
       printStubs.failToLoad = true;
       assert2.equal(
         expectFailure(await invoke("print:html", { html: INVOICE_HTML })),
+        PRINT_ERRORS.windowFailed
+      );
+      assert2.equal(printStubs.openWindows, 0);
+    });
+    it("pr\xE9visualise le document dans une fen\xEAtre visible", async () => {
+      const result = await invoke("print:preview", {
+        html: INVOICE_HTML,
+        title: "Facture VTE-000001"
+      });
+      assert2.equal(result.success, true);
+      assert2.equal(printStubs.loadedUrls.length, 1);
+      assert2.equal(
+        printStubs.loadedUrls[0].startsWith("data:text/html;charset=utf-8,"),
+        true
+      );
+      const windowOptions = printStubs.windowOptions[0];
+      assert2.equal(windowOptions.show, void 0);
+      assert2.equal(windowOptions.width, 1180);
+      assert2.equal(windowOptions.height, 860);
+      assert2.equal(windowOptions.backgroundColor, "#f1f5f9");
+      assert2.equal(windowOptions.webPreferences.javascript, true);
+      assert2.equal(printStubs.openWindows, 1);
+    });
+    it("pr\xE9visualise sans imprimer, sans PDF et sans dialogue", async () => {
+      await invoke("print:preview", { html: INVOICE_HTML });
+      assert2.equal(printStubs.printOptions.length, 0);
+      assert2.equal(printStubs.pdfOptions.length, 0);
+      assert2.equal(printStubs.saveOptions.length, 0);
+    });
+    it("n\u2019ouvre aucune fen\xEAtre pour un document vide en pr\xE9visualisation", async () => {
+      assert2.equal(
+        expectFailure(await invoke("print:preview", { html: "" })),
+        PRINT_ERRORS.emptyDocument
+      );
+      assert2.equal(printStubs.loadedUrls.length, 0);
+      assert2.equal(printStubs.openWindows, 0);
+    });
+    it("remonte l\u2019\xE9chec d\u2019ouverture de la fen\xEAtre de pr\xE9visualisation", async () => {
+      printStubs.failToLoad = true;
+      assert2.equal(
+        expectFailure(await invoke("print:preview", { html: INVOICE_HTML })),
         PRINT_ERRORS.windowFailed
       );
       assert2.equal(printStubs.openWindows, 0);

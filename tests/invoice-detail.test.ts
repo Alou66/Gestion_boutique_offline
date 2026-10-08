@@ -225,8 +225,8 @@ describe('affichage du détail', () => {
   it('formate les montants, les dates et les quantités vendues', () => {
     const grouped = new Intl.NumberFormat('fr-FR')
 
-    assert.equal(formatAmount(25_000), `${grouped.format(25_000)} FCFA`)
-    assert.equal(formatAmount(0), `${grouped.format(0)} FCFA`)
+    assert.equal(formatAmount(25_000), grouped.format(25_000))
+    assert.equal(formatAmount(0), grouped.format(0))
     assert.equal(formatInvoiceDate(new Date(2026, 9, 5)), '05/10/2026')
     assert.equal(formatSoldQuantity('CARTON', 10), '10 CARTONS')
     assert.equal(formatSoldQuantity('SEAU', 4), '4 SEAUX')

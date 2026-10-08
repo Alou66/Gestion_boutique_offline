@@ -69,6 +69,8 @@ function buildShop(overrides: Partial<Settings> = {}): Settings {
     id: 1,
     shopName: 'BOUTIQUE SOKNA',
     phone: '77 123 45 67',
+    address: 'Rue 10, Dakar',
+    ninea: '12345678901',
     ownerName: 'Awa Ndiaye',
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -173,7 +175,8 @@ describe('document imprimable de la facture', () => {
     assert.equal(html.includes('<style>'), true)
     assert.equal(html.includes('BOUTIQUE SOKNA'), true)
     assert.equal(html.includes('77 123 45 67'), true)
-    assert.equal(html.includes('Awa Ndiaye'), true)
+    assert.equal(html.includes('Rue 10, Dakar'), true)
+    assert.equal(html.includes('12345678901'), true)
     assert.equal(html.includes('FACTURE'), true)
     assert.equal(html.includes('VTE-000001'), true)
   })
@@ -249,18 +252,12 @@ describe('document imprimable de la facture', () => {
     assert.equal(html.includes('>Total facture<'), true)
     assert.equal(html.includes('>Déjà payé<'), true)
     assert.equal(html.includes('>Reste à payer<'), true)
-    assert.equal(
-      html.includes(`${grouped.format(28_000)} FCFA`),
-      true,
-    )
-    assert.equal(
-      html.includes(`${grouped.format(10_000)} FCFA`),
-      true,
-    )
-    assert.equal(
-      html.includes(`${grouped.format(18_000)} FCFA`),
-      true,
-    )
+    // Les montants sont portés tels que le service les renvoie, une
+    // fois par exemplaire : la devise est écrite en lettres sous les
+    // visas, jamais répétée à côté des chiffres.
+    assert.equal(countOccurrences(html, grouped.format(28_000)), 2)
+    assert.equal(countOccurrences(html, grouped.format(10_000)), 2)
+    assert.equal(countOccurrences(html, grouped.format(18_000)), 2)
   })
 
   it('porte les trois cases de visa avec leur espace de signature', () => {

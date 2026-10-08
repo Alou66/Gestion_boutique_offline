@@ -21,12 +21,12 @@ import {
 
 /**
  * The preload bridge is imported so the test can inspect what the renderer is
- * offered for printing: nothing else than two async methods.
+ * offered for printing: nothing else than three async methods.
  */
 import '../electron/preload'
 import { exposedToMainWorld } from './stubs/electron'
 
-const PRINT_CHANNELS = ['print:html', 'print:pdf']
+const PRINT_CHANNELS = ['print:html', 'print:pdf', 'print:preview']
 
 /** A complete invoice page, as the renderer builds it. */
 const INVOICE_HTML = `<!DOCTYPE html><html><head><title>Facture VTE-000001</title></head><body><p>25 000 FCFA</p></body></html>`
@@ -96,13 +96,14 @@ describe('impression et PDF', () => {
       assert.deepEqual(channels, [...PRINT_CHANNELS].sort())
     })
 
-    it('publie window.api.print avec ses deux méthodes', () => {
+    it('publie window.api.print avec ses trois méthodes', () => {
       const exposed = exposedToMainWorld.api as Record<string, Record<string, unknown>>
 
       assert.equal(typeof exposed.print, 'object')
       assert.equal(typeof exposed.print.print, 'function')
       assert.equal(typeof exposed.print.savePdf, 'function')
-      assert.equal(Object.keys(exposed.print).length, 2)
+      assert.equal(typeof exposed.print.preview, 'function')
+      assert.equal(Object.keys(exposed.print).length, 3)
       // The other modules keep their exact surface.
       assert.equal(Object.keys(exposed.invoices).length, 12)
     })
@@ -179,14 +180,75 @@ describe('impression et PDF', () => {
       resetPrintStubs()
       printStubs.failToLoad = true
 
-      assert.equal(
-        expectFailure(await invoke<null>('print:html', { html: INVOICE_HTML })),
-        PRINT_ERRORS.windowFailed,
-      )
-      assert.equal(printStubs.openWindows, 0)
+    assert.equal(
+      expectFailure(await invoke<null>('print:html', { html: INVOICE_HTML })),
+      PRINT_ERRORS.windowFailed,
+    )
+    assert.equal(printStubs.openWindows, 0)
+  })
+
+  it('prévisualise le document dans une fenêtre visible', async () => {
+    const result = await invoke<null>('print:preview', {
+      html: INVOICE_HTML,
+      title: 'Facture VTE-000001',
     })
 
-    it('génère le PDF hors ligne et l’enregistre où le commerçant l’a choisi', async () => {
+    assert.equal(result.success, true)
+    assert.equal(printStubs.loadedUrls.length, 1)
+    assert.equal(
+      printStubs.loadedUrls[0].startsWith('data:text/html;charset=utf-8,'),
+      true,
+    )
+    // Une fenêtre visible, distincte de la feuille cachée de
+    // l'impression : le commerçant inspecte le document avant
+    // d'imprimer ou de télécharger.
+    const windowOptions = printStubs.windowOptions[0] as {
+      show?: boolean
+      width: number
+      height: number
+      backgroundColor: string
+      webPreferences: { javascript: boolean }
+    }
+
+    assert.equal(windowOptions.show, undefined)
+    assert.equal(windowOptions.width, 1180)
+    assert.equal(windowOptions.height, 860)
+    assert.equal(windowOptions.backgroundColor, '#f1f5f9')
+    assert.equal(windowOptions.webPreferences.javascript, true)
+    // La prévisualisation appartient au commerçant : le service
+    // ne ferme jamais la fenêtre lui-même.
+    assert.equal(printStubs.openWindows, 1)
+  })
+
+  it('prévisualise sans imprimer, sans PDF et sans dialogue', async () => {
+    await invoke<null>('print:preview', { html: INVOICE_HTML })
+
+    assert.equal(printStubs.printOptions.length, 0)
+    assert.equal(printStubs.pdfOptions.length, 0)
+    assert.equal(printStubs.saveOptions.length, 0)
+  })
+
+  it('n’ouvre aucune fenêtre pour un document vide en prévisualisation', async () => {
+    assert.equal(
+      expectFailure(await invoke('print:preview', { html: '' })),
+      PRINT_ERRORS.emptyDocument,
+    )
+    assert.equal(printStubs.loadedUrls.length, 0)
+    assert.equal(printStubs.openWindows, 0)
+  })
+
+  it('remonte l’échec d’ouverture de la fenêtre de prévisualisation', async () => {
+    printStubs.failToLoad = true
+
+    assert.equal(
+      expectFailure(await invoke('print:preview', { html: INVOICE_HTML })),
+      PRINT_ERRORS.windowFailed,
+    )
+    // La fenêtre qui n'a pas pu charger le document est fermée.
+    assert.equal(printStubs.openWindows, 0)
+  })
+
+  it('génère le PDF hors ligne et l’enregistre où le commerçant l’a choisi', async () => {
       const target = tempFile('Facture VTE-000001.pdf')
 
       printStubs.savePath = target

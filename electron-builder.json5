@@ -4,8 +4,10 @@
   "appId": "com.gestion-boutique",
   "productName": "Gestion Boutique",
   "asarUnpack": [
-    "node_modules/better-sqlite3/**/*.node"
+    "node_modules/better-sqlite3/**/*.node",
+    "dist-electron/database/migrations/**"
   ],
+  "icon": "public/icons/gestion-boutique.png",
   "directories": {
     "output": "release/${version}"
   },
@@ -18,7 +20,8 @@
     "target": [
       "dmg"
     ],
-    "artifactName": "${productName}-Mac-${version}-Installer.${ext}"
+    "artifactName": "${productName}-Mac-${version}-Installer.${ext}",
+    "icon": "public/icons/gestion-boutique.icns"
   },
   "win": {
     "target": [
@@ -29,18 +32,22 @@
         ]
       }
     ],
-    "artifactName": "${productName}-Windows-${version}-Setup.${ext}"
+    "artifactName": "${productName}-Windows-${version}-Setup.${ext}",
+    "icon": "public/icons/gestion-boutique.ico"
   },
   "nsis": {
     "oneClick": false,
     "perMachine": false,
     "allowToChangeInstallationDirectory": true,
-    "deleteAppDataOnUninstall": false
+    "deleteAppDataOnUninstall": false,
+    "installerIcon": "public/icons/gestion-boutique.ico",
+    "uninstallerIcon": "public/icons/gestion-boutique.ico"
   },
   "linux": {
     "target": [
       "AppImage"
     ],
-    "artifactName": "${productName}-Linux-${version}.${ext}"
+    "artifactName": "${productName}-Linux-${version}.${ext}",
+    "icon": "public/icons/gestion-boutique.png"
   }
 }

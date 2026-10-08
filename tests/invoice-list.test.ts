@@ -41,7 +41,21 @@ describe('filtres de la liste des factures', () => {
       search: 'vte-000001',
       clientSearch: 'Awa Diop',
       status: null,
+      dateFrom: undefined,
+      dateTo: undefined,
     })
+
+    // Les bornes de date sont transmises telles quelles au service.
+    assert.deepEqual(
+      buildInvoiceFilters('vte-000001', 'Awa Diop', 'all', '2026-10-01', '2026-10-31'),
+      {
+        search: 'vte-000001',
+        clientSearch: 'Awa Diop',
+        status: null,
+        dateFrom: '2026-10-01',
+        dateTo: '2026-10-31',
+      },
+    )
   })
 
   it('enlève les espaces superflus et les filtres vides', () => {
@@ -49,12 +63,25 @@ describe('filtres de la liste des factures', () => {
       search: 'VTE-000001',
       clientSearch: undefined,
       status: null,
+      dateFrom: undefined,
+      dateTo: undefined,
     })
 
     assert.deepEqual(buildInvoiceFilters('', '', 'VALIDEE'), {
       search: undefined,
       clientSearch: undefined,
       status: 'VALIDEE',
+      dateFrom: undefined,
+      dateTo: undefined,
+    })
+
+    // Une date vide ou composée d'espaces ne filtre rien.
+    assert.deepEqual(buildInvoiceFilters('', '', 'VALIDEE', '  ', ''), {
+      search: undefined,
+      clientSearch: undefined,
+      status: 'VALIDEE',
+      dateFrom: undefined,
+      dateTo: undefined,
     })
   })
 
@@ -118,9 +145,9 @@ describe('affichage des colonnes de la liste', () => {
 
     const grouped = new Intl.NumberFormat('fr-FR')
 
-    assert.equal(formatAmount(invoice.totalAmount), `${grouped.format(25_000)} FCFA`)
-    assert.equal(formatAmount(invoice.paidAmount), `${grouped.format(10_000)} FCFA`)
-    assert.equal(formatAmount(invoice.remainingAmount), `${grouped.format(15_000)} FCFA`)
+    assert.equal(formatAmount(invoice.totalAmount), grouped.format(25_000))
+    assert.equal(formatAmount(invoice.paidAmount), grouped.format(10_000))
+    assert.equal(formatAmount(invoice.remainingAmount), grouped.format(15_000))
     assert.equal(formatStatusLabel(invoice.paymentStatus), 'PARTIELLEMENT PAYEE')
     assert.equal(formatStatusLabel(invoice.status), 'VALIDEE')
   })
