@@ -11,6 +11,7 @@ import {
   listProducts,
   normalizeFormName,
 } from './productService'
+import { maintenanceLock } from './maintenanceLock'
 import type {
   Product,
   StockAdjustInput,
@@ -495,6 +496,12 @@ function withMappedErrors<T>(operation: () => T): T {
   }
 }
 
+function assertNotInMaintenance(): void {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new StockError('unexpected')
+  }
+}
+
 /**
  * Single, irreversible declaration of the stock physically owned before using
  * the application.
@@ -513,6 +520,7 @@ export function initializeStock(
   productId: number,
   input: StockInitializeInput,
 ): StockFormLevel[] {
+  assertNotInMaintenance()
   const parsedId = parseProductId(productId)
   const db = getDb()
 
@@ -579,6 +587,7 @@ export function adjustStock(
   productId: number,
   input: StockAdjustInput,
 ): StockAdjustResult {
+  assertNotInMaintenance()
   const parsedId = parseProductId(productId)
   const parsedInput = parseAdjustInput(input, parsedId)
   const db = getDb()

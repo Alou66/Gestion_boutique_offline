@@ -5,6 +5,7 @@ import {
   saveSettings,
 } from '../services/databaseService'
 import { registerAuthIpcHandlers } from './auth'
+import { registerBackupIpcHandlers } from './backup'
 import { registerCategoryIpcHandlers } from './categories'
 import { registerClientIpcHandlers } from './clients'
 import { registerInvoiceIpcHandlers } from './invoices'
@@ -33,6 +34,7 @@ export function registerIpcHandlers(): void {
     return saveSettings(input)
   })
 
+  registerBackupIpcHandlers()
   registerAuthIpcHandlers()
   registerCategoryIpcHandlers()
   registerProductIpcHandlers()

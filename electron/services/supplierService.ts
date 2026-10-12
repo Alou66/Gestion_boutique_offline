@@ -2,6 +2,7 @@ import { and, asc, eq, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { suppliers } from '../database/schema'
 import { getDb } from '../database/client'
+import { maintenanceLock } from './maintenanceLock'
 import type {
   Supplier,
   SupplierFilters,
@@ -216,6 +217,12 @@ function isUniqueViolation(error: unknown): boolean {
   return error instanceof Error && error.message.includes('UNIQUE')
 }
 
+function assertNotInMaintenance(): void {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new SupplierError('unexpected')
+  }
+}
+
 export function listSuppliers(filters: SupplierFilters = {}): Supplier[] {
   const conditions = []
 
@@ -250,6 +257,7 @@ export function getSupplierById(id: number): Supplier | null {
 }
 
 export function createSupplier(input: SupplierInput): Supplier {
+  assertNotInMaintenance()
   const name = parseSupplierName(input)
   const phone = parseSupplierPhone(input)
   const address = parseSupplierAddress(input)
@@ -291,6 +299,7 @@ export function createSupplier(input: SupplierInput): Supplier {
 }
 
 export function updateSupplier(id: number, input: SupplierUpdateInput): Supplier {
+  assertNotInMaintenance()
   const supplierId = parseSupplierId(id)
   const db = getDb()
 
@@ -344,6 +353,7 @@ export function updateSupplier(id: number, input: SupplierUpdateInput): Supplier
 }
 
 export function setSupplierActive(id: number, isActive: boolean): Supplier {
+  assertNotInMaintenance()
   const supplierId = parseSupplierId(id)
   const db = getDb()
 
@@ -407,6 +417,7 @@ export function isPhoneAvailable(phone: string, excludeSupplierId?: number): boo
  * Returns the system supplier.
  */
 export function ensureSystemSupplier(): Supplier {
+  assertNotInMaintenance()
   const existing = getDb()
     .select()
     .from(suppliers)

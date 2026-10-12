@@ -5,6 +5,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { settings } from '../database/schema'
 import { getDb, initializeDatabase, type AppDatabase } from '../database/client'
+import { maintenanceLock } from './maintenanceLock'
 import type { DatabaseStatus, Settings, SettingsInput } from '../types'
 
 export function buildSettingsRow(input: SettingsInput, now: Date) {
@@ -159,6 +160,9 @@ export async function getSettings(): Promise<Settings | null> {
 }
 
 export async function saveSettings(input: SettingsInput): Promise<Settings> {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new Error('Maintenance in progress')
+  }
   const db = getDb()
   const values = buildSettingsRow(input, new Date())
   const existing = await db

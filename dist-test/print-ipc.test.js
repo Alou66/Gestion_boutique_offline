@@ -6,12 +6,27 @@ var __export = (target, all) => {
 
 // tests/print-ipc.test.ts
 import assert2 from "node:assert/strict";
-import fs2 from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import fs6 from "node:fs";
+import os2 from "node:os";
+import path5 from "node:path";
 import { before, beforeEach, describe as describe3, it } from "node:test";
 
 // tests/stubs/electron.ts
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+var app = {
+  isPackaged: false,
+  getPath(name) {
+    const userDataDir = process.env.GESTION_BOUTIQUE_TEST_USER_DATA ?? path.join(os.tmpdir(), "gestion-boutique-tests");
+    fs.mkdirSync(userDataDir, { recursive: true });
+    return name === "userData" ? userDataDir : path.join(userDataDir, name);
+  },
+  quit: () => {
+  },
+  relaunch: () => {
+  }
+};
 var handlers = /* @__PURE__ */ new Map();
 var ipcMain = {
   handle(channel, listener) {
@@ -56,6 +71,8 @@ var printStubs = {
   printOptions: [],
   pdfOptions: [],
   saveOptions: [],
+  openOptions: [],
+  errorBoxMessages: [],
   /** What `webContents.print` answers through its callback. */
   printSucceeds: true,
   /** Electron answered through a promise instead of the callback. */
@@ -64,6 +81,8 @@ var printStubs = {
   pdfResult: Buffer.from("%PDF-1.4 facture"),
   /** Where the save dialog points, or null when it is cancelled. */
   savePath: "/tmp/gestion-boutique-facture.pdf",
+  /** Where the open dialog points, or null when it is cancelled. */
+  openPath: null,
   failToLoad: false,
   openWindows: 0
 };
@@ -73,10 +92,13 @@ function resetPrintStubs() {
   printStubs.printOptions = [];
   printStubs.pdfOptions = [];
   printStubs.saveOptions = [];
+  printStubs.openOptions = [];
+  printStubs.errorBoxMessages = [];
   printStubs.printSucceeds = true;
   printStubs.printReturnsPromise = false;
   printStubs.pdfResult = Buffer.from("%PDF-1.4 facture");
   printStubs.savePath = "/tmp/gestion-boutique-facture.pdf";
+  printStubs.openPath = null;
   printStubs.failToLoad = false;
   printStubs.openWindows = 0;
 }
@@ -122,8 +144,56 @@ var dialog = {
       canceled: printStubs.savePath === null,
       filePath: printStubs.savePath ?? void 0
     });
+  },
+  showOpenDialog(options) {
+    printStubs.openOptions.push(options);
+    return Promise.resolve({
+      canceled: printStubs.openPath === null,
+      filePaths: printStubs.openPath === null ? [] : [printStubs.openPath]
+    });
+  },
+  showErrorBox(_, content) {
+    printStubs.errorBoxMessages.push(content);
   }
 };
+
+// node_modules/drizzle-orm/migrator.js
+import crypto2 from "node:crypto";
+import fs2 from "node:fs";
+function readMigrationFiles(config2) {
+  const migrationFolderTo = config2.migrationsFolder;
+  const migrationQueries = [];
+  const journalPath = `${migrationFolderTo}/meta/_journal.json`;
+  if (!fs2.existsSync(journalPath)) {
+    throw new Error(`Can't find meta/_journal.json file`);
+  }
+  const journalAsString = fs2.readFileSync(`${migrationFolderTo}/meta/_journal.json`).toString();
+  const journal = JSON.parse(journalAsString);
+  for (const journalEntry of journal.entries) {
+    const migrationPath = `${migrationFolderTo}/${journalEntry.tag}.sql`;
+    try {
+      const query = fs2.readFileSync(`${migrationFolderTo}/${journalEntry.tag}.sql`).toString();
+      const result = query.split("--> statement-breakpoint").map((it2) => {
+        return it2;
+      });
+      migrationQueries.push({
+        sql: result,
+        bps: journalEntry.breakpoints,
+        folderMillis: journalEntry.when,
+        hash: crypto2.createHash("sha256").update(query).digest("hex")
+      });
+    } catch {
+      throw new Error(`No file ${migrationPath} found in ${migrationFolderTo} folder`);
+    }
+  }
+  return migrationQueries;
+}
+
+// node_modules/drizzle-orm/better-sqlite3/migrator.js
+function migrate(db2, config2) {
+  const migrations = readMigrationFiles(config2);
+  db2.dialect.migrate(migrations, db2.session, config2);
+}
 
 // node_modules/drizzle-orm/entity.js
 var entityKind = Symbol.for("drizzle:entityKind");
@@ -850,12 +920,18 @@ var Table = class {
   [IsDrizzleTable] = true;
   /** @internal */
   [ExtraConfigBuilder] = void 0;
-  constructor(name, schema, baseName) {
+  constructor(name, schema2, baseName) {
     this[TableName] = this[OriginalName] = name;
-    this[Schema] = schema;
+    this[Schema] = schema2;
     this[BaseName] = baseName;
   }
 };
+function getTableName(table) {
+  return table[TableName];
+}
+function getTableUniqueName(table) {
+  return `${table[Schema] ?? "public"}.${table[TableName]}`;
+}
 
 // node_modules/drizzle-orm/sql/sql.js
 var FakePrimitiveParam = class {
@@ -1202,6 +1278,23 @@ var Placeholder = class {
     return new SQL([this]);
   }
 };
+function fillPlaceholders(params, values) {
+  return params.map((p) => {
+    if (is(p, Placeholder)) {
+      if (!(p.name in values)) {
+        throw new Error(`No value for placeholder "${p.name}" was provided`);
+      }
+      return values[p.name];
+    }
+    if (is(p, Param) && is(p.value, Placeholder)) {
+      if (!(p.value.name in values)) {
+        throw new Error(`No value for placeholder "${p.value.name}" was provided`);
+      }
+      return p.encoder.mapToDriverValue(values[p.value.name]);
+    }
+    return p;
+  });
+}
 var IsDrizzleView = Symbol.for("drizzle:IsDrizzleView");
 var View = class {
   static [entityKind] = "View";
@@ -1209,11 +1302,11 @@ var View = class {
   [ViewBaseConfig];
   /** @internal */
   [IsDrizzleView] = true;
-  constructor({ name: name2, schema, selectedFields, query }) {
+  constructor({ name: name2, schema: schema2, selectedFields, query }) {
     this[ViewBaseConfig] = {
       name: name2,
       originalName: name2,
-      schema,
+      schema: schema2,
       selectedFields,
       query,
       isExisting: !query,
@@ -1234,14 +1327,384 @@ Subquery.prototype.getSQL = function() {
   return new SQL([this]);
 };
 
+// node_modules/drizzle-orm/alias.js
+var ColumnAliasProxyHandler = class {
+  constructor(table) {
+    this.table = table;
+  }
+  static [entityKind] = "ColumnAliasProxyHandler";
+  get(columnObj, prop) {
+    if (prop === "table") {
+      return this.table;
+    }
+    return columnObj[prop];
+  }
+};
+var TableAliasProxyHandler = class {
+  constructor(alias, replaceOriginalName) {
+    this.alias = alias;
+    this.replaceOriginalName = replaceOriginalName;
+  }
+  static [entityKind] = "TableAliasProxyHandler";
+  get(target, prop) {
+    if (prop === Table.Symbol.IsAlias) {
+      return true;
+    }
+    if (prop === Table.Symbol.Name) {
+      return this.alias;
+    }
+    if (this.replaceOriginalName && prop === Table.Symbol.OriginalName) {
+      return this.alias;
+    }
+    if (prop === ViewBaseConfig) {
+      return {
+        ...target[ViewBaseConfig],
+        name: this.alias,
+        isAlias: true
+      };
+    }
+    if (prop === Table.Symbol.Columns) {
+      const columns = target[Table.Symbol.Columns];
+      if (!columns) {
+        return columns;
+      }
+      const proxiedColumns = {};
+      Object.keys(columns).map((key) => {
+        proxiedColumns[key] = new Proxy(
+          columns[key],
+          new ColumnAliasProxyHandler(new Proxy(target, this))
+        );
+      });
+      return proxiedColumns;
+    }
+    const value = target[prop];
+    if (is(value, Column)) {
+      return new Proxy(value, new ColumnAliasProxyHandler(new Proxy(target, this)));
+    }
+    return value;
+  }
+};
+var RelationTableAliasProxyHandler = class {
+  constructor(alias) {
+    this.alias = alias;
+  }
+  static [entityKind] = "RelationTableAliasProxyHandler";
+  get(target, prop) {
+    if (prop === "sourceTable") {
+      return aliasedTable(target.sourceTable, this.alias);
+    }
+    return target[prop];
+  }
+};
+function aliasedTable(table, tableAlias) {
+  return new Proxy(table, new TableAliasProxyHandler(tableAlias, false));
+}
+function aliasedTableColumn(column, tableAlias) {
+  return new Proxy(
+    column,
+    new ColumnAliasProxyHandler(new Proxy(column.table, new TableAliasProxyHandler(tableAlias, false)))
+  );
+}
+function mapColumnsInAliasedSQLToAlias(query, alias) {
+  return new SQL.Aliased(mapColumnsInSQLToAlias(query.sql, alias), query.fieldAlias);
+}
+function mapColumnsInSQLToAlias(query, alias) {
+  return sql.join(query.queryChunks.map((c) => {
+    if (is(c, Column)) {
+      return aliasedTableColumn(c, alias);
+    }
+    if (is(c, SQL)) {
+      return mapColumnsInSQLToAlias(c, alias);
+    }
+    if (is(c, SQL.Aliased)) {
+      return mapColumnsInAliasedSQLToAlias(c, alias);
+    }
+    return c;
+  }));
+}
+
+// node_modules/drizzle-orm/errors.js
+var DrizzleError = class extends Error {
+  static [entityKind] = "DrizzleError";
+  constructor({ message, cause }) {
+    super(message);
+    this.name = "DrizzleError";
+    this.cause = cause;
+  }
+};
+var DrizzleQueryError = class _DrizzleQueryError extends Error {
+  constructor(query, params, cause) {
+    super(`Failed query: ${query}
+params: ${params}`);
+    this.query = query;
+    this.params = params;
+    this.cause = cause;
+    Error.captureStackTrace(this, _DrizzleQueryError);
+    if (cause) this.cause = cause;
+  }
+};
+var TransactionRollbackError = class extends DrizzleError {
+  static [entityKind] = "TransactionRollbackError";
+  constructor() {
+    super({ message: "Rollback" });
+  }
+};
+
+// node_modules/drizzle-orm/logger.js
+var ConsoleLogWriter = class {
+  static [entityKind] = "ConsoleLogWriter";
+  write(message) {
+    console.log(message);
+  }
+};
+var DefaultLogger = class {
+  static [entityKind] = "DefaultLogger";
+  writer;
+  constructor(config2) {
+    this.writer = config2?.writer ?? new ConsoleLogWriter();
+  }
+  logQuery(query, params) {
+    const stringifiedParams = params.map((p) => {
+      try {
+        return JSON.stringify(p);
+      } catch {
+        return String(p);
+      }
+    });
+    const paramsStr = stringifiedParams.length ? ` -- params: [${stringifiedParams.join(", ")}]` : "";
+    this.writer.write(`Query: ${query}${paramsStr}`);
+  }
+};
+var NoopLogger = class {
+  static [entityKind] = "NoopLogger";
+  logQuery() {
+  }
+};
+
+// node_modules/drizzle-orm/query-promise.js
+var QueryPromise = class {
+  static [entityKind] = "QueryPromise";
+  [Symbol.toStringTag] = "QueryPromise";
+  catch(onRejected) {
+    return this.then(void 0, onRejected);
+  }
+  finally(onFinally) {
+    return this.then(
+      (value) => {
+        onFinally?.();
+        return value;
+      },
+      (reason) => {
+        onFinally?.();
+        throw reason;
+      }
+    );
+  }
+  then(onFulfilled, onRejected) {
+    return this.execute().then(onFulfilled, onRejected);
+  }
+};
+
 // node_modules/drizzle-orm/utils.js
+function mapResultRow(columns, row, joinsNotNullableMap) {
+  const nullifyMap = {};
+  const result = columns.reduce(
+    (result2, { path: path6, field }, columnIndex) => {
+      let decoder;
+      if (is(field, Column)) {
+        decoder = field;
+      } else if (is(field, SQL)) {
+        decoder = field.decoder;
+      } else if (is(field, Subquery)) {
+        decoder = field._.sql.decoder;
+      } else {
+        decoder = field.sql.decoder;
+      }
+      let node2 = result2;
+      for (const [pathChunkIndex, pathChunk] of path6.entries()) {
+        if (pathChunkIndex < path6.length - 1) {
+          if (!(pathChunk in node2)) {
+            node2[pathChunk] = {};
+          }
+          node2 = node2[pathChunk];
+        } else {
+          const rawValue = row[columnIndex];
+          const value = node2[pathChunk] = rawValue === null ? null : decoder.mapFromDriverValue(rawValue);
+          if (joinsNotNullableMap && is(field, Column) && path6.length === 2) {
+            const objectName = path6[0];
+            if (!(objectName in nullifyMap)) {
+              nullifyMap[objectName] = value === null ? getTableName(field.table) : false;
+            } else if (typeof nullifyMap[objectName] === "string" && nullifyMap[objectName] !== getTableName(field.table)) {
+              nullifyMap[objectName] = false;
+            }
+          }
+        }
+      }
+      return result2;
+    },
+    {}
+  );
+  if (joinsNotNullableMap && Object.keys(nullifyMap).length > 0) {
+    for (const [objectName, tableName] of Object.entries(nullifyMap)) {
+      if (typeof tableName === "string" && !joinsNotNullableMap[tableName]) {
+        result[objectName] = null;
+      }
+    }
+  }
+  return result;
+}
+function orderSelectedFields(fields, pathPrefix) {
+  return Object.entries(fields).reduce((result, [name, field]) => {
+    if (typeof name !== "string") {
+      return result;
+    }
+    const newPath = pathPrefix ? [...pathPrefix, name] : [name];
+    if (is(field, Column) || is(field, SQL) || is(field, SQL.Aliased) || is(field, Subquery)) {
+      result.push({ path: newPath, field });
+    } else if (is(field, Table)) {
+      result.push(...orderSelectedFields(field[Table.Symbol.Columns], newPath));
+    } else {
+      result.push(...orderSelectedFields(field, newPath));
+    }
+    return result;
+  }, []);
+}
+function haveSameKeys(left, right) {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) {
+    return false;
+  }
+  for (const [index2, key] of leftKeys.entries()) {
+    if (key !== rightKeys[index2]) {
+      return false;
+    }
+  }
+  return true;
+}
+function mapUpdateSet(table, values) {
+  const entries = Object.entries(values).filter(([, value]) => value !== void 0).map(([key, value]) => {
+    if (is(value, SQL) || is(value, Column)) {
+      return [key, value];
+    } else {
+      return [key, new Param(value, table[Table.Symbol.Columns][key])];
+    }
+  });
+  if (entries.length === 0) {
+    throw new Error("No values to set");
+  }
+  return Object.fromEntries(entries);
+}
+function applyMixins(baseClass, extendedClasses) {
+  for (const extendedClass of extendedClasses) {
+    for (const name of Object.getOwnPropertyNames(extendedClass.prototype)) {
+      if (name === "constructor") continue;
+      Object.defineProperty(
+        baseClass.prototype,
+        name,
+        Object.getOwnPropertyDescriptor(extendedClass.prototype, name) || /* @__PURE__ */ Object.create(null)
+      );
+    }
+  }
+}
+function getTableColumns(table) {
+  return table[Table.Symbol.Columns];
+}
+function getTableLikeName(table) {
+  return is(table, Subquery) ? table._.alias : is(table, View) ? table[ViewBaseConfig].name : is(table, SQL) ? void 0 : table[Table.Symbol.IsAlias] ? table[Table.Symbol.Name] : table[Table.Symbol.BaseName];
+}
 function getColumnNameAndConfig(a, b) {
   return {
     name: typeof a === "string" && a.length > 0 ? a : "",
     config: typeof a === "object" ? a : b
   };
 }
+function isConfig(data) {
+  if (typeof data !== "object" || data === null) return false;
+  if (data.constructor.name !== "Object") return false;
+  if ("logger" in data) {
+    const type = typeof data["logger"];
+    if (type !== "boolean" && (type !== "object" || typeof data["logger"]["logQuery"] !== "function") && type !== "undefined") return false;
+    return true;
+  }
+  if ("schema" in data) {
+    const type = typeof data["schema"];
+    if (type !== "object" && type !== "undefined") return false;
+    return true;
+  }
+  if ("casing" in data) {
+    const type = typeof data["casing"];
+    if (type !== "string" && type !== "undefined") return false;
+    return true;
+  }
+  if ("mode" in data) {
+    if (data["mode"] !== "default" || data["mode"] !== "planetscale" || data["mode"] !== void 0) return false;
+    return true;
+  }
+  if ("connection" in data) {
+    const type = typeof data["connection"];
+    if (type !== "string" && type !== "object" && type !== "undefined") return false;
+    return true;
+  }
+  if ("client" in data) {
+    const type = typeof data["client"];
+    if (type !== "object" && type !== "function" && type !== "undefined") return false;
+    return true;
+  }
+  if (Object.keys(data).length === 0) return true;
+  return false;
+}
 var textDecoder = typeof TextDecoder === "undefined" ? null : new TextDecoder();
+
+// node_modules/drizzle-orm/pg-core/table.js
+var InlineForeignKeys = Symbol.for("drizzle:PgInlineForeignKeys");
+var EnableRLS = Symbol.for("drizzle:EnableRLS");
+var PgTable = class extends Table {
+  static [entityKind] = "PgTable";
+  /** @internal */
+  static Symbol = Object.assign({}, Table.Symbol, {
+    InlineForeignKeys,
+    EnableRLS
+  });
+  /**@internal */
+  [InlineForeignKeys] = [];
+  /** @internal */
+  [EnableRLS] = false;
+  /** @internal */
+  [Table.Symbol.ExtraConfigBuilder] = void 0;
+  /** @internal */
+  [Table.Symbol.ExtraConfigColumns] = {};
+};
+
+// node_modules/drizzle-orm/pg-core/primary-keys.js
+var PrimaryKeyBuilder = class {
+  static [entityKind] = "PgPrimaryKeyBuilder";
+  /** @internal */
+  columns;
+  /** @internal */
+  name;
+  constructor(columns, name) {
+    this.columns = columns;
+    this.name = name;
+  }
+  /** @internal */
+  build(table) {
+    return new PrimaryKey(table, this.columns, this.name);
+  }
+};
+var PrimaryKey = class {
+  constructor(table, columns, name) {
+    this.table = table;
+    this.columns = columns;
+    this.name = name;
+  }
+  static [entityKind] = "PgPrimaryKey";
+  columns;
+  name;
+  getName() {
+    return this.name ?? `${this.table[PgTable.Symbol.Name]}_${this.columns.map((column) => column.name).join("_")}_pk`;
+  }
+};
 
 // node_modules/drizzle-orm/sql/expressions/conditions.js
 function bindIfParam(value, column) {
@@ -1272,6 +1735,91 @@ function and(...unfilteredConditions) {
     new StringChunk(")")
   ]);
 }
+function or(...unfilteredConditions) {
+  const conditions = unfilteredConditions.filter(
+    (c) => c !== void 0
+  );
+  if (conditions.length === 0) {
+    return void 0;
+  }
+  if (conditions.length === 1) {
+    return new SQL(conditions);
+  }
+  return new SQL([
+    new StringChunk("("),
+    sql.join(conditions, new StringChunk(" or ")),
+    new StringChunk(")")
+  ]);
+}
+function not(condition) {
+  return sql`not ${condition}`;
+}
+var gt = (left, right) => {
+  return sql`${left} > ${bindIfParam(right, left)}`;
+};
+var gte = (left, right) => {
+  return sql`${left} >= ${bindIfParam(right, left)}`;
+};
+var lt = (left, right) => {
+  return sql`${left} < ${bindIfParam(right, left)}`;
+};
+var lte = (left, right) => {
+  return sql`${left} <= ${bindIfParam(right, left)}`;
+};
+function inArray(column, values) {
+  if (Array.isArray(values)) {
+    if (values.length === 0) {
+      return sql`false`;
+    }
+    return sql`${column} in ${values.map((v) => bindIfParam(v, column))}`;
+  }
+  return sql`${column} in ${bindIfParam(values, column)}`;
+}
+function notInArray(column, values) {
+  if (Array.isArray(values)) {
+    if (values.length === 0) {
+      return sql`true`;
+    }
+    return sql`${column} not in ${values.map((v) => bindIfParam(v, column))}`;
+  }
+  return sql`${column} not in ${bindIfParam(values, column)}`;
+}
+function isNull(value) {
+  return sql`${value} is null`;
+}
+function isNotNull(value) {
+  return sql`${value} is not null`;
+}
+function exists(subquery) {
+  return sql`exists ${subquery}`;
+}
+function notExists(subquery) {
+  return sql`not exists ${subquery}`;
+}
+function between(column, min, max) {
+  return sql`${column} between ${bindIfParam(min, column)} and ${bindIfParam(
+    max,
+    column
+  )}`;
+}
+function notBetween(column, min, max) {
+  return sql`${column} not between ${bindIfParam(
+    min,
+    column
+  )} and ${bindIfParam(max, column)}`;
+}
+function like(column, value) {
+  return sql`${column} like ${value}`;
+}
+function notLike(column, value) {
+  return sql`${column} not like ${value}`;
+}
+function ilike(column, value) {
+  return sql`${column} ilike ${value}`;
+}
+function notIlike(column, value) {
+  return sql`${column} not ilike ${value}`;
+}
 
 // node_modules/drizzle-orm/sql/expressions/select.js
 function asc(column) {
@@ -1281,10 +1829,295 @@ function desc(column) {
   return sql`${column} desc`;
 }
 
+// node_modules/drizzle-orm/relations.js
+var Relation = class {
+  constructor(sourceTable, referencedTable, relationName) {
+    this.sourceTable = sourceTable;
+    this.referencedTable = referencedTable;
+    this.relationName = relationName;
+    this.referencedTableName = referencedTable[Table.Symbol.Name];
+  }
+  static [entityKind] = "Relation";
+  referencedTableName;
+  fieldName;
+};
+var Relations = class {
+  constructor(table, config2) {
+    this.table = table;
+    this.config = config2;
+  }
+  static [entityKind] = "Relations";
+};
+var One = class _One extends Relation {
+  constructor(sourceTable, referencedTable, config2, isNullable) {
+    super(sourceTable, referencedTable, config2?.relationName);
+    this.config = config2;
+    this.isNullable = isNullable;
+  }
+  static [entityKind] = "One";
+  withFieldName(fieldName) {
+    const relation = new _One(
+      this.sourceTable,
+      this.referencedTable,
+      this.config,
+      this.isNullable
+    );
+    relation.fieldName = fieldName;
+    return relation;
+  }
+};
+var Many = class _Many extends Relation {
+  constructor(sourceTable, referencedTable, config2) {
+    super(sourceTable, referencedTable, config2?.relationName);
+    this.config = config2;
+  }
+  static [entityKind] = "Many";
+  withFieldName(fieldName) {
+    const relation = new _Many(
+      this.sourceTable,
+      this.referencedTable,
+      this.config
+    );
+    relation.fieldName = fieldName;
+    return relation;
+  }
+};
+function getOperators() {
+  return {
+    and,
+    between,
+    eq,
+    exists,
+    gt,
+    gte,
+    ilike,
+    inArray,
+    isNull,
+    isNotNull,
+    like,
+    lt,
+    lte,
+    ne,
+    not,
+    notBetween,
+    notExists,
+    notLike,
+    notIlike,
+    notInArray,
+    or,
+    sql
+  };
+}
+function getOrderByOperators() {
+  return {
+    sql,
+    asc,
+    desc
+  };
+}
+function extractTablesRelationalConfig(schema2, configHelpers) {
+  if (Object.keys(schema2).length === 1 && "default" in schema2 && !is(schema2["default"], Table)) {
+    schema2 = schema2["default"];
+  }
+  const tableNamesMap = {};
+  const relationsBuffer = {};
+  const tablesConfig = {};
+  for (const [key, value] of Object.entries(schema2)) {
+    if (is(value, Table)) {
+      const dbName = getTableUniqueName(value);
+      const bufferedRelations = relationsBuffer[dbName];
+      tableNamesMap[dbName] = key;
+      tablesConfig[key] = {
+        tsName: key,
+        dbName: value[Table.Symbol.Name],
+        schema: value[Table.Symbol.Schema],
+        columns: value[Table.Symbol.Columns],
+        relations: bufferedRelations?.relations ?? {},
+        primaryKey: bufferedRelations?.primaryKey ?? []
+      };
+      for (const column of Object.values(
+        value[Table.Symbol.Columns]
+      )) {
+        if (column.primary) {
+          tablesConfig[key].primaryKey.push(column);
+        }
+      }
+      const extraConfig = value[Table.Symbol.ExtraConfigBuilder]?.(value[Table.Symbol.ExtraConfigColumns]);
+      if (extraConfig) {
+        for (const configEntry of Object.values(extraConfig)) {
+          if (is(configEntry, PrimaryKeyBuilder)) {
+            tablesConfig[key].primaryKey.push(...configEntry.columns);
+          }
+        }
+      }
+    } else if (is(value, Relations)) {
+      const dbName = getTableUniqueName(value.table);
+      const tableName = tableNamesMap[dbName];
+      const relations2 = value.config(
+        configHelpers(value.table)
+      );
+      let primaryKey;
+      for (const [relationName, relation] of Object.entries(relations2)) {
+        if (tableName) {
+          const tableConfig = tablesConfig[tableName];
+          tableConfig.relations[relationName] = relation;
+          if (primaryKey) {
+            tableConfig.primaryKey.push(...primaryKey);
+          }
+        } else {
+          if (!(dbName in relationsBuffer)) {
+            relationsBuffer[dbName] = {
+              relations: {},
+              primaryKey
+            };
+          }
+          relationsBuffer[dbName].relations[relationName] = relation;
+        }
+      }
+    }
+  }
+  return { tables: tablesConfig, tableNamesMap };
+}
+function createOne(sourceTable) {
+  return function one(table, config2) {
+    return new One(
+      sourceTable,
+      table,
+      config2,
+      config2?.fields.reduce((res, f) => res && f.notNull, true) ?? false
+    );
+  };
+}
+function createMany(sourceTable) {
+  return function many(referencedTable, config2) {
+    return new Many(sourceTable, referencedTable, config2);
+  };
+}
+function normalizeRelation(schema2, tableNamesMap, relation) {
+  if (is(relation, One) && relation.config) {
+    return {
+      fields: relation.config.fields,
+      references: relation.config.references
+    };
+  }
+  const referencedTableTsName = tableNamesMap[getTableUniqueName(relation.referencedTable)];
+  if (!referencedTableTsName) {
+    throw new Error(
+      `Table "${relation.referencedTable[Table.Symbol.Name]}" not found in schema`
+    );
+  }
+  const referencedTableConfig = schema2[referencedTableTsName];
+  if (!referencedTableConfig) {
+    throw new Error(`Table "${referencedTableTsName}" not found in schema`);
+  }
+  const sourceTable = relation.sourceTable;
+  const sourceTableTsName = tableNamesMap[getTableUniqueName(sourceTable)];
+  if (!sourceTableTsName) {
+    throw new Error(
+      `Table "${sourceTable[Table.Symbol.Name]}" not found in schema`
+    );
+  }
+  const reverseRelations = [];
+  for (const referencedTableRelation of Object.values(
+    referencedTableConfig.relations
+  )) {
+    if (relation.relationName && relation !== referencedTableRelation && referencedTableRelation.relationName === relation.relationName || !relation.relationName && referencedTableRelation.referencedTable === relation.sourceTable) {
+      reverseRelations.push(referencedTableRelation);
+    }
+  }
+  if (reverseRelations.length > 1) {
+    throw relation.relationName ? new Error(
+      `There are multiple relations with name "${relation.relationName}" in table "${referencedTableTsName}"`
+    ) : new Error(
+      `There are multiple relations between "${referencedTableTsName}" and "${relation.sourceTable[Table.Symbol.Name]}". Please specify relation name`
+    );
+  }
+  if (reverseRelations[0] && is(reverseRelations[0], One) && reverseRelations[0].config) {
+    return {
+      fields: reverseRelations[0].config.references,
+      references: reverseRelations[0].config.fields
+    };
+  }
+  throw new Error(
+    `There is not enough information to infer relation "${sourceTableTsName}.${relation.fieldName}"`
+  );
+}
+function createTableRelationsHelpers(sourceTable) {
+  return {
+    one: createOne(sourceTable),
+    many: createMany(sourceTable)
+  };
+}
+function mapRelationalRow(tablesConfig, tableConfig, row, buildQueryResultSelection, mapColumnValue = (value) => value) {
+  const result = {};
+  for (const [
+    selectionItemIndex,
+    selectionItem
+  ] of buildQueryResultSelection.entries()) {
+    if (selectionItem.isJson) {
+      const relation = tableConfig.relations[selectionItem.tsKey];
+      const rawSubRows = row[selectionItemIndex];
+      const subRows = typeof rawSubRows === "string" ? JSON.parse(rawSubRows) : rawSubRows;
+      result[selectionItem.tsKey] = is(relation, One) ? subRows && mapRelationalRow(
+        tablesConfig,
+        tablesConfig[selectionItem.relationTableTsKey],
+        subRows,
+        selectionItem.selection,
+        mapColumnValue
+      ) : subRows.map(
+        (subRow) => mapRelationalRow(
+          tablesConfig,
+          tablesConfig[selectionItem.relationTableTsKey],
+          subRow,
+          selectionItem.selection,
+          mapColumnValue
+        )
+      );
+    } else {
+      const value = mapColumnValue(row[selectionItemIndex]);
+      const field = selectionItem.field;
+      let decoder;
+      if (is(field, Column)) {
+        decoder = field;
+      } else if (is(field, SQL)) {
+        decoder = field.decoder;
+      } else {
+        decoder = field.sql.decoder;
+      }
+      result[selectionItem.tsKey] = value === null ? null : decoder.mapFromDriverValue(value);
+    }
+  }
+  return result;
+}
+
 // node_modules/drizzle-orm/sql/functions/aggregate.js
 function count(expression) {
   return sql`count(${expression || sql.raw("*")})`.mapWith(Number);
 }
+
+// electron/services/databaseService.ts
+import fs3 from "node:fs";
+import path3 from "node:path";
+import crypto3 from "node:crypto";
+
+// electron/database/schema.ts
+var schema_exports = {};
+__export(schema_exports, {
+  categories: () => categories,
+  clients: () => clients,
+  payments: () => payments,
+  products: () => products,
+  saleItems: () => saleItems,
+  sales: () => sales,
+  schema: () => schema,
+  settings: () => settings,
+  stockMovements: () => stockMovements,
+  suppliers: () => suppliers,
+  supplies: () => supplies,
+  supplyItems: () => supplyItems,
+  transformations: () => transformations,
+  users: () => users
+});
 
 // node_modules/drizzle-orm/sqlite-core/checks.js
 var CheckBuilder = class {
@@ -1864,6 +2697,74 @@ function text(a, b = {}) {
   return new SQLiteTextBuilder(name, config2);
 }
 
+// node_modules/drizzle-orm/selection-proxy.js
+var SelectionProxyHandler = class _SelectionProxyHandler {
+  static [entityKind] = "SelectionProxyHandler";
+  config;
+  constructor(config2) {
+    this.config = { ...config2 };
+  }
+  get(subquery, prop) {
+    if (prop === "_") {
+      return {
+        ...subquery["_"],
+        selectedFields: new Proxy(
+          subquery._.selectedFields,
+          this
+        )
+      };
+    }
+    if (prop === ViewBaseConfig) {
+      return {
+        ...subquery[ViewBaseConfig],
+        selectedFields: new Proxy(
+          subquery[ViewBaseConfig].selectedFields,
+          this
+        )
+      };
+    }
+    if (typeof prop === "symbol") {
+      return subquery[prop];
+    }
+    const columns = is(subquery, Subquery) ? subquery._.selectedFields : is(subquery, View) ? subquery[ViewBaseConfig].selectedFields : subquery;
+    const value = columns[prop];
+    if (is(value, SQL.Aliased)) {
+      if (this.config.sqlAliasedBehavior === "sql" && !value.isSelectionField) {
+        return value.sql;
+      }
+      const newValue = value.clone();
+      newValue.isSelectionField = true;
+      return newValue;
+    }
+    if (is(value, SQL)) {
+      if (this.config.sqlBehavior === "sql") {
+        return value;
+      }
+      throw new Error(
+        `You tried to reference "${prop}" field from a subquery, which is a raw SQL field, but it doesn't have an alias declared. Please add an alias to the field using ".as('alias')" method.`
+      );
+    }
+    if (is(value, Column)) {
+      if (this.config.alias) {
+        return new Proxy(
+          value,
+          new ColumnAliasProxyHandler(
+            new Proxy(
+              value.table,
+              new TableAliasProxyHandler(this.config.alias, this.config.replaceOriginalName ?? false)
+            )
+          )
+        );
+      }
+      return value;
+    }
+    if (typeof value !== "object" || value === null) {
+      return value;
+    }
+    return new Proxy(value, new _SelectionProxyHandler(this.config));
+  }
+};
+
 // node_modules/drizzle-orm/sqlite-core/columns/all.js
 function getSQLiteColumnBuilders() {
   return {
@@ -1877,29 +2778,29 @@ function getSQLiteColumnBuilders() {
 }
 
 // node_modules/drizzle-orm/sqlite-core/table.js
-var InlineForeignKeys = Symbol.for("drizzle:SQLiteInlineForeignKeys");
+var InlineForeignKeys2 = Symbol.for("drizzle:SQLiteInlineForeignKeys");
 var SQLiteTable = class extends Table {
   static [entityKind] = "SQLiteTable";
   /** @internal */
   static Symbol = Object.assign({}, Table.Symbol, {
-    InlineForeignKeys
+    InlineForeignKeys: InlineForeignKeys2
   });
   /** @internal */
   [Table.Symbol.Columns];
   /** @internal */
-  [InlineForeignKeys] = [];
+  [InlineForeignKeys2] = [];
   /** @internal */
   [Table.Symbol.ExtraConfigBuilder] = void 0;
 };
-function sqliteTableBase(name, columns, extraConfig, schema, baseName = name) {
-  const rawTable = new SQLiteTable(name, schema, baseName);
+function sqliteTableBase(name, columns, extraConfig, schema2, baseName = name) {
+  const rawTable = new SQLiteTable(name, schema2, baseName);
   const parsedColumns = typeof columns === "function" ? columns(getSQLiteColumnBuilders()) : columns;
   const builtColumns = Object.fromEntries(
     Object.entries(parsedColumns).map(([name2, colBuilderBase]) => {
       const colBuilder = colBuilderBase;
       colBuilder.setName(name2);
       const column = colBuilder.build(rawTable);
-      rawTable[InlineForeignKeys].push(...colBuilder.buildForeignKeys(column, rawTable));
+      rawTable[InlineForeignKeys2].push(...colBuilder.buildForeignKeys(column, rawTable));
       return [name2, column];
     })
   );
@@ -1963,6 +2864,2692 @@ function index(name) {
 function uniqueIndex(name) {
   return new IndexBuilderOn(name, true);
 }
+
+// node_modules/drizzle-orm/sqlite-core/utils.js
+function extractUsedTable(table) {
+  if (is(table, SQLiteTable)) {
+    return [`${table[Table.Symbol.BaseName]}`];
+  }
+  if (is(table, Subquery)) {
+    return table._.usedTables ?? [];
+  }
+  if (is(table, SQL)) {
+    return table.usedTables ?? [];
+  }
+  return [];
+}
+
+// node_modules/drizzle-orm/sqlite-core/query-builders/delete.js
+var SQLiteDeleteBase = class extends QueryPromise {
+  constructor(table, session, dialect, withList) {
+    super();
+    this.table = table;
+    this.session = session;
+    this.dialect = dialect;
+    this.config = { table, withList };
+  }
+  static [entityKind] = "SQLiteDelete";
+  /** @internal */
+  config;
+  /**
+   * Adds a `where` clause to the query.
+   *
+   * Calling this method will delete only those rows that fulfill a specified condition.
+   *
+   * See docs: {@link https://orm.drizzle.team/docs/delete}
+   *
+   * @param where the `where` clause.
+   *
+   * @example
+   * You can use conditional operators and `sql function` to filter the rows to be deleted.
+   *
+   * ```ts
+   * // Delete all cars with green color
+   * db.delete(cars).where(eq(cars.color, 'green'));
+   * // or
+   * db.delete(cars).where(sql`${cars.color} = 'green'`)
+   * ```
+   *
+   * You can logically combine conditional operators with `and()` and `or()` operators:
+   *
+   * ```ts
+   * // Delete all BMW cars with a green color
+   * db.delete(cars).where(and(eq(cars.color, 'green'), eq(cars.brand, 'BMW')));
+   *
+   * // Delete all cars with the green or blue color
+   * db.delete(cars).where(or(eq(cars.color, 'green'), eq(cars.color, 'blue')));
+   * ```
+   */
+  where(where) {
+    this.config.where = where;
+    return this;
+  }
+  orderBy(...columns) {
+    if (typeof columns[0] === "function") {
+      const orderBy = columns[0](
+        new Proxy(
+          this.config.table[Table.Symbol.Columns],
+          new SelectionProxyHandler({ sqlAliasedBehavior: "alias", sqlBehavior: "sql" })
+        )
+      );
+      const orderByArray = Array.isArray(orderBy) ? orderBy : [orderBy];
+      this.config.orderBy = orderByArray;
+    } else {
+      const orderByArray = columns;
+      this.config.orderBy = orderByArray;
+    }
+    return this;
+  }
+  limit(limit) {
+    this.config.limit = limit;
+    return this;
+  }
+  returning(fields = this.table[SQLiteTable.Symbol.Columns]) {
+    this.config.returning = orderSelectedFields(fields);
+    return this;
+  }
+  /** @internal */
+  getSQL() {
+    return this.dialect.buildDeleteQuery(this.config);
+  }
+  toSQL() {
+    const { typings: _typings, ...rest } = this.dialect.sqlToQuery(this.getSQL());
+    return rest;
+  }
+  /** @internal */
+  _prepare(isOneTimeQuery = true) {
+    return this.session[isOneTimeQuery ? "prepareOneTimeQuery" : "prepareQuery"](
+      this.dialect.sqlToQuery(this.getSQL()),
+      this.config.returning,
+      this.config.returning ? "all" : "run",
+      true,
+      void 0,
+      {
+        type: "delete",
+        tables: extractUsedTable(this.config.table)
+      }
+    );
+  }
+  prepare() {
+    return this._prepare(false);
+  }
+  run = (placeholderValues) => {
+    return this._prepare().run(placeholderValues);
+  };
+  all = (placeholderValues) => {
+    return this._prepare().all(placeholderValues);
+  };
+  get = (placeholderValues) => {
+    return this._prepare().get(placeholderValues);
+  };
+  values = (placeholderValues) => {
+    return this._prepare().values(placeholderValues);
+  };
+  async execute(placeholderValues) {
+    return this._prepare().execute(placeholderValues);
+  }
+  $dynamic() {
+    return this;
+  }
+};
+
+// node_modules/drizzle-orm/casing.js
+function toSnakeCase(input2) {
+  const words = input2.replace(/['\u2019]/g, "").match(/[\da-z]+|[A-Z]+(?![a-z])|[A-Z][\da-z]+/g) ?? [];
+  return words.map((word) => word.toLowerCase()).join("_");
+}
+function toCamelCase(input2) {
+  const words = input2.replace(/['\u2019]/g, "").match(/[\da-z]+|[A-Z]+(?![a-z])|[A-Z][\da-z]+/g) ?? [];
+  return words.reduce((acc, word, i) => {
+    const formattedWord = i === 0 ? word.toLowerCase() : `${word[0].toUpperCase()}${word.slice(1)}`;
+    return acc + formattedWord;
+  }, "");
+}
+function noopCase(input2) {
+  return input2;
+}
+var CasingCache = class {
+  static [entityKind] = "CasingCache";
+  /** @internal */
+  cache = {};
+  cachedTables = {};
+  convert;
+  constructor(casing) {
+    this.convert = casing === "snake_case" ? toSnakeCase : casing === "camelCase" ? toCamelCase : noopCase;
+  }
+  getColumnCasing(column) {
+    if (!column.keyAsName) return column.name;
+    const schema2 = column.table[Table.Symbol.Schema] ?? "public";
+    const tableName = column.table[Table.Symbol.OriginalName];
+    const key = `${schema2}.${tableName}.${column.name}`;
+    if (!this.cache[key]) {
+      this.cacheTable(column.table);
+    }
+    return this.cache[key];
+  }
+  cacheTable(table) {
+    const schema2 = table[Table.Symbol.Schema] ?? "public";
+    const tableName = table[Table.Symbol.OriginalName];
+    const tableKey = `${schema2}.${tableName}`;
+    if (!this.cachedTables[tableKey]) {
+      for (const column of Object.values(table[Table.Symbol.Columns])) {
+        const columnKey = `${tableKey}.${column.name}`;
+        this.cache[columnKey] = this.convert(column.name);
+      }
+      this.cachedTables[tableKey] = true;
+    }
+  }
+  clearCache() {
+    this.cache = {};
+    this.cachedTables = {};
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/view-base.js
+var SQLiteViewBase = class extends View {
+  static [entityKind] = "SQLiteViewBase";
+};
+
+// node_modules/drizzle-orm/sqlite-core/dialect.js
+var SQLiteDialect = class {
+  static [entityKind] = "SQLiteDialect";
+  /** @internal */
+  casing;
+  constructor(config2) {
+    this.casing = new CasingCache(config2?.casing);
+  }
+  escapeName(name) {
+    return `"${name.replace(/"/g, '""')}"`;
+  }
+  escapeParam(_num) {
+    return "?";
+  }
+  escapeString(str) {
+    return `'${str.replace(/'/g, "''")}'`;
+  }
+  buildWithCTE(queries) {
+    if (!queries?.length) return void 0;
+    const withSqlChunks = [sql`with `];
+    for (const [i, w] of queries.entries()) {
+      withSqlChunks.push(sql`${sql.identifier(w._.alias)} as (${w._.sql})`);
+      if (i < queries.length - 1) {
+        withSqlChunks.push(sql`, `);
+      }
+    }
+    withSqlChunks.push(sql` `);
+    return sql.join(withSqlChunks);
+  }
+  buildDeleteQuery({
+    table,
+    where,
+    returning,
+    withList,
+    limit,
+    orderBy
+  }) {
+    const withSql = this.buildWithCTE(withList);
+    const returningSql = returning ? sql` returning ${this.buildSelection(returning, { isSingleTable: true })}` : void 0;
+    const whereSql = where ? sql` where ${where}` : void 0;
+    const orderBySql = this.buildOrderBy(orderBy);
+    const limitSql = this.buildLimit(limit);
+    return sql`${withSql}delete from ${table}${whereSql}${returningSql}${orderBySql}${limitSql}`;
+  }
+  buildUpdateSet(table, set2) {
+    const tableColumns = table[Table.Symbol.Columns];
+    const columnNames = Object.keys(tableColumns).filter(
+      (colName) => set2[colName] !== void 0 || tableColumns[colName]?.onUpdateFn !== void 0
+    );
+    const setSize = columnNames.length;
+    return sql.join(
+      columnNames.flatMap((colName, i) => {
+        const col = tableColumns[colName];
+        const onUpdateFnResult = col.onUpdateFn?.();
+        const value = set2[colName] ?? (is(onUpdateFnResult, SQL) ? onUpdateFnResult : sql.param(onUpdateFnResult, col));
+        const res = sql`${sql.identifier(this.casing.getColumnCasing(col))} = ${value}`;
+        if (i < setSize - 1) {
+          return [res, sql.raw(", ")];
+        }
+        return [res];
+      })
+    );
+  }
+  buildUpdateQuery({
+    table,
+    set: set2,
+    where,
+    returning,
+    withList,
+    joins,
+    from,
+    limit,
+    orderBy
+  }) {
+    const withSql = this.buildWithCTE(withList);
+    const setSql = this.buildUpdateSet(table, set2);
+    const fromSql = from && sql.join([sql.raw(" from "), this.buildFromTable(from)]);
+    const joinsSql = this.buildJoins(joins);
+    const returningSql = returning ? sql` returning ${this.buildSelection(returning, { isSingleTable: true })}` : void 0;
+    const whereSql = where ? sql` where ${where}` : void 0;
+    const orderBySql = this.buildOrderBy(orderBy);
+    const limitSql = this.buildLimit(limit);
+    return sql`${withSql}update ${table} set ${setSql}${fromSql}${joinsSql}${whereSql}${returningSql}${orderBySql}${limitSql}`;
+  }
+  /**
+   * Builds selection SQL with provided fields/expressions
+   *
+   * Examples:
+   *
+   * `select <selection> from`
+   *
+   * `insert ... returning <selection>`
+   *
+   * If `isSingleTable` is true, then columns won't be prefixed with table name
+   */
+  buildSelection(fields, { isSingleTable = false } = {}) {
+    const columnsLen = fields.length;
+    const chunks = fields.flatMap(({ field }, i) => {
+      const chunk = [];
+      if (is(field, SQL.Aliased) && field.isSelectionField) {
+        chunk.push(sql.identifier(field.fieldAlias));
+      } else if (is(field, SQL.Aliased) || is(field, SQL)) {
+        const query = is(field, SQL.Aliased) ? field.sql : field;
+        if (isSingleTable) {
+          chunk.push(
+            new SQL(
+              query.queryChunks.map((c) => {
+                if (is(c, Column)) {
+                  return sql.identifier(this.casing.getColumnCasing(c));
+                }
+                return c;
+              })
+            )
+          );
+        } else {
+          chunk.push(query);
+        }
+        if (is(field, SQL.Aliased)) {
+          chunk.push(sql` as ${sql.identifier(field.fieldAlias)}`);
+        }
+      } else if (is(field, Column)) {
+        const tableName = field.table[Table.Symbol.Name];
+        if (field.columnType === "SQLiteNumericBigInt") {
+          if (isSingleTable) {
+            chunk.push(
+              sql`cast(${sql.identifier(this.casing.getColumnCasing(field))} as text)`
+            );
+          } else {
+            chunk.push(
+              sql`cast(${sql.identifier(tableName)}.${sql.identifier(this.casing.getColumnCasing(field))} as text)`
+            );
+          }
+        } else {
+          if (isSingleTable) {
+            chunk.push(sql.identifier(this.casing.getColumnCasing(field)));
+          } else {
+            chunk.push(
+              sql`${sql.identifier(tableName)}.${sql.identifier(this.casing.getColumnCasing(field))}`
+            );
+          }
+        }
+      } else if (is(field, Subquery)) {
+        const entries = Object.entries(field._.selectedFields);
+        if (entries.length === 1) {
+          const entry = entries[0][1];
+          const fieldDecoder = is(entry, SQL) ? entry.decoder : is(entry, Column) ? { mapFromDriverValue: (v) => entry.mapFromDriverValue(v) } : entry.sql.decoder;
+          if (fieldDecoder) field._.sql.decoder = fieldDecoder;
+        }
+        chunk.push(field);
+      }
+      if (i < columnsLen - 1) {
+        chunk.push(sql`, `);
+      }
+      return chunk;
+    });
+    return sql.join(chunks);
+  }
+  buildJoins(joins) {
+    if (!joins || joins.length === 0) {
+      return void 0;
+    }
+    const joinsArray = [];
+    if (joins) {
+      for (const [index2, joinMeta] of joins.entries()) {
+        if (index2 === 0) {
+          joinsArray.push(sql` `);
+        }
+        const table = joinMeta.table;
+        const onSql = joinMeta.on ? sql` on ${joinMeta.on}` : void 0;
+        if (is(table, SQLiteTable)) {
+          const tableName = table[SQLiteTable.Symbol.Name];
+          const tableSchema = table[SQLiteTable.Symbol.Schema];
+          const origTableName = table[SQLiteTable.Symbol.OriginalName];
+          const alias = tableName === origTableName ? void 0 : joinMeta.alias;
+          joinsArray.push(
+            sql`${sql.raw(joinMeta.joinType)} join ${tableSchema ? sql`${sql.identifier(tableSchema)}.` : void 0}${sql.identifier(
+              origTableName
+            )}${alias && sql` ${sql.identifier(alias)}`}${onSql}`
+          );
+        } else {
+          joinsArray.push(
+            sql`${sql.raw(joinMeta.joinType)} join ${table}${onSql}`
+          );
+        }
+        if (index2 < joins.length - 1) {
+          joinsArray.push(sql` `);
+        }
+      }
+    }
+    return sql.join(joinsArray);
+  }
+  buildLimit(limit) {
+    return typeof limit === "object" || typeof limit === "number" && limit >= 0 ? sql` limit ${limit}` : void 0;
+  }
+  buildOrderBy(orderBy) {
+    const orderByList = [];
+    if (orderBy) {
+      for (const [index2, orderByValue] of orderBy.entries()) {
+        orderByList.push(orderByValue);
+        if (index2 < orderBy.length - 1) {
+          orderByList.push(sql`, `);
+        }
+      }
+    }
+    return orderByList.length > 0 ? sql` order by ${sql.join(orderByList)}` : void 0;
+  }
+  buildFromTable(table) {
+    if (is(table, Table) && table[Table.Symbol.IsAlias]) {
+      return sql`${sql`${sql.identifier(table[Table.Symbol.Schema] ?? "")}.`.if(table[Table.Symbol.Schema])}${sql.identifier(
+        table[Table.Symbol.OriginalName]
+      )} ${sql.identifier(table[Table.Symbol.Name])}`;
+    }
+    return table;
+  }
+  buildSelectQuery({
+    withList,
+    fields,
+    fieldsFlat,
+    where,
+    having,
+    table,
+    joins,
+    orderBy,
+    groupBy,
+    limit,
+    offset,
+    distinct,
+    setOperators
+  }) {
+    const fieldsList = fieldsFlat ?? orderSelectedFields(fields);
+    for (const f of fieldsList) {
+      if (is(f.field, Column) && getTableName(f.field.table) !== (is(table, Subquery) ? table._.alias : is(table, SQLiteViewBase) ? table[ViewBaseConfig].name : is(table, SQL) ? void 0 : getTableName(table)) && !((table2) => joins?.some(
+        ({ alias }) => alias === (table2[Table.Symbol.IsAlias] ? getTableName(table2) : table2[Table.Symbol.BaseName])
+      ))(f.field.table)) {
+        const tableName = getTableName(f.field.table);
+        throw new Error(
+          `Your "${f.path.join(
+            "->"
+          )}" field references a column "${tableName}"."${f.field.name}", but the table "${tableName}" is not part of the query! Did you forget to join it?`
+        );
+      }
+    }
+    const isSingleTable = !joins || joins.length === 0;
+    const withSql = this.buildWithCTE(withList);
+    const distinctSql = distinct ? sql` distinct` : void 0;
+    const selection = this.buildSelection(fieldsList, { isSingleTable });
+    const tableSql = this.buildFromTable(table);
+    const joinsSql = this.buildJoins(joins);
+    const whereSql = where ? sql` where ${where}` : void 0;
+    const havingSql = having ? sql` having ${having}` : void 0;
+    const groupByList = [];
+    if (groupBy) {
+      for (const [index2, groupByValue] of groupBy.entries()) {
+        groupByList.push(groupByValue);
+        if (index2 < groupBy.length - 1) {
+          groupByList.push(sql`, `);
+        }
+      }
+    }
+    const groupBySql = groupByList.length > 0 ? sql` group by ${sql.join(groupByList)}` : void 0;
+    const orderBySql = this.buildOrderBy(orderBy);
+    const limitSql = this.buildLimit(limit);
+    const offsetSql = offset ? sql` offset ${offset}` : void 0;
+    const finalQuery = sql`${withSql}select${distinctSql} ${selection} from ${tableSql}${joinsSql}${whereSql}${groupBySql}${havingSql}${orderBySql}${limitSql}${offsetSql}`;
+    if (setOperators.length > 0) {
+      return this.buildSetOperations(finalQuery, setOperators);
+    }
+    return finalQuery;
+  }
+  buildSetOperations(leftSelect, setOperators) {
+    const [setOperator, ...rest] = setOperators;
+    if (!setOperator) {
+      throw new Error("Cannot pass undefined values to any set operator");
+    }
+    if (rest.length === 0) {
+      return this.buildSetOperationQuery({ leftSelect, setOperator });
+    }
+    return this.buildSetOperations(
+      this.buildSetOperationQuery({ leftSelect, setOperator }),
+      rest
+    );
+  }
+  buildSetOperationQuery({
+    leftSelect,
+    setOperator: { type, isAll, rightSelect, limit, orderBy, offset }
+  }) {
+    const leftChunk = sql`${leftSelect.getSQL()} `;
+    const rightChunk = sql`${rightSelect.getSQL()}`;
+    let orderBySql;
+    if (orderBy && orderBy.length > 0) {
+      const orderByValues = [];
+      for (const singleOrderBy of orderBy) {
+        if (is(singleOrderBy, SQLiteColumn)) {
+          orderByValues.push(sql.identifier(singleOrderBy.name));
+        } else if (is(singleOrderBy, SQL)) {
+          for (let i = 0; i < singleOrderBy.queryChunks.length; i++) {
+            const chunk = singleOrderBy.queryChunks[i];
+            if (is(chunk, SQLiteColumn)) {
+              singleOrderBy.queryChunks[i] = sql.identifier(
+                this.casing.getColumnCasing(chunk)
+              );
+            }
+          }
+          orderByValues.push(sql`${singleOrderBy}`);
+        } else {
+          orderByValues.push(sql`${singleOrderBy}`);
+        }
+      }
+      orderBySql = sql` order by ${sql.join(orderByValues, sql`, `)}`;
+    }
+    const limitSql = typeof limit === "object" || typeof limit === "number" && limit >= 0 ? sql` limit ${limit}` : void 0;
+    const operatorChunk = sql.raw(`${type} ${isAll ? "all " : ""}`);
+    const offsetSql = offset ? sql` offset ${offset}` : void 0;
+    return sql`${leftChunk}${operatorChunk}${rightChunk}${orderBySql}${limitSql}${offsetSql}`;
+  }
+  buildInsertQuery({
+    table,
+    values: valuesOrSelect,
+    onConflict,
+    returning,
+    withList,
+    select
+  }) {
+    const valuesSqlList = [];
+    const columns = table[Table.Symbol.Columns];
+    const colEntries = Object.entries(columns).filter(
+      ([_, col]) => !col.shouldDisableInsert()
+    );
+    const insertOrder = colEntries.map(([, column]) => sql.identifier(this.casing.getColumnCasing(column)));
+    if (select) {
+      const select2 = valuesOrSelect;
+      if (is(select2, SQL)) {
+        valuesSqlList.push(select2);
+      } else {
+        valuesSqlList.push(select2.getSQL());
+      }
+    } else {
+      const values = valuesOrSelect;
+      valuesSqlList.push(sql.raw("values "));
+      for (const [valueIndex, value] of values.entries()) {
+        const valueList = [];
+        for (const [fieldName, col] of colEntries) {
+          const colValue = value[fieldName];
+          if (colValue === void 0 || is(colValue, Param) && colValue.value === void 0) {
+            let defaultValue;
+            if (col.default !== null && col.default !== void 0) {
+              defaultValue = is(col.default, SQL) ? col.default : sql.param(col.default, col);
+            } else if (col.defaultFn !== void 0) {
+              const defaultFnResult = col.defaultFn();
+              defaultValue = is(defaultFnResult, SQL) ? defaultFnResult : sql.param(defaultFnResult, col);
+            } else if (!col.default && col.onUpdateFn !== void 0) {
+              const onUpdateFnResult = col.onUpdateFn();
+              defaultValue = is(onUpdateFnResult, SQL) ? onUpdateFnResult : sql.param(onUpdateFnResult, col);
+            } else {
+              defaultValue = sql`null`;
+            }
+            valueList.push(defaultValue);
+          } else {
+            valueList.push(colValue);
+          }
+        }
+        valuesSqlList.push(valueList);
+        if (valueIndex < values.length - 1) {
+          valuesSqlList.push(sql`, `);
+        }
+      }
+    }
+    const withSql = this.buildWithCTE(withList);
+    const valuesSql = sql.join(valuesSqlList);
+    const returningSql = returning ? sql` returning ${this.buildSelection(returning, { isSingleTable: true })}` : void 0;
+    const onConflictSql = onConflict?.length ? sql.join(onConflict) : void 0;
+    return sql`${withSql}insert into ${table} ${insertOrder} ${valuesSql}${onConflictSql}${returningSql}`;
+  }
+  sqlToQuery(sql2, invokeSource) {
+    return sql2.toQuery({
+      casing: this.casing,
+      escapeName: this.escapeName,
+      escapeParam: this.escapeParam,
+      escapeString: this.escapeString,
+      invokeSource
+    });
+  }
+  buildRelationalQuery({
+    fullSchema,
+    schema: schema2,
+    tableNamesMap,
+    table,
+    tableConfig,
+    queryConfig: config2,
+    tableAlias,
+    nestedQueryRelation,
+    joinOn
+  }) {
+    let selection = [];
+    let limit, offset, orderBy = [], where;
+    const joins = [];
+    if (config2 === true) {
+      const selectionEntries = Object.entries(tableConfig.columns);
+      selection = selectionEntries.map(([key, value]) => ({
+        dbKey: value.name,
+        tsKey: key,
+        field: aliasedTableColumn(value, tableAlias),
+        relationTableTsKey: void 0,
+        isJson: false,
+        selection: []
+      }));
+    } else {
+      const aliasedColumns = Object.fromEntries(
+        Object.entries(tableConfig.columns).map(([key, value]) => [
+          key,
+          aliasedTableColumn(value, tableAlias)
+        ])
+      );
+      if (config2.where) {
+        const whereSql = typeof config2.where === "function" ? config2.where(aliasedColumns, getOperators()) : config2.where;
+        where = whereSql && mapColumnsInSQLToAlias(whereSql, tableAlias);
+      }
+      const fieldsSelection = [];
+      let selectedColumns = [];
+      if (config2.columns) {
+        let isIncludeMode = false;
+        for (const [field, value] of Object.entries(config2.columns)) {
+          if (value === void 0) {
+            continue;
+          }
+          if (field in tableConfig.columns) {
+            if (!isIncludeMode && value === true) {
+              isIncludeMode = true;
+            }
+            selectedColumns.push(field);
+          }
+        }
+        if (selectedColumns.length > 0) {
+          selectedColumns = isIncludeMode ? selectedColumns.filter((c) => config2.columns?.[c] === true) : Object.keys(tableConfig.columns).filter(
+            (key) => !selectedColumns.includes(key)
+          );
+        }
+      } else {
+        selectedColumns = Object.keys(tableConfig.columns);
+      }
+      for (const field of selectedColumns) {
+        const column = tableConfig.columns[field];
+        fieldsSelection.push({ tsKey: field, value: column });
+      }
+      let selectedRelations = [];
+      if (config2.with) {
+        selectedRelations = Object.entries(config2.with).filter(
+          (entry) => !!entry[1]
+        ).map(([tsKey, queryConfig]) => ({
+          tsKey,
+          queryConfig,
+          relation: tableConfig.relations[tsKey]
+        }));
+      }
+      let extras;
+      if (config2.extras) {
+        extras = typeof config2.extras === "function" ? config2.extras(aliasedColumns, { sql }) : config2.extras;
+        for (const [tsKey, value] of Object.entries(extras)) {
+          fieldsSelection.push({
+            tsKey,
+            value: mapColumnsInAliasedSQLToAlias(value, tableAlias)
+          });
+        }
+      }
+      for (const { tsKey, value } of fieldsSelection) {
+        selection.push({
+          dbKey: is(value, SQL.Aliased) ? value.fieldAlias : tableConfig.columns[tsKey].name,
+          tsKey,
+          field: is(value, Column) ? aliasedTableColumn(value, tableAlias) : value,
+          relationTableTsKey: void 0,
+          isJson: false,
+          selection: []
+        });
+      }
+      let orderByOrig = typeof config2.orderBy === "function" ? config2.orderBy(aliasedColumns, getOrderByOperators()) : config2.orderBy ?? [];
+      if (!Array.isArray(orderByOrig)) {
+        orderByOrig = [orderByOrig];
+      }
+      orderBy = orderByOrig.map((orderByValue) => {
+        if (is(orderByValue, Column)) {
+          return aliasedTableColumn(orderByValue, tableAlias);
+        }
+        return mapColumnsInSQLToAlias(orderByValue, tableAlias);
+      });
+      limit = config2.limit;
+      offset = config2.offset;
+      for (const {
+        tsKey: selectedRelationTsKey,
+        queryConfig: selectedRelationConfigValue,
+        relation
+      } of selectedRelations) {
+        const normalizedRelation = normalizeRelation(
+          schema2,
+          tableNamesMap,
+          relation
+        );
+        const relationTableName = getTableUniqueName(relation.referencedTable);
+        const relationTableTsName = tableNamesMap[relationTableName];
+        const relationTableAlias = `${tableAlias}_${selectedRelationTsKey}`;
+        const joinOn2 = and(
+          ...normalizedRelation.fields.map(
+            (field2, i) => eq(
+              aliasedTableColumn(
+                normalizedRelation.references[i],
+                relationTableAlias
+              ),
+              aliasedTableColumn(field2, tableAlias)
+            )
+          )
+        );
+        const builtRelation = this.buildRelationalQuery({
+          fullSchema,
+          schema: schema2,
+          tableNamesMap,
+          table: fullSchema[relationTableTsName],
+          tableConfig: schema2[relationTableTsName],
+          queryConfig: is(relation, One) ? selectedRelationConfigValue === true ? { limit: 1 } : { ...selectedRelationConfigValue, limit: 1 } : selectedRelationConfigValue,
+          tableAlias: relationTableAlias,
+          joinOn: joinOn2,
+          nestedQueryRelation: relation
+        });
+        const field = sql`(${builtRelation.sql})`.as(selectedRelationTsKey);
+        selection.push({
+          dbKey: selectedRelationTsKey,
+          tsKey: selectedRelationTsKey,
+          field,
+          relationTableTsKey: relationTableTsName,
+          isJson: true,
+          selection: builtRelation.selection
+        });
+      }
+    }
+    if (selection.length === 0) {
+      throw new DrizzleError({
+        message: `No fields selected for table "${tableConfig.tsName}" ("${tableAlias}"). You need to have at least one item in "columns", "with" or "extras". If you need to select all columns, omit the "columns" key or set it to undefined.`
+      });
+    }
+    let result;
+    where = and(joinOn, where);
+    if (nestedQueryRelation) {
+      let field = sql`json_array(${sql.join(
+        selection.map(
+          ({ field: field2 }) => is(field2, SQLiteColumn) ? sql.identifier(this.casing.getColumnCasing(field2)) : is(field2, SQL.Aliased) ? field2.sql : field2
+        ),
+        sql`, `
+      )})`;
+      if (is(nestedQueryRelation, Many)) {
+        field = sql`coalesce(json_group_array(${field}), json_array())`;
+      }
+      const nestedSelection = [
+        {
+          dbKey: "data",
+          tsKey: "data",
+          field: field.as("data"),
+          isJson: true,
+          relationTableTsKey: tableConfig.tsName,
+          selection
+        }
+      ];
+      const needsSubquery = limit !== void 0 || offset !== void 0 || orderBy.length > 0;
+      if (needsSubquery) {
+        result = this.buildSelectQuery({
+          table: aliasedTable(table, tableAlias),
+          fields: {},
+          fieldsFlat: [
+            {
+              path: [],
+              field: sql.raw("*")
+            }
+          ],
+          where,
+          limit,
+          offset,
+          orderBy,
+          setOperators: []
+        });
+        where = void 0;
+        limit = void 0;
+        offset = void 0;
+        orderBy = void 0;
+      } else {
+        result = aliasedTable(table, tableAlias);
+      }
+      result = this.buildSelectQuery({
+        table: is(result, SQLiteTable) ? result : new Subquery(result, {}, tableAlias),
+        fields: {},
+        fieldsFlat: nestedSelection.map(({ field: field2 }) => ({
+          path: [],
+          field: is(field2, Column) ? aliasedTableColumn(field2, tableAlias) : field2
+        })),
+        joins,
+        where,
+        limit,
+        offset,
+        orderBy,
+        setOperators: []
+      });
+    } else {
+      result = this.buildSelectQuery({
+        table: aliasedTable(table, tableAlias),
+        fields: {},
+        fieldsFlat: selection.map(({ field }) => ({
+          path: [],
+          field: is(field, Column) ? aliasedTableColumn(field, tableAlias) : field
+        })),
+        joins,
+        where,
+        limit,
+        offset,
+        orderBy,
+        setOperators: []
+      });
+    }
+    return {
+      tableTsKey: tableConfig.tsName,
+      sql: result,
+      selection
+    };
+  }
+};
+var SQLiteSyncDialect = class extends SQLiteDialect {
+  static [entityKind] = "SQLiteSyncDialect";
+  migrate(migrations, session, config2) {
+    const migrationsTable = config2 === void 0 ? "__drizzle_migrations" : typeof config2 === "string" ? "__drizzle_migrations" : config2.migrationsTable ?? "__drizzle_migrations";
+    const migrationTableCreate = sql`
+			CREATE TABLE IF NOT EXISTS ${sql.identifier(migrationsTable)} (
+				id SERIAL PRIMARY KEY,
+				hash text NOT NULL,
+				created_at numeric
+			)
+		`;
+    session.run(migrationTableCreate);
+    const dbMigrations = session.values(
+      sql`SELECT id, hash, created_at FROM ${sql.identifier(migrationsTable)} ORDER BY created_at DESC LIMIT 1`
+    );
+    const lastDbMigration = dbMigrations[0] ?? void 0;
+    session.run(sql`BEGIN`);
+    try {
+      for (const migration of migrations) {
+        if (!lastDbMigration || Number(lastDbMigration[2]) < migration.folderMillis) {
+          for (const stmt of migration.sql) {
+            session.run(sql.raw(stmt));
+          }
+          session.run(
+            sql`INSERT INTO ${sql.identifier(
+              migrationsTable
+            )} ("hash", "created_at") VALUES(${migration.hash}, ${migration.folderMillis})`
+          );
+        }
+      }
+      session.run(sql`COMMIT`);
+    } catch (e) {
+      session.run(sql`ROLLBACK`);
+      throw e;
+    }
+  }
+};
+var SQLiteAsyncDialect = class extends SQLiteDialect {
+  static [entityKind] = "SQLiteAsyncDialect";
+  async migrate(migrations, session, config2) {
+    const migrationsTable = config2 === void 0 ? "__drizzle_migrations" : typeof config2 === "string" ? "__drizzle_migrations" : config2.migrationsTable ?? "__drizzle_migrations";
+    const migrationTableCreate = sql`
+			CREATE TABLE IF NOT EXISTS ${sql.identifier(migrationsTable)} (
+				id SERIAL PRIMARY KEY,
+				hash text NOT NULL,
+				created_at numeric
+			)
+		`;
+    await session.run(migrationTableCreate);
+    const dbMigrations = await session.values(
+      sql`SELECT id, hash, created_at FROM ${sql.identifier(migrationsTable)} ORDER BY created_at DESC LIMIT 1`
+    );
+    const lastDbMigration = dbMigrations[0] ?? void 0;
+    await session.transaction(async (tx) => {
+      for (const migration of migrations) {
+        if (!lastDbMigration || Number(lastDbMigration[2]) < migration.folderMillis) {
+          for (const stmt of migration.sql) {
+            await tx.run(sql.raw(stmt));
+          }
+          await tx.run(
+            sql`INSERT INTO ${sql.identifier(
+              migrationsTable
+            )} ("hash", "created_at") VALUES(${migration.hash}, ${migration.folderMillis})`
+          );
+        }
+      }
+    });
+  }
+};
+
+// node_modules/drizzle-orm/query-builders/query-builder.js
+var TypedQueryBuilder = class {
+  static [entityKind] = "TypedQueryBuilder";
+  /** @internal */
+  getSelectedFields() {
+    return this._.selectedFields;
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/query-builders/select.js
+var SQLiteSelectBuilder = class {
+  static [entityKind] = "SQLiteSelectBuilder";
+  fields;
+  session;
+  dialect;
+  withList;
+  distinct;
+  constructor(config2) {
+    this.fields = config2.fields;
+    this.session = config2.session;
+    this.dialect = config2.dialect;
+    this.withList = config2.withList;
+    this.distinct = config2.distinct;
+  }
+  from(source) {
+    const isPartialSelect = !!this.fields;
+    let fields;
+    if (this.fields) {
+      fields = this.fields;
+    } else if (is(source, Subquery)) {
+      fields = Object.fromEntries(
+        Object.keys(source._.selectedFields).map((key) => [key, source[key]])
+      );
+    } else if (is(source, SQLiteViewBase)) {
+      fields = source[ViewBaseConfig].selectedFields;
+    } else if (is(source, SQL)) {
+      fields = {};
+    } else {
+      fields = getTableColumns(source);
+    }
+    return new SQLiteSelectBase({
+      table: source,
+      fields,
+      isPartialSelect,
+      session: this.session,
+      dialect: this.dialect,
+      withList: this.withList,
+      distinct: this.distinct
+    });
+  }
+};
+var SQLiteSelectQueryBuilderBase = class extends TypedQueryBuilder {
+  static [entityKind] = "SQLiteSelectQueryBuilder";
+  _;
+  /** @internal */
+  config;
+  joinsNotNullableMap;
+  tableName;
+  isPartialSelect;
+  session;
+  dialect;
+  cacheConfig = void 0;
+  usedTables = /* @__PURE__ */ new Set();
+  constructor({ table, fields, isPartialSelect, session, dialect, withList, distinct }) {
+    super();
+    this.config = {
+      withList,
+      table,
+      fields: { ...fields },
+      distinct,
+      setOperators: []
+    };
+    this.isPartialSelect = isPartialSelect;
+    this.session = session;
+    this.dialect = dialect;
+    this._ = {
+      selectedFields: fields,
+      config: this.config
+    };
+    this.tableName = getTableLikeName(table);
+    this.joinsNotNullableMap = typeof this.tableName === "string" ? { [this.tableName]: true } : {};
+    for (const item of extractUsedTable(table)) this.usedTables.add(item);
+  }
+  /** @internal */
+  getUsedTables() {
+    return [...this.usedTables];
+  }
+  createJoin(joinType) {
+    return (table, on) => {
+      const baseTableName = this.tableName;
+      const tableName = getTableLikeName(table);
+      for (const item of extractUsedTable(table)) this.usedTables.add(item);
+      if (typeof tableName === "string" && this.config.joins?.some((join) => join.alias === tableName)) {
+        throw new Error(`Alias "${tableName}" is already used in this query`);
+      }
+      if (!this.isPartialSelect) {
+        if (Object.keys(this.joinsNotNullableMap).length === 1 && typeof baseTableName === "string") {
+          this.config.fields = {
+            [baseTableName]: this.config.fields
+          };
+        }
+        if (typeof tableName === "string" && !is(table, SQL)) {
+          const selection = is(table, Subquery) ? table._.selectedFields : is(table, View) ? table[ViewBaseConfig].selectedFields : table[Table.Symbol.Columns];
+          this.config.fields[tableName] = selection;
+        }
+      }
+      if (typeof on === "function") {
+        on = on(
+          new Proxy(
+            this.config.fields,
+            new SelectionProxyHandler({ sqlAliasedBehavior: "sql", sqlBehavior: "sql" })
+          )
+        );
+      }
+      if (!this.config.joins) {
+        this.config.joins = [];
+      }
+      this.config.joins.push({ on, table, joinType, alias: tableName });
+      if (typeof tableName === "string") {
+        switch (joinType) {
+          case "left": {
+            this.joinsNotNullableMap[tableName] = false;
+            break;
+          }
+          case "right": {
+            this.joinsNotNullableMap = Object.fromEntries(
+              Object.entries(this.joinsNotNullableMap).map(([key]) => [key, false])
+            );
+            this.joinsNotNullableMap[tableName] = true;
+            break;
+          }
+          case "cross":
+          case "inner": {
+            this.joinsNotNullableMap[tableName] = true;
+            break;
+          }
+          case "full": {
+            this.joinsNotNullableMap = Object.fromEntries(
+              Object.entries(this.joinsNotNullableMap).map(([key]) => [key, false])
+            );
+            this.joinsNotNullableMap[tableName] = false;
+            break;
+          }
+        }
+      }
+      return this;
+    };
+  }
+  /**
+   * Executes a `left join` operation by adding another table to the current query.
+   *
+   * Calling this method associates each row of the table with the corresponding row from the joined table, if a match is found. If no matching row exists, it sets all columns of the joined table to null.
+   *
+   * See docs: {@link https://orm.drizzle.team/docs/joins#left-join}
+   *
+   * @param table the table to join.
+   * @param on the `on` clause.
+   *
+   * @example
+   *
+   * ```ts
+   * // Select all users and their pets
+   * const usersWithPets: { user: User; pets: Pet | null; }[] = await db.select()
+   *   .from(users)
+   *   .leftJoin(pets, eq(users.id, pets.ownerId))
+   *
+   * // Select userId and petId
+   * const usersIdsAndPetIds: { userId: number; petId: number | null; }[] = await db.select({
+   *   userId: users.id,
+   *   petId: pets.id,
+   * })
+   *   .from(users)
+   *   .leftJoin(pets, eq(users.id, pets.ownerId))
+   * ```
+   */
+  leftJoin = this.createJoin("left");
+  /**
+   * Executes a `right join` operation by adding another table to the current query.
+   *
+   * Calling this method associates each row of the joined table with the corresponding row from the main table, if a match is found. If no matching row exists, it sets all columns of the main table to null.
+   *
+   * See docs: {@link https://orm.drizzle.team/docs/joins#right-join}
+   *
+   * @param table the table to join.
+   * @param on the `on` clause.
+   *
+   * @example
+   *
+   * ```ts
+   * // Select all users and their pets
+   * const usersWithPets: { user: User | null; pets: Pet; }[] = await db.select()
+   *   .from(users)
+   *   .rightJoin(pets, eq(users.id, pets.ownerId))
+   *
+   * // Select userId and petId
+   * const usersIdsAndPetIds: { userId: number | null; petId: number; }[] = await db.select({
+   *   userId: users.id,
+   *   petId: pets.id,
+   * })
+   *   .from(users)
+   *   .rightJoin(pets, eq(users.id, pets.ownerId))
+   * ```
+   */
+  rightJoin = this.createJoin("right");
+  /**
+   * Executes an `inner join` operation, creating a new table by combining rows from two tables that have matching values.
+   *
+   * Calling this method retrieves rows that have corresponding entries in both joined tables. Rows without matching entries in either table are excluded, resulting in a table that includes only matching pairs.
+   *
+   * See docs: {@link https://orm.drizzle.team/docs/joins#inner-join}
+   *
+   * @param table the table to join.
+   * @param on the `on` clause.
+   *
+   * @example
+   *
+   * ```ts
+   * // Select all users and their pets
+   * const usersWithPets: { user: User; pets: Pet; }[] = await db.select()
+   *   .from(users)
+   *   .innerJoin(pets, eq(users.id, pets.ownerId))
+   *
+   * // Select userId and petId
+   * const usersIdsAndPetIds: { userId: number; petId: number; }[] = await db.select({
+   *   userId: users.id,
+   *   petId: pets.id,
+   * })
+   *   .from(users)
+   *   .innerJoin(pets, eq(users.id, pets.ownerId))
+   * ```
+   */
+  innerJoin = this.createJoin("inner");
+  /**
+   * Executes a `full join` operation by combining rows from two tables into a new table.
+   *
+   * Calling this method retrieves all rows from both main and joined tables, merging rows with matching values and filling in `null` for non-matching columns.
+   *
+   * See docs: {@link https://orm.drizzle.team/docs/joins#full-join}
+   *
+   * @param table the table to join.
+   * @param on the `on` clause.
+   *
+   * @example
+   *
+   * ```ts
+   * // Select all users and their pets
+   * const usersWithPets: { user: User | null; pets: Pet | null; }[] = await db.select()
+   *   .from(users)
+   *   .fullJoin(pets, eq(users.id, pets.ownerId))
+   *
+   * // Select userId and petId
+   * const usersIdsAndPetIds: { userId: number | null; petId: number | null; }[] = await db.select({
+   *   userId: users.id,
+   *   petId: pets.id,
+   * })
+   *   .from(users)
+   *   .fullJoin(pets, eq(users.id, pets.ownerId))
+   * ```
+   */
+  fullJoin = this.createJoin("full");
+  /**
+   * Executes a `cross join` operation by combining rows from two tables into a new table.
+   *
+   * Calling this method retrieves all rows from both main and joined tables, merging all rows from each table.
+   *
+   * See docs: {@link https://orm.drizzle.team/docs/joins#cross-join}
+   *
+   * @param table the table to join.
+   *
+   * @example
+   *
+   * ```ts
+   * // Select all users, each user with every pet
+   * const usersWithPets: { user: User; pets: Pet; }[] = await db.select()
+   *   .from(users)
+   *   .crossJoin(pets)
+   *
+   * // Select userId and petId
+   * const usersIdsAndPetIds: { userId: number; petId: number; }[] = await db.select({
+   *   userId: users.id,
+   *   petId: pets.id,
+   * })
+   *   .from(users)
+   *   .crossJoin(pets)
+   * ```
+   */
+  crossJoin = this.createJoin("cross");
+  createSetOperator(type, isAll) {
+    return (rightSelection) => {
+      const rightSelect = typeof rightSelection === "function" ? rightSelection(getSQLiteSetOperators()) : rightSelection;
+      if (!haveSameKeys(this.getSelectedFields(), rightSelect.getSelectedFields())) {
+        throw new Error(
+          "Set operator error (union / intersect / except): selected fields are not the same or are in a different order"
+        );
+      }
+      this.config.setOperators.push({ type, isAll, rightSelect });
+      return this;
+    };
+  }
+  /**
+   * Adds `union` set operator to the query.
+   *
+   * Calling this method will combine the result sets of the `select` statements and remove any duplicate rows that appear across them.
+   *
+   * See docs: {@link https://orm.drizzle.team/docs/set-operations#union}
+   *
+   * @example
+   *
+   * ```ts
+   * // Select all unique names from customers and users tables
+   * await db.select({ name: users.name })
+   *   .from(users)
+   *   .union(
+   *     db.select({ name: customers.name }).from(customers)
+   *   );
+   * // or
+   * import { union } from 'drizzle-orm/sqlite-core'
+   *
+   * await union(
+   *   db.select({ name: users.name }).from(users),
+   *   db.select({ name: customers.name }).from(customers)
+   * );
+   * ```
+   */
+  union = this.createSetOperator("union", false);
+  /**
+   * Adds `union all` set operator to the query.
+   *
+   * Calling this method will combine the result-set of the `select` statements and keep all duplicate rows that appear across them.
+   *
+   * See docs: {@link https://orm.drizzle.team/docs/set-operations#union-all}
+   *
+   * @example
+   *
+   * ```ts
+   * // Select all transaction ids from both online and in-store sales
+   * await db.select({ transaction: onlineSales.transactionId })
+   *   .from(onlineSales)
+   *   .unionAll(
+   *     db.select({ transaction: inStoreSales.transactionId }).from(inStoreSales)
+   *   );
+   * // or
+   * import { unionAll } from 'drizzle-orm/sqlite-core'
+   *
+   * await unionAll(
+   *   db.select({ transaction: onlineSales.transactionId }).from(onlineSales),
+   *   db.select({ transaction: inStoreSales.transactionId }).from(inStoreSales)
+   * );
+   * ```
+   */
+  unionAll = this.createSetOperator("union", true);
+  /**
+   * Adds `intersect` set operator to the query.
+   *
+   * Calling this method will retain only the rows that are present in both result sets and eliminate duplicates.
+   *
+   * See docs: {@link https://orm.drizzle.team/docs/set-operations#intersect}
+   *
+   * @example
+   *
+   * ```ts
+   * // Select course names that are offered in both departments A and B
+   * await db.select({ courseName: depA.courseName })
+   *   .from(depA)
+   *   .intersect(
+   *     db.select({ courseName: depB.courseName }).from(depB)
+   *   );
+   * // or
+   * import { intersect } from 'drizzle-orm/sqlite-core'
+   *
+   * await intersect(
+   *   db.select({ courseName: depA.courseName }).from(depA),
+   *   db.select({ courseName: depB.courseName }).from(depB)
+   * );
+   * ```
+   */
+  intersect = this.createSetOperator("intersect", false);
+  /**
+   * Adds `except` set operator to the query.
+   *
+   * Calling this method will retrieve all unique rows from the left query, except for the rows that are present in the result set of the right query.
+   *
+   * See docs: {@link https://orm.drizzle.team/docs/set-operations#except}
+   *
+   * @example
+   *
+   * ```ts
+   * // Select all courses offered in department A but not in department B
+   * await db.select({ courseName: depA.courseName })
+   *   .from(depA)
+   *   .except(
+   *     db.select({ courseName: depB.courseName }).from(depB)
+   *   );
+   * // or
+   * import { except } from 'drizzle-orm/sqlite-core'
+   *
+   * await except(
+   *   db.select({ courseName: depA.courseName }).from(depA),
+   *   db.select({ courseName: depB.courseName }).from(depB)
+   * );
+   * ```
+   */
+  except = this.createSetOperator("except", false);
+  /** @internal */
+  addSetOperators(setOperators) {
+    this.config.setOperators.push(...setOperators);
+    return this;
+  }
+  /**
+   * Adds a `where` clause to the query.
+   *
+   * Calling this method will select only those rows that fulfill a specified condition.
+   *
+   * See docs: {@link https://orm.drizzle.team/docs/select#filtering}
+   *
+   * @param where the `where` clause.
+   *
+   * @example
+   * You can use conditional operators and `sql function` to filter the rows to be selected.
+   *
+   * ```ts
+   * // Select all cars with green color
+   * await db.select().from(cars).where(eq(cars.color, 'green'));
+   * // or
+   * await db.select().from(cars).where(sql`${cars.color} = 'green'`)
+   * ```
+   *
+   * You can logically combine conditional operators with `and()` and `or()` operators:
+   *
+   * ```ts
+   * // Select all BMW cars with a green color
+   * await db.select().from(cars).where(and(eq(cars.color, 'green'), eq(cars.brand, 'BMW')));
+   *
+   * // Select all cars with the green or blue color
+   * await db.select().from(cars).where(or(eq(cars.color, 'green'), eq(cars.color, 'blue')));
+   * ```
+   */
+  where(where) {
+    if (typeof where === "function") {
+      where = where(
+        new Proxy(
+          this.config.fields,
+          new SelectionProxyHandler({ sqlAliasedBehavior: "sql", sqlBehavior: "sql" })
+        )
+      );
+    }
+    this.config.where = where;
+    return this;
+  }
+  /**
+   * Adds a `having` clause to the query.
+   *
+   * Calling this method will select only those rows that fulfill a specified condition. It is typically used with aggregate functions to filter the aggregated data based on a specified condition.
+   *
+   * See docs: {@link https://orm.drizzle.team/docs/select#aggregations}
+   *
+   * @param having the `having` clause.
+   *
+   * @example
+   *
+   * ```ts
+   * // Select all brands with more than one car
+   * await db.select({
+   * 	brand: cars.brand,
+   * 	count: sql<number>`cast(count(${cars.id}) as int)`,
+   * })
+   *   .from(cars)
+   *   .groupBy(cars.brand)
+   *   .having(({ count }) => gt(count, 1));
+   * ```
+   */
+  having(having) {
+    if (typeof having === "function") {
+      having = having(
+        new Proxy(
+          this.config.fields,
+          new SelectionProxyHandler({ sqlAliasedBehavior: "sql", sqlBehavior: "sql" })
+        )
+      );
+    }
+    this.config.having = having;
+    return this;
+  }
+  groupBy(...columns) {
+    if (typeof columns[0] === "function") {
+      const groupBy = columns[0](
+        new Proxy(
+          this.config.fields,
+          new SelectionProxyHandler({ sqlAliasedBehavior: "alias", sqlBehavior: "sql" })
+        )
+      );
+      this.config.groupBy = Array.isArray(groupBy) ? groupBy : [groupBy];
+    } else {
+      this.config.groupBy = columns;
+    }
+    return this;
+  }
+  orderBy(...columns) {
+    if (typeof columns[0] === "function") {
+      const orderBy = columns[0](
+        new Proxy(
+          this.config.fields,
+          new SelectionProxyHandler({ sqlAliasedBehavior: "alias", sqlBehavior: "sql" })
+        )
+      );
+      const orderByArray = Array.isArray(orderBy) ? orderBy : [orderBy];
+      if (this.config.setOperators.length > 0) {
+        this.config.setOperators.at(-1).orderBy = orderByArray;
+      } else {
+        this.config.orderBy = orderByArray;
+      }
+    } else {
+      const orderByArray = columns;
+      if (this.config.setOperators.length > 0) {
+        this.config.setOperators.at(-1).orderBy = orderByArray;
+      } else {
+        this.config.orderBy = orderByArray;
+      }
+    }
+    return this;
+  }
+  /**
+   * Adds a `limit` clause to the query.
+   *
+   * Calling this method will set the maximum number of rows that will be returned by this query.
+   *
+   * See docs: {@link https://orm.drizzle.team/docs/select#limit--offset}
+   *
+   * @param limit the `limit` clause.
+   *
+   * @example
+   *
+   * ```ts
+   * // Get the first 10 people from this query.
+   * await db.select().from(people).limit(10);
+   * ```
+   */
+  limit(limit) {
+    if (this.config.setOperators.length > 0) {
+      this.config.setOperators.at(-1).limit = limit;
+    } else {
+      this.config.limit = limit;
+    }
+    return this;
+  }
+  /**
+   * Adds an `offset` clause to the query.
+   *
+   * Calling this method will skip a number of rows when returning results from this query.
+   *
+   * See docs: {@link https://orm.drizzle.team/docs/select#limit--offset}
+   *
+   * @param offset the `offset` clause.
+   *
+   * @example
+   *
+   * ```ts
+   * // Get the 10th-20th people from this query.
+   * await db.select().from(people).offset(10).limit(10);
+   * ```
+   */
+  offset(offset) {
+    if (this.config.setOperators.length > 0) {
+      this.config.setOperators.at(-1).offset = offset;
+    } else {
+      this.config.offset = offset;
+    }
+    return this;
+  }
+  /** @internal */
+  getSQL() {
+    return this.dialect.buildSelectQuery(this.config);
+  }
+  toSQL() {
+    const { typings: _typings, ...rest } = this.dialect.sqlToQuery(this.getSQL());
+    return rest;
+  }
+  as(alias) {
+    const usedTables = [];
+    usedTables.push(...extractUsedTable(this.config.table));
+    if (this.config.joins) {
+      for (const it2 of this.config.joins) usedTables.push(...extractUsedTable(it2.table));
+    }
+    return new Proxy(
+      new Subquery(this.getSQL(), this.config.fields, alias, false, [...new Set(usedTables)]),
+      new SelectionProxyHandler({ alias, sqlAliasedBehavior: "alias", sqlBehavior: "error" })
+    );
+  }
+  /** @internal */
+  getSelectedFields() {
+    return new Proxy(
+      this.config.fields,
+      new SelectionProxyHandler({ alias: this.tableName, sqlAliasedBehavior: "alias", sqlBehavior: "error" })
+    );
+  }
+  $dynamic() {
+    return this;
+  }
+};
+var SQLiteSelectBase = class extends SQLiteSelectQueryBuilderBase {
+  static [entityKind] = "SQLiteSelect";
+  /** @internal */
+  _prepare(isOneTimeQuery = true) {
+    if (!this.session) {
+      throw new Error("Cannot execute a query on a query builder. Please use a database instance instead.");
+    }
+    const fieldsList = orderSelectedFields(this.config.fields);
+    const query = this.session[isOneTimeQuery ? "prepareOneTimeQuery" : "prepareQuery"](
+      this.dialect.sqlToQuery(this.getSQL()),
+      fieldsList,
+      "all",
+      true,
+      void 0,
+      {
+        type: "select",
+        tables: [...this.usedTables]
+      },
+      this.cacheConfig
+    );
+    query.joinsNotNullableMap = this.joinsNotNullableMap;
+    return query;
+  }
+  $withCache(config2) {
+    this.cacheConfig = config2 === void 0 ? { config: {}, enable: true, autoInvalidate: true } : config2 === false ? { enable: false } : { enable: true, autoInvalidate: true, ...config2 };
+    return this;
+  }
+  prepare() {
+    return this._prepare(false);
+  }
+  run = (placeholderValues) => {
+    return this._prepare().run(placeholderValues);
+  };
+  all = (placeholderValues) => {
+    return this._prepare().all(placeholderValues);
+  };
+  get = (placeholderValues) => {
+    return this._prepare().get(placeholderValues);
+  };
+  values = (placeholderValues) => {
+    return this._prepare().values(placeholderValues);
+  };
+  async execute() {
+    return this.all();
+  }
+};
+applyMixins(SQLiteSelectBase, [QueryPromise]);
+function createSetOperator(type, isAll) {
+  return (leftSelect, rightSelect, ...restSelects) => {
+    const setOperators = [rightSelect, ...restSelects].map((select) => ({
+      type,
+      isAll,
+      rightSelect: select
+    }));
+    for (const setOperator of setOperators) {
+      if (!haveSameKeys(leftSelect.getSelectedFields(), setOperator.rightSelect.getSelectedFields())) {
+        throw new Error(
+          "Set operator error (union / intersect / except): selected fields are not the same or are in a different order"
+        );
+      }
+    }
+    return leftSelect.addSetOperators(setOperators);
+  };
+}
+var getSQLiteSetOperators = () => ({
+  union,
+  unionAll,
+  intersect,
+  except
+});
+var union = createSetOperator("union", false);
+var unionAll = createSetOperator("union", true);
+var intersect = createSetOperator("intersect", false);
+var except = createSetOperator("except", false);
+
+// node_modules/drizzle-orm/sqlite-core/query-builders/query-builder.js
+var QueryBuilder = class {
+  static [entityKind] = "SQLiteQueryBuilder";
+  dialect;
+  dialectConfig;
+  constructor(dialect) {
+    this.dialect = is(dialect, SQLiteDialect) ? dialect : void 0;
+    this.dialectConfig = is(dialect, SQLiteDialect) ? void 0 : dialect;
+  }
+  $with = (alias, selection) => {
+    const queryBuilder = this;
+    const as = (qb) => {
+      if (typeof qb === "function") {
+        qb = qb(queryBuilder);
+      }
+      return new Proxy(
+        new WithSubquery(
+          qb.getSQL(),
+          selection ?? ("getSelectedFields" in qb ? qb.getSelectedFields() ?? {} : {}),
+          alias,
+          true
+        ),
+        new SelectionProxyHandler({ alias, sqlAliasedBehavior: "alias", sqlBehavior: "error" })
+      );
+    };
+    return { as };
+  };
+  with(...queries) {
+    const self = this;
+    function select(fields) {
+      return new SQLiteSelectBuilder({
+        fields: fields ?? void 0,
+        session: void 0,
+        dialect: self.getDialect(),
+        withList: queries
+      });
+    }
+    function selectDistinct(fields) {
+      return new SQLiteSelectBuilder({
+        fields: fields ?? void 0,
+        session: void 0,
+        dialect: self.getDialect(),
+        withList: queries,
+        distinct: true
+      });
+    }
+    return { select, selectDistinct };
+  }
+  select(fields) {
+    return new SQLiteSelectBuilder({ fields: fields ?? void 0, session: void 0, dialect: this.getDialect() });
+  }
+  selectDistinct(fields) {
+    return new SQLiteSelectBuilder({
+      fields: fields ?? void 0,
+      session: void 0,
+      dialect: this.getDialect(),
+      distinct: true
+    });
+  }
+  // Lazy load dialect to avoid circular dependency
+  getDialect() {
+    if (!this.dialect) {
+      this.dialect = new SQLiteSyncDialect(this.dialectConfig);
+    }
+    return this.dialect;
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/query-builders/insert.js
+var SQLiteInsertBuilder = class {
+  constructor(table, session, dialect, withList) {
+    this.table = table;
+    this.session = session;
+    this.dialect = dialect;
+    this.withList = withList;
+  }
+  static [entityKind] = "SQLiteInsertBuilder";
+  values(values) {
+    values = Array.isArray(values) ? values : [values];
+    if (values.length === 0) {
+      throw new Error("values() must be called with at least one value");
+    }
+    const mappedValues = values.map((entry) => {
+      const result = {};
+      const cols = this.table[Table.Symbol.Columns];
+      for (const colKey of Object.keys(entry)) {
+        const colValue = entry[colKey];
+        result[colKey] = is(colValue, SQL) ? colValue : new Param(colValue, cols[colKey]);
+      }
+      return result;
+    });
+    return new SQLiteInsertBase(this.table, mappedValues, this.session, this.dialect, this.withList);
+  }
+  select(selectQuery) {
+    const select = typeof selectQuery === "function" ? selectQuery(new QueryBuilder()) : selectQuery;
+    if (!is(select, SQL) && !haveSameKeys(this.table[Columns], select._.selectedFields)) {
+      throw new Error(
+        "Insert select error: selected fields are not the same or are in a different order compared to the table definition"
+      );
+    }
+    return new SQLiteInsertBase(this.table, select, this.session, this.dialect, this.withList, true);
+  }
+};
+var SQLiteInsertBase = class extends QueryPromise {
+  constructor(table, values, session, dialect, withList, select) {
+    super();
+    this.session = session;
+    this.dialect = dialect;
+    this.config = { table, values, withList, select };
+  }
+  static [entityKind] = "SQLiteInsert";
+  /** @internal */
+  config;
+  returning(fields = this.config.table[SQLiteTable.Symbol.Columns]) {
+    this.config.returning = orderSelectedFields(fields);
+    return this;
+  }
+  /**
+   * Adds an `on conflict do nothing` clause to the query.
+   *
+   * Calling this method simply avoids inserting a row as its alternative action.
+   *
+   * See docs: {@link https://orm.drizzle.team/docs/insert#on-conflict-do-nothing}
+   *
+   * @param config The `target` and `where` clauses.
+   *
+   * @example
+   * ```ts
+   * // Insert one row and cancel the insert if there's a conflict
+   * await db.insert(cars)
+   *   .values({ id: 1, brand: 'BMW' })
+   *   .onConflictDoNothing();
+   *
+   * // Explicitly specify conflict target
+   * await db.insert(cars)
+   *   .values({ id: 1, brand: 'BMW' })
+   *   .onConflictDoNothing({ target: cars.id });
+   * ```
+   */
+  onConflictDoNothing(config2 = {}) {
+    if (!this.config.onConflict) this.config.onConflict = [];
+    if (config2.target === void 0) {
+      this.config.onConflict.push(sql` on conflict do nothing`);
+    } else {
+      const targetSql = Array.isArray(config2.target) ? sql`${config2.target}` : sql`${[config2.target]}`;
+      const whereSql = config2.where ? sql` where ${config2.where}` : sql``;
+      this.config.onConflict.push(sql` on conflict ${targetSql} do nothing${whereSql}`);
+    }
+    return this;
+  }
+  /**
+   * Adds an `on conflict do update` clause to the query.
+   *
+   * Calling this method will update the existing row that conflicts with the row proposed for insertion as its alternative action.
+   *
+   * See docs: {@link https://orm.drizzle.team/docs/insert#upserts-and-conflicts}
+   *
+   * @param config The `target`, `set` and `where` clauses.
+   *
+   * @example
+   * ```ts
+   * // Update the row if there's a conflict
+   * await db.insert(cars)
+   *   .values({ id: 1, brand: 'BMW' })
+   *   .onConflictDoUpdate({
+   *     target: cars.id,
+   *     set: { brand: 'Porsche' }
+   *   });
+   *
+   * // Upsert with 'where' clause
+   * await db.insert(cars)
+   *   .values({ id: 1, brand: 'BMW' })
+   *   .onConflictDoUpdate({
+   *     target: cars.id,
+   *     set: { brand: 'newBMW' },
+   *     where: sql`${cars.createdAt} > '2023-01-01'::date`,
+   *   });
+   * ```
+   */
+  onConflictDoUpdate(config2) {
+    if (config2.where && (config2.targetWhere || config2.setWhere)) {
+      throw new Error(
+        'You cannot use both "where" and "targetWhere"/"setWhere" at the same time - "where" is deprecated, use "targetWhere" or "setWhere" instead.'
+      );
+    }
+    if (!this.config.onConflict) this.config.onConflict = [];
+    const whereSql = config2.where ? sql` where ${config2.where}` : void 0;
+    const targetWhereSql = config2.targetWhere ? sql` where ${config2.targetWhere}` : void 0;
+    const setWhereSql = config2.setWhere ? sql` where ${config2.setWhere}` : void 0;
+    const targetSql = Array.isArray(config2.target) ? sql`${config2.target}` : sql`${[config2.target]}`;
+    const setSql = this.dialect.buildUpdateSet(this.config.table, mapUpdateSet(this.config.table, config2.set));
+    this.config.onConflict.push(
+      sql` on conflict ${targetSql}${targetWhereSql} do update set ${setSql}${whereSql}${setWhereSql}`
+    );
+    return this;
+  }
+  /** @internal */
+  getSQL() {
+    return this.dialect.buildInsertQuery(this.config);
+  }
+  toSQL() {
+    const { typings: _typings, ...rest } = this.dialect.sqlToQuery(this.getSQL());
+    return rest;
+  }
+  /** @internal */
+  _prepare(isOneTimeQuery = true) {
+    return this.session[isOneTimeQuery ? "prepareOneTimeQuery" : "prepareQuery"](
+      this.dialect.sqlToQuery(this.getSQL()),
+      this.config.returning,
+      this.config.returning ? "all" : "run",
+      true,
+      void 0,
+      {
+        type: "insert",
+        tables: extractUsedTable(this.config.table)
+      }
+    );
+  }
+  prepare() {
+    return this._prepare(false);
+  }
+  run = (placeholderValues) => {
+    return this._prepare().run(placeholderValues);
+  };
+  all = (placeholderValues) => {
+    return this._prepare().all(placeholderValues);
+  };
+  get = (placeholderValues) => {
+    return this._prepare().get(placeholderValues);
+  };
+  values = (placeholderValues) => {
+    return this._prepare().values(placeholderValues);
+  };
+  async execute() {
+    return this.config.returning ? this.all() : this.run();
+  }
+  $dynamic() {
+    return this;
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/query-builders/update.js
+var SQLiteUpdateBuilder = class {
+  constructor(table, session, dialect, withList) {
+    this.table = table;
+    this.session = session;
+    this.dialect = dialect;
+    this.withList = withList;
+  }
+  static [entityKind] = "SQLiteUpdateBuilder";
+  set(values) {
+    return new SQLiteUpdateBase(
+      this.table,
+      mapUpdateSet(this.table, values),
+      this.session,
+      this.dialect,
+      this.withList
+    );
+  }
+};
+var SQLiteUpdateBase = class extends QueryPromise {
+  constructor(table, set2, session, dialect, withList) {
+    super();
+    this.session = session;
+    this.dialect = dialect;
+    this.config = { set: set2, table, withList, joins: [] };
+  }
+  static [entityKind] = "SQLiteUpdate";
+  /** @internal */
+  config;
+  from(source) {
+    this.config.from = source;
+    return this;
+  }
+  createJoin(joinType) {
+    return (table, on) => {
+      const tableName = getTableLikeName(table);
+      if (typeof tableName === "string" && this.config.joins.some((join) => join.alias === tableName)) {
+        throw new Error(`Alias "${tableName}" is already used in this query`);
+      }
+      if (typeof on === "function") {
+        const from = this.config.from ? is(table, SQLiteTable) ? table[Table.Symbol.Columns] : is(table, Subquery) ? table._.selectedFields : is(table, SQLiteViewBase) ? table[ViewBaseConfig].selectedFields : void 0 : void 0;
+        on = on(
+          new Proxy(
+            this.config.table[Table.Symbol.Columns],
+            new SelectionProxyHandler({ sqlAliasedBehavior: "sql", sqlBehavior: "sql" })
+          ),
+          from && new Proxy(
+            from,
+            new SelectionProxyHandler({ sqlAliasedBehavior: "sql", sqlBehavior: "sql" })
+          )
+        );
+      }
+      this.config.joins.push({ on, table, joinType, alias: tableName });
+      return this;
+    };
+  }
+  leftJoin = this.createJoin("left");
+  rightJoin = this.createJoin("right");
+  innerJoin = this.createJoin("inner");
+  fullJoin = this.createJoin("full");
+  /**
+   * Adds a 'where' clause to the query.
+   *
+   * Calling this method will update only those rows that fulfill a specified condition.
+   *
+   * See docs: {@link https://orm.drizzle.team/docs/update}
+   *
+   * @param where the 'where' clause.
+   *
+   * @example
+   * You can use conditional operators and `sql function` to filter the rows to be updated.
+   *
+   * ```ts
+   * // Update all cars with green color
+   * db.update(cars).set({ color: 'red' })
+   *   .where(eq(cars.color, 'green'));
+   * // or
+   * db.update(cars).set({ color: 'red' })
+   *   .where(sql`${cars.color} = 'green'`)
+   * ```
+   *
+   * You can logically combine conditional operators with `and()` and `or()` operators:
+   *
+   * ```ts
+   * // Update all BMW cars with a green color
+   * db.update(cars).set({ color: 'red' })
+   *   .where(and(eq(cars.color, 'green'), eq(cars.brand, 'BMW')));
+   *
+   * // Update all cars with the green or blue color
+   * db.update(cars).set({ color: 'red' })
+   *   .where(or(eq(cars.color, 'green'), eq(cars.color, 'blue')));
+   * ```
+   */
+  where(where) {
+    this.config.where = where;
+    return this;
+  }
+  orderBy(...columns) {
+    if (typeof columns[0] === "function") {
+      const orderBy = columns[0](
+        new Proxy(
+          this.config.table[Table.Symbol.Columns],
+          new SelectionProxyHandler({ sqlAliasedBehavior: "alias", sqlBehavior: "sql" })
+        )
+      );
+      const orderByArray = Array.isArray(orderBy) ? orderBy : [orderBy];
+      this.config.orderBy = orderByArray;
+    } else {
+      const orderByArray = columns;
+      this.config.orderBy = orderByArray;
+    }
+    return this;
+  }
+  limit(limit) {
+    this.config.limit = limit;
+    return this;
+  }
+  returning(fields = this.config.table[SQLiteTable.Symbol.Columns]) {
+    this.config.returning = orderSelectedFields(fields);
+    return this;
+  }
+  /** @internal */
+  getSQL() {
+    return this.dialect.buildUpdateQuery(this.config);
+  }
+  toSQL() {
+    const { typings: _typings, ...rest } = this.dialect.sqlToQuery(this.getSQL());
+    return rest;
+  }
+  /** @internal */
+  _prepare(isOneTimeQuery = true) {
+    return this.session[isOneTimeQuery ? "prepareOneTimeQuery" : "prepareQuery"](
+      this.dialect.sqlToQuery(this.getSQL()),
+      this.config.returning,
+      this.config.returning ? "all" : "run",
+      true,
+      void 0,
+      {
+        type: "insert",
+        tables: extractUsedTable(this.config.table)
+      }
+    );
+  }
+  prepare() {
+    return this._prepare(false);
+  }
+  run = (placeholderValues) => {
+    return this._prepare().run(placeholderValues);
+  };
+  all = (placeholderValues) => {
+    return this._prepare().all(placeholderValues);
+  };
+  get = (placeholderValues) => {
+    return this._prepare().get(placeholderValues);
+  };
+  values = (placeholderValues) => {
+    return this._prepare().values(placeholderValues);
+  };
+  async execute() {
+    return this.config.returning ? this.all() : this.run();
+  }
+  $dynamic() {
+    return this;
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/query-builders/count.js
+var SQLiteCountBuilder = class _SQLiteCountBuilder extends SQL {
+  constructor(params) {
+    super(_SQLiteCountBuilder.buildEmbeddedCount(params.source, params.filters).queryChunks);
+    this.params = params;
+    this.session = params.session;
+    this.sql = _SQLiteCountBuilder.buildCount(
+      params.source,
+      params.filters
+    );
+  }
+  sql;
+  static [entityKind] = "SQLiteCountBuilderAsync";
+  [Symbol.toStringTag] = "SQLiteCountBuilderAsync";
+  session;
+  static buildEmbeddedCount(source, filters) {
+    return sql`(select count(*) from ${source}${sql.raw(" where ").if(filters)}${filters})`;
+  }
+  static buildCount(source, filters) {
+    return sql`select count(*) from ${source}${sql.raw(" where ").if(filters)}${filters}`;
+  }
+  then(onfulfilled, onrejected) {
+    return Promise.resolve(this.session.count(this.sql)).then(
+      onfulfilled,
+      onrejected
+    );
+  }
+  catch(onRejected) {
+    return this.then(void 0, onRejected);
+  }
+  finally(onFinally) {
+    return this.then(
+      (value) => {
+        onFinally?.();
+        return value;
+      },
+      (reason) => {
+        onFinally?.();
+        throw reason;
+      }
+    );
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/query-builders/query.js
+var RelationalQueryBuilder = class {
+  constructor(mode, fullSchema, schema2, tableNamesMap, table, tableConfig, dialect, session) {
+    this.mode = mode;
+    this.fullSchema = fullSchema;
+    this.schema = schema2;
+    this.tableNamesMap = tableNamesMap;
+    this.table = table;
+    this.tableConfig = tableConfig;
+    this.dialect = dialect;
+    this.session = session;
+  }
+  static [entityKind] = "SQLiteAsyncRelationalQueryBuilder";
+  findMany(config2) {
+    return this.mode === "sync" ? new SQLiteSyncRelationalQuery(
+      this.fullSchema,
+      this.schema,
+      this.tableNamesMap,
+      this.table,
+      this.tableConfig,
+      this.dialect,
+      this.session,
+      config2 ? config2 : {},
+      "many"
+    ) : new SQLiteRelationalQuery(
+      this.fullSchema,
+      this.schema,
+      this.tableNamesMap,
+      this.table,
+      this.tableConfig,
+      this.dialect,
+      this.session,
+      config2 ? config2 : {},
+      "many"
+    );
+  }
+  findFirst(config2) {
+    return this.mode === "sync" ? new SQLiteSyncRelationalQuery(
+      this.fullSchema,
+      this.schema,
+      this.tableNamesMap,
+      this.table,
+      this.tableConfig,
+      this.dialect,
+      this.session,
+      config2 ? { ...config2, limit: 1 } : { limit: 1 },
+      "first"
+    ) : new SQLiteRelationalQuery(
+      this.fullSchema,
+      this.schema,
+      this.tableNamesMap,
+      this.table,
+      this.tableConfig,
+      this.dialect,
+      this.session,
+      config2 ? { ...config2, limit: 1 } : { limit: 1 },
+      "first"
+    );
+  }
+};
+var SQLiteRelationalQuery = class extends QueryPromise {
+  constructor(fullSchema, schema2, tableNamesMap, table, tableConfig, dialect, session, config2, mode) {
+    super();
+    this.fullSchema = fullSchema;
+    this.schema = schema2;
+    this.tableNamesMap = tableNamesMap;
+    this.table = table;
+    this.tableConfig = tableConfig;
+    this.dialect = dialect;
+    this.session = session;
+    this.config = config2;
+    this.mode = mode;
+  }
+  static [entityKind] = "SQLiteAsyncRelationalQuery";
+  /** @internal */
+  mode;
+  /** @internal */
+  getSQL() {
+    return this.dialect.buildRelationalQuery({
+      fullSchema: this.fullSchema,
+      schema: this.schema,
+      tableNamesMap: this.tableNamesMap,
+      table: this.table,
+      tableConfig: this.tableConfig,
+      queryConfig: this.config,
+      tableAlias: this.tableConfig.tsName
+    }).sql;
+  }
+  /** @internal */
+  _prepare(isOneTimeQuery = false) {
+    const { query, builtQuery } = this._toSQL();
+    return this.session[isOneTimeQuery ? "prepareOneTimeQuery" : "prepareQuery"](
+      builtQuery,
+      void 0,
+      this.mode === "first" ? "get" : "all",
+      true,
+      (rawRows, mapColumnValue) => {
+        const rows = rawRows.map(
+          (row) => mapRelationalRow(this.schema, this.tableConfig, row, query.selection, mapColumnValue)
+        );
+        if (this.mode === "first") {
+          return rows[0];
+        }
+        return rows;
+      }
+    );
+  }
+  prepare() {
+    return this._prepare(false);
+  }
+  _toSQL() {
+    const query = this.dialect.buildRelationalQuery({
+      fullSchema: this.fullSchema,
+      schema: this.schema,
+      tableNamesMap: this.tableNamesMap,
+      table: this.table,
+      tableConfig: this.tableConfig,
+      queryConfig: this.config,
+      tableAlias: this.tableConfig.tsName
+    });
+    const builtQuery = this.dialect.sqlToQuery(query.sql);
+    return { query, builtQuery };
+  }
+  toSQL() {
+    return this._toSQL().builtQuery;
+  }
+  /** @internal */
+  executeRaw() {
+    if (this.mode === "first") {
+      return this._prepare(false).get();
+    }
+    return this._prepare(false).all();
+  }
+  async execute() {
+    return this.executeRaw();
+  }
+};
+var SQLiteSyncRelationalQuery = class extends SQLiteRelationalQuery {
+  static [entityKind] = "SQLiteSyncRelationalQuery";
+  sync() {
+    return this.executeRaw();
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/query-builders/raw.js
+var SQLiteRaw = class extends QueryPromise {
+  constructor(execute, getSQL, action, dialect, mapBatchResult) {
+    super();
+    this.execute = execute;
+    this.getSQL = getSQL;
+    this.dialect = dialect;
+    this.mapBatchResult = mapBatchResult;
+    this.config = { action };
+  }
+  static [entityKind] = "SQLiteRaw";
+  /** @internal */
+  config;
+  getQuery() {
+    return { ...this.dialect.sqlToQuery(this.getSQL()), method: this.config.action };
+  }
+  mapResult(result, isFromBatch) {
+    return isFromBatch ? this.mapBatchResult(result) : result;
+  }
+  _prepare() {
+    return this;
+  }
+  /** @internal */
+  isResponseInArrayMode() {
+    return false;
+  }
+};
+
+// node_modules/drizzle-orm/sqlite-core/db.js
+var BaseSQLiteDatabase = class {
+  constructor(resultKind, dialect, session, schema2) {
+    this.resultKind = resultKind;
+    this.dialect = dialect;
+    this.session = session;
+    this._ = schema2 ? {
+      schema: schema2.schema,
+      fullSchema: schema2.fullSchema,
+      tableNamesMap: schema2.tableNamesMap
+    } : {
+      schema: void 0,
+      fullSchema: {},
+      tableNamesMap: {}
+    };
+    this.query = {};
+    const query = this.query;
+    if (this._.schema) {
+      for (const [tableName, columns] of Object.entries(this._.schema)) {
+        query[tableName] = new RelationalQueryBuilder(
+          resultKind,
+          schema2.fullSchema,
+          this._.schema,
+          this._.tableNamesMap,
+          schema2.fullSchema[tableName],
+          columns,
+          dialect,
+          session
+        );
+      }
+    }
+    this.$cache = { invalidate: async (_params) => {
+    } };
+  }
+  static [entityKind] = "BaseSQLiteDatabase";
+  query;
+  /**
+   * Creates a subquery that defines a temporary named result set as a CTE.
+   *
+   * It is useful for breaking down complex queries into simpler parts and for reusing the result set in subsequent parts of the query.
+   *
+   * See docs: {@link https://orm.drizzle.team/docs/select#with-clause}
+   *
+   * @param alias The alias for the subquery.
+   *
+   * Failure to provide an alias will result in a DrizzleTypeError, preventing the subquery from being referenced in other queries.
+   *
+   * @example
+   *
+   * ```ts
+   * // Create a subquery with alias 'sq' and use it in the select query
+   * const sq = db.$with('sq').as(db.select().from(users).where(eq(users.id, 42)));
+   *
+   * const result = await db.with(sq).select().from(sq);
+   * ```
+   *
+   * To select arbitrary SQL values as fields in a CTE and reference them in other CTEs or in the main query, you need to add aliases to them:
+   *
+   * ```ts
+   * // Select an arbitrary SQL value as a field in a CTE and reference it in the main query
+   * const sq = db.$with('sq').as(db.select({
+   *   name: sql<string>`upper(${users.name})`.as('name'),
+   * })
+   * .from(users));
+   *
+   * const result = await db.with(sq).select({ name: sq.name }).from(sq);
+   * ```
+   */
+  $with = (alias, selection) => {
+    const self = this;
+    const as = (qb) => {
+      if (typeof qb === "function") {
+        qb = qb(new QueryBuilder(self.dialect));
+      }
+      return new Proxy(
+        new WithSubquery(
+          qb.getSQL(),
+          selection ?? ("getSelectedFields" in qb ? qb.getSelectedFields() ?? {} : {}),
+          alias,
+          true
+        ),
+        new SelectionProxyHandler({ alias, sqlAliasedBehavior: "alias", sqlBehavior: "error" })
+      );
+    };
+    return { as };
+  };
+  $count(source, filters) {
+    return new SQLiteCountBuilder({ source, filters, session: this.session });
+  }
+  /**
+   * Incorporates a previously defined CTE (using `$with`) into the main query.
+   *
+   * This method allows the main query to reference a temporary named result set.
+   *
+   * See docs: {@link https://orm.drizzle.team/docs/select#with-clause}
+   *
+   * @param queries The CTEs to incorporate into the main query.
+   *
+   * @example
+   *
+   * ```ts
+   * // Define a subquery 'sq' as a CTE using $with
+   * const sq = db.$with('sq').as(db.select().from(users).where(eq(users.id, 42)));
+   *
+   * // Incorporate the CTE 'sq' into the main query and select from it
+   * const result = await db.with(sq).select().from(sq);
+   * ```
+   */
+  with(...queries) {
+    const self = this;
+    function select(fields) {
+      return new SQLiteSelectBuilder({
+        fields: fields ?? void 0,
+        session: self.session,
+        dialect: self.dialect,
+        withList: queries
+      });
+    }
+    function selectDistinct(fields) {
+      return new SQLiteSelectBuilder({
+        fields: fields ?? void 0,
+        session: self.session,
+        dialect: self.dialect,
+        withList: queries,
+        distinct: true
+      });
+    }
+    function update(table) {
+      return new SQLiteUpdateBuilder(table, self.session, self.dialect, queries);
+    }
+    function insert(into) {
+      return new SQLiteInsertBuilder(into, self.session, self.dialect, queries);
+    }
+    function delete_(from) {
+      return new SQLiteDeleteBase(from, self.session, self.dialect, queries);
+    }
+    return { select, selectDistinct, update, insert, delete: delete_ };
+  }
+  select(fields) {
+    return new SQLiteSelectBuilder({ fields: fields ?? void 0, session: this.session, dialect: this.dialect });
+  }
+  selectDistinct(fields) {
+    return new SQLiteSelectBuilder({
+      fields: fields ?? void 0,
+      session: this.session,
+      dialect: this.dialect,
+      distinct: true
+    });
+  }
+  /**
+   * Creates an update query.
+   *
+   * Calling this method without `.where()` clause will update all rows in a table. The `.where()` clause specifies which rows should be updated.
+   *
+   * Use `.set()` method to specify which values to update.
+   *
+   * See docs: {@link https://orm.drizzle.team/docs/update}
+   *
+   * @param table The table to update.
+   *
+   * @example
+   *
+   * ```ts
+   * // Update all rows in the 'cars' table
+   * await db.update(cars).set({ color: 'red' });
+   *
+   * // Update rows with filters and conditions
+   * await db.update(cars).set({ color: 'red' }).where(eq(cars.brand, 'BMW'));
+   *
+   * // Update with returning clause
+   * const updatedCar: Car[] = await db.update(cars)
+   *   .set({ color: 'red' })
+   *   .where(eq(cars.id, 1))
+   *   .returning();
+   * ```
+   */
+  update(table) {
+    return new SQLiteUpdateBuilder(table, this.session, this.dialect);
+  }
+  $cache;
+  /**
+   * Creates an insert query.
+   *
+   * Calling this method will create new rows in a table. Use `.values()` method to specify which values to insert.
+   *
+   * See docs: {@link https://orm.drizzle.team/docs/insert}
+   *
+   * @param table The table to insert into.
+   *
+   * @example
+   *
+   * ```ts
+   * // Insert one row
+   * await db.insert(cars).values({ brand: 'BMW' });
+   *
+   * // Insert multiple rows
+   * await db.insert(cars).values([{ brand: 'BMW' }, { brand: 'Porsche' }]);
+   *
+   * // Insert with returning clause
+   * const insertedCar: Car[] = await db.insert(cars)
+   *   .values({ brand: 'BMW' })
+   *   .returning();
+   * ```
+   */
+  insert(into) {
+    return new SQLiteInsertBuilder(into, this.session, this.dialect);
+  }
+  /**
+   * Creates a delete query.
+   *
+   * Calling this method without `.where()` clause will delete all rows in a table. The `.where()` clause specifies which rows should be deleted.
+   *
+   * See docs: {@link https://orm.drizzle.team/docs/delete}
+   *
+   * @param table The table to delete from.
+   *
+   * @example
+   *
+   * ```ts
+   * // Delete all rows in the 'cars' table
+   * await db.delete(cars);
+   *
+   * // Delete rows with filters and conditions
+   * await db.delete(cars).where(eq(cars.color, 'green'));
+   *
+   * // Delete with returning clause
+   * const deletedCar: Car[] = await db.delete(cars)
+   *   .where(eq(cars.id, 1))
+   *   .returning();
+   * ```
+   */
+  delete(from) {
+    return new SQLiteDeleteBase(from, this.session, this.dialect);
+  }
+  run(query) {
+    const sequel = typeof query === "string" ? sql.raw(query) : query.getSQL();
+    if (this.resultKind === "async") {
+      return new SQLiteRaw(
+        async () => this.session.run(sequel),
+        () => sequel,
+        "run",
+        this.dialect,
+        this.session.extractRawRunValueFromBatchResult.bind(this.session)
+      );
+    }
+    return this.session.run(sequel);
+  }
+  all(query) {
+    const sequel = typeof query === "string" ? sql.raw(query) : query.getSQL();
+    if (this.resultKind === "async") {
+      return new SQLiteRaw(
+        async () => this.session.all(sequel),
+        () => sequel,
+        "all",
+        this.dialect,
+        this.session.extractRawAllValueFromBatchResult.bind(this.session)
+      );
+    }
+    return this.session.all(sequel);
+  }
+  get(query) {
+    const sequel = typeof query === "string" ? sql.raw(query) : query.getSQL();
+    if (this.resultKind === "async") {
+      return new SQLiteRaw(
+        async () => this.session.get(sequel),
+        () => sequel,
+        "get",
+        this.dialect,
+        this.session.extractRawGetValueFromBatchResult.bind(this.session)
+      );
+    }
+    return this.session.get(sequel);
+  }
+  values(query) {
+    const sequel = typeof query === "string" ? sql.raw(query) : query.getSQL();
+    if (this.resultKind === "async") {
+      return new SQLiteRaw(
+        async () => this.session.values(sequel),
+        () => sequel,
+        "values",
+        this.dialect,
+        this.session.extractRawValuesValueFromBatchResult.bind(this.session)
+      );
+    }
+    return this.session.values(sequel);
+  }
+  transaction(transaction, config2) {
+    return this.session.transaction(transaction, config2);
+  }
+};
+
+// node_modules/drizzle-orm/cache/core/cache.js
+var Cache = class {
+  static [entityKind] = "Cache";
+};
+var NoopCache = class extends Cache {
+  strategy() {
+    return "all";
+  }
+  static [entityKind] = "NoopCache";
+  async get(_key) {
+    return void 0;
+  }
+  async put(_hashedQuery, _response, _tables, _config) {
+  }
+  async onMutate(_params) {
+  }
+};
+async function hashQuery(sql2, params) {
+  const dataToHash = `${sql2}-${JSON.stringify(params)}`;
+  const encoder = new TextEncoder();
+  const data = encoder.encode(dataToHash);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = [...new Uint8Array(hashBuffer)];
+  const hashHex = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+  return hashHex;
+}
+
+// node_modules/drizzle-orm/sqlite-core/session.js
+var ExecuteResultSync = class extends QueryPromise {
+  constructor(resultCb) {
+    super();
+    this.resultCb = resultCb;
+  }
+  static [entityKind] = "ExecuteResultSync";
+  async execute() {
+    return this.resultCb();
+  }
+  sync() {
+    return this.resultCb();
+  }
+};
+var SQLitePreparedQuery = class {
+  constructor(mode, executeMethod, query, cache, queryMetadata, cacheConfig) {
+    this.mode = mode;
+    this.executeMethod = executeMethod;
+    this.query = query;
+    this.cache = cache;
+    this.queryMetadata = queryMetadata;
+    this.cacheConfig = cacheConfig;
+    if (cache && cache.strategy() === "all" && cacheConfig === void 0) {
+      this.cacheConfig = { enable: true, autoInvalidate: true };
+    }
+    if (!this.cacheConfig?.enable) {
+      this.cacheConfig = void 0;
+    }
+  }
+  static [entityKind] = "PreparedQuery";
+  /** @internal */
+  joinsNotNullableMap;
+  /** @internal */
+  async queryWithCache(queryString, params, query) {
+    if (this.cache === void 0 || is(this.cache, NoopCache) || this.queryMetadata === void 0) {
+      try {
+        return await query();
+      } catch (e) {
+        throw new DrizzleQueryError(queryString, params, e);
+      }
+    }
+    if (this.cacheConfig && !this.cacheConfig.enable) {
+      try {
+        return await query();
+      } catch (e) {
+        throw new DrizzleQueryError(queryString, params, e);
+      }
+    }
+    if ((this.queryMetadata.type === "insert" || this.queryMetadata.type === "update" || this.queryMetadata.type === "delete") && this.queryMetadata.tables.length > 0) {
+      try {
+        const [res] = await Promise.all([
+          query(),
+          this.cache.onMutate({ tables: this.queryMetadata.tables })
+        ]);
+        return res;
+      } catch (e) {
+        throw new DrizzleQueryError(queryString, params, e);
+      }
+    }
+    if (!this.cacheConfig) {
+      try {
+        return await query();
+      } catch (e) {
+        throw new DrizzleQueryError(queryString, params, e);
+      }
+    }
+    if (this.queryMetadata.type === "select") {
+      const fromCache = await this.cache.get(
+        this.cacheConfig.tag ?? await hashQuery(queryString, params),
+        this.queryMetadata.tables,
+        this.cacheConfig.tag !== void 0,
+        this.cacheConfig.autoInvalidate
+      );
+      if (fromCache === void 0) {
+        let result;
+        try {
+          result = await query();
+        } catch (e) {
+          throw new DrizzleQueryError(queryString, params, e);
+        }
+        await this.cache.put(
+          this.cacheConfig.tag ?? await hashQuery(queryString, params),
+          result,
+          // make sure we send tables that were used in a query only if user wants to invalidate it on each write
+          this.cacheConfig.autoInvalidate ? this.queryMetadata.tables : [],
+          this.cacheConfig.tag !== void 0,
+          this.cacheConfig.config
+        );
+        return result;
+      }
+      return fromCache;
+    }
+    try {
+      return await query();
+    } catch (e) {
+      throw new DrizzleQueryError(queryString, params, e);
+    }
+  }
+  getQuery() {
+    return this.query;
+  }
+  mapRunResult(result, _isFromBatch) {
+    return result;
+  }
+  mapAllResult(_result, _isFromBatch) {
+    throw new Error("Not implemented");
+  }
+  mapGetResult(_result, _isFromBatch) {
+    throw new Error("Not implemented");
+  }
+  execute(placeholderValues) {
+    if (this.mode === "async") {
+      return this[this.executeMethod](placeholderValues);
+    }
+    return new ExecuteResultSync(() => this[this.executeMethod](placeholderValues));
+  }
+  mapResult(response, isFromBatch) {
+    switch (this.executeMethod) {
+      case "run": {
+        return this.mapRunResult(response, isFromBatch);
+      }
+      case "all": {
+        return this.mapAllResult(response, isFromBatch);
+      }
+      case "get": {
+        return this.mapGetResult(response, isFromBatch);
+      }
+    }
+  }
+};
+var SQLiteSession = class {
+  constructor(dialect) {
+    this.dialect = dialect;
+  }
+  static [entityKind] = "SQLiteSession";
+  prepareOneTimeQuery(query, fields, executeMethod, isResponseInArrayMode, customResultMapper, queryMetadata, cacheConfig) {
+    return this.prepareQuery(
+      query,
+      fields,
+      executeMethod,
+      isResponseInArrayMode,
+      customResultMapper,
+      queryMetadata,
+      cacheConfig
+    );
+  }
+  run(query) {
+    const staticQuery = this.dialect.sqlToQuery(query);
+    try {
+      return this.prepareOneTimeQuery(staticQuery, void 0, "run", false).run();
+    } catch (err) {
+      throw new DrizzleError({ cause: err, message: `Failed to run the query '${staticQuery.sql}'` });
+    }
+  }
+  /** @internal */
+  extractRawRunValueFromBatchResult(result) {
+    return result;
+  }
+  all(query) {
+    return this.prepareOneTimeQuery(this.dialect.sqlToQuery(query), void 0, "run", false).all();
+  }
+  /** @internal */
+  extractRawAllValueFromBatchResult(_result) {
+    throw new Error("Not implemented");
+  }
+  get(query) {
+    return this.prepareOneTimeQuery(this.dialect.sqlToQuery(query), void 0, "run", false).get();
+  }
+  /** @internal */
+  extractRawGetValueFromBatchResult(_result) {
+    throw new Error("Not implemented");
+  }
+  values(query) {
+    return this.prepareOneTimeQuery(this.dialect.sqlToQuery(query), void 0, "run", false).values();
+  }
+  async count(sql2) {
+    const result = await this.values(sql2);
+    return result[0][0];
+  }
+  /** @internal */
+  extractRawValuesValueFromBatchResult(_result) {
+    throw new Error("Not implemented");
+  }
+};
+var SQLiteTransaction = class extends BaseSQLiteDatabase {
+  constructor(resultType, dialect, session, schema2, nestedIndex = 0) {
+    super(resultType, dialect, session, schema2);
+    this.schema = schema2;
+    this.nestedIndex = nestedIndex;
+  }
+  static [entityKind] = "SQLiteTransaction";
+  rollback() {
+    throw new TransactionRollbackError();
+  }
+};
 
 // electron/database/schema.ts
 var users = sqliteTable("users", {
@@ -2263,18 +5850,311 @@ var payments = sqliteTable(
     check("payments_amount_check", sql`${table.amount} > 0`)
   ]
 );
+var schema = {
+  users,
+  settings,
+  categories,
+  products,
+  stockMovements,
+  suppliers,
+  supplies,
+  supplyItems,
+  transformations,
+  clients,
+  sales,
+  saleItems,
+  payments
+};
 
 // electron/database/client.ts
 import Database from "better-sqlite3";
+
+// node_modules/drizzle-orm/better-sqlite3/driver.js
+import Client from "better-sqlite3";
+
+// node_modules/drizzle-orm/better-sqlite3/session.js
+var BetterSQLiteSession = class extends SQLiteSession {
+  constructor(client, dialect, schema2, options = {}) {
+    super(dialect);
+    this.client = client;
+    this.schema = schema2;
+    this.logger = options.logger ?? new NoopLogger();
+    this.cache = options.cache ?? new NoopCache();
+  }
+  static [entityKind] = "BetterSQLiteSession";
+  logger;
+  cache;
+  prepareQuery(query, fields, executeMethod, isResponseInArrayMode, customResultMapper, queryMetadata, cacheConfig) {
+    const stmt = this.client.prepare(query.sql);
+    return new PreparedQuery(
+      stmt,
+      query,
+      this.logger,
+      this.cache,
+      queryMetadata,
+      cacheConfig,
+      fields,
+      executeMethod,
+      isResponseInArrayMode,
+      customResultMapper
+    );
+  }
+  transaction(transaction, config2 = {}) {
+    const tx = new BetterSQLiteTransaction("sync", this.dialect, this, this.schema);
+    const nativeTx = this.client.transaction(transaction);
+    return nativeTx[config2.behavior ?? "deferred"](tx);
+  }
+};
+var BetterSQLiteTransaction = class _BetterSQLiteTransaction extends SQLiteTransaction {
+  static [entityKind] = "BetterSQLiteTransaction";
+  transaction(transaction) {
+    const savepointName = `sp${this.nestedIndex}`;
+    const tx = new _BetterSQLiteTransaction("sync", this.dialect, this.session, this.schema, this.nestedIndex + 1);
+    this.session.run(sql.raw(`savepoint ${savepointName}`));
+    try {
+      const result = transaction(tx);
+      this.session.run(sql.raw(`release savepoint ${savepointName}`));
+      return result;
+    } catch (err) {
+      this.session.run(sql.raw(`rollback to savepoint ${savepointName}`));
+      throw err;
+    }
+  }
+};
+var PreparedQuery = class extends SQLitePreparedQuery {
+  constructor(stmt, query, logger, cache, queryMetadata, cacheConfig, fields, executeMethod, _isResponseInArrayMode, customResultMapper) {
+    super("sync", executeMethod, query, cache, queryMetadata, cacheConfig);
+    this.stmt = stmt;
+    this.logger = logger;
+    this.fields = fields;
+    this._isResponseInArrayMode = _isResponseInArrayMode;
+    this.customResultMapper = customResultMapper;
+  }
+  static [entityKind] = "BetterSQLitePreparedQuery";
+  run(placeholderValues) {
+    const params = fillPlaceholders(this.query.params, placeholderValues ?? {});
+    this.logger.logQuery(this.query.sql, params);
+    return this.stmt.run(...params);
+  }
+  all(placeholderValues) {
+    const { fields, joinsNotNullableMap, query, logger, stmt, customResultMapper } = this;
+    if (!fields && !customResultMapper) {
+      const params = fillPlaceholders(query.params, placeholderValues ?? {});
+      logger.logQuery(query.sql, params);
+      return stmt.all(...params);
+    }
+    const rows = this.values(placeholderValues);
+    if (customResultMapper) {
+      return customResultMapper(rows);
+    }
+    return rows.map((row) => mapResultRow(fields, row, joinsNotNullableMap));
+  }
+  get(placeholderValues) {
+    const params = fillPlaceholders(this.query.params, placeholderValues ?? {});
+    this.logger.logQuery(this.query.sql, params);
+    const { fields, stmt, joinsNotNullableMap, customResultMapper } = this;
+    if (!fields && !customResultMapper) {
+      return stmt.get(...params);
+    }
+    const row = stmt.raw().get(...params);
+    if (!row) {
+      return void 0;
+    }
+    if (customResultMapper) {
+      return customResultMapper([row]);
+    }
+    return mapResultRow(fields, row, joinsNotNullableMap);
+  }
+  values(placeholderValues) {
+    const params = fillPlaceholders(this.query.params, placeholderValues ?? {});
+    this.logger.logQuery(this.query.sql, params);
+    return this.stmt.raw().all(...params);
+  }
+  /** @internal */
+  isResponseInArrayMode() {
+    return this._isResponseInArrayMode;
+  }
+};
+
+// node_modules/drizzle-orm/better-sqlite3/driver.js
+var BetterSQLite3Database = class extends BaseSQLiteDatabase {
+  static [entityKind] = "BetterSQLite3Database";
+};
+function construct(client, config2 = {}) {
+  const dialect = new SQLiteSyncDialect({ casing: config2.casing });
+  let logger;
+  if (config2.logger === true) {
+    logger = new DefaultLogger();
+  } else if (config2.logger !== false) {
+    logger = config2.logger;
+  }
+  let schema2;
+  if (config2.schema) {
+    const tablesConfig = extractTablesRelationalConfig(
+      config2.schema,
+      createTableRelationsHelpers
+    );
+    schema2 = {
+      fullSchema: config2.schema,
+      schema: tablesConfig.tables,
+      tableNamesMap: tablesConfig.tableNamesMap
+    };
+  }
+  const session = new BetterSQLiteSession(client, dialect, schema2, { logger });
+  const db2 = new BetterSQLite3Database("sync", dialect, session, schema2);
+  db2.$client = client;
+  return db2;
+}
+function drizzle(...params) {
+  if (params[0] === void 0 || typeof params[0] === "string") {
+    const instance = params[0] === void 0 ? new Client() : new Client(params[0]);
+    return construct(instance, params[1]);
+  }
+  if (isConfig(params[0])) {
+    const { connection, client, ...drizzleConfig } = params[0];
+    if (client) return construct(client, drizzleConfig);
+    if (typeof connection === "object") {
+      const { source, ...options } = connection;
+      const instance2 = new Client(source, options);
+      return construct(instance2, drizzleConfig);
+    }
+    const instance = new Client(connection);
+    return construct(instance, drizzleConfig);
+  }
+  return construct(params[0], params[1]);
+}
+((drizzle2) => {
+  function mock(config2) {
+    return construct({}, config2);
+  }
+  drizzle2.mock = mock;
+})(drizzle || (drizzle = {}));
+
+// electron/database/client.ts
+import path2 from "node:path";
 var db = null;
 function removeDiacritics(value) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+function initializeDatabase() {
+  if (db) {
+    return db;
+  }
+  const dbPath = path2.join(app.getPath("userData"), "database.sqlite");
+  const sqlite = new Database(dbPath);
+  sqlite.pragma("foreign_keys = ON");
+  sqlite.function("unaccent", { deterministic: true }, removeDiacritics);
+  db = drizzle(sqlite, { schema: schema_exports });
+  return db;
 }
 function getDb() {
   if (!db) {
     throw new Error("Database not initialized");
   }
   return db;
+}
+function closeDatabase() {
+  if (db) {
+    db.$client.close();
+    db = null;
+  }
+}
+
+// electron/services/maintenanceLock.ts
+import { EventEmitter } from "node:events";
+var acquireCount = 0;
+var maintenanceMode = false;
+var ee = new EventEmitter();
+var maintenanceLock = {
+  /**
+   * Acquires a shared lock for backup operations.
+   * Multiple backups can run concurrently, but maintenance (restore) blocks new backups.
+   * Returns a handle that must be released.
+   */
+  acquireForBackup() {
+    if (maintenanceMode) {
+      throw new Error("Maintenance in progress: backup not allowed");
+    }
+    acquireCount++;
+    return {
+      release() {
+        acquireCount--;
+        if (acquireCount <= 0) {
+          ee.emit("unlocked");
+        }
+      }
+    };
+  },
+  /**
+   * Acquires an exclusive lock for maintenance (restore).
+   * Sets maintenance mode, which blocks all new write operations.
+   * Waits for any in-flight transaction to complete before returning.
+   * Returns a handle that must be released (clears maintenance mode).
+   */
+  async acquireForMaintenance(db2, timeoutMs = 3e4) {
+    if (maintenanceMode) {
+      throw new Error("Maintenance already in progress");
+    }
+    maintenanceMode = true;
+    try {
+      if (db2.inTransaction) {
+        await waitForTransactionEnd(db2, timeoutMs);
+      }
+    } catch (error62) {
+      maintenanceMode = false;
+      throw error62;
+    }
+    return {
+      release() {
+        maintenanceMode = false;
+        acquireCount = 0;
+        ee.emit("unlocked");
+      }
+    };
+  },
+  /**
+   * Checks if maintenance mode is active (restore in progress).
+   * Write operations should check this and refuse to start.
+   */
+  isMaintenanceMode() {
+    return maintenanceMode;
+  },
+  /**
+   * Checks if any lock is held (backup or maintenance).
+   * Used by backup to know if it should wait.
+   */
+  isLocked() {
+    return acquireCount > 0 || maintenanceMode;
+  },
+  /**
+   * Waits for all locks to be released, up to timeoutMs.
+   * Returns true if idle, false on timeout.
+   */
+  waitForIdle(timeoutMs = 1e4) {
+    if (acquireCount === 0 && !maintenanceMode) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), timeoutMs);
+      ee.once("unlocked", () => {
+        clearTimeout(timer);
+        resolve(true);
+      });
+    });
+  }
+};
+async function waitForTransactionEnd(db2, timeoutMs) {
+  if (!db2.inTransaction) return;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error("Transaction did not complete in time"));
+    }, timeoutMs);
+    const checkInterval = setInterval(() => {
+      if (!db2.inTransaction) {
+        clearInterval(checkInterval);
+        clearTimeout(timer);
+        resolve();
+      }
+    }, 10);
+  });
 }
 
 // electron/services/databaseService.ts
@@ -2289,6 +6169,72 @@ function buildSettingsRow(input2, now) {
     createdAt: now,
     updatedAt: now
   };
+}
+function initDatabase(migrationsFolder) {
+  const db2 = initializeDatabase();
+  runMigrationsWithRecovery(db2, migrationsFolder);
+}
+function runMigrationsWithRecovery(db2, migrationsFolder) {
+  let done = false;
+  while (!done) {
+    try {
+      migrate(db2, { migrationsFolder });
+      done = true;
+    } catch (error62) {
+      if (!isAlreadyAppliedError(error62)) {
+        throw error62;
+      }
+      if (!markMigrationAsApplied(db2, migrationsFolder, error62)) {
+        throw error62;
+      }
+    }
+  }
+}
+function isAlreadyAppliedError(error62) {
+  const messages = [error62.message, error62.cause instanceof Error ? error62.cause.message : ""];
+  return messages.some((msg) => {
+    const lower = msg.toLowerCase();
+    return lower.includes("duplicate column name") || lower.includes("duplicate table name") || lower.includes("already exists");
+  });
+}
+function getErrorMessage(error62) {
+  const parts = [error62.message];
+  const cause = error62.cause;
+  if (cause instanceof Error) {
+    parts.push(cause.message);
+  }
+  return parts.join("\n");
+}
+function markMigrationAsApplied(db2, migrationsFolder, error62) {
+  const journalPath = path3.join(migrationsFolder, "meta", "_journal.json");
+  if (!fs3.existsSync(journalPath)) {
+    return false;
+  }
+  const journal = JSON.parse(fs3.readFileSync(journalPath, "utf8"));
+  const fullMessage = getErrorMessage(error62);
+  const sqlMatch = fullMessage.match(/Failed to run the query '([^']+)'/s);
+  if (!sqlMatch) {
+    return false;
+  }
+  const failingSqlFirstLine = sqlMatch[1].trim().replace(/--> statement-breakpoint/, "").trim().split("\n")[0].trim();
+  for (const entry of journal.entries) {
+    const sqlFile = path3.join(migrationsFolder, `${entry.tag}.sql`);
+    if (!fs3.existsSync(sqlFile)) {
+      continue;
+    }
+    const content = fs3.readFileSync(sqlFile, "utf8");
+    if (content.includes(failingSqlFirstLine)) {
+      const hash2 = crypto3.createHash("sha256").update(content).digest("hex");
+      db2.$client.prepare(
+        "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)"
+      ).run(hash2, entry.when);
+      console.warn(
+        `[migrations] Schema drift detected: marked migration "${entry.tag}" as already applied`
+      );
+      return true;
+    }
+  }
+  return false;
 }
 function getDatabaseStatus() {
   const db2 = getDb();
@@ -2314,6 +6260,9 @@ async function getSettings() {
   }
 }
 async function saveSettings(input2) {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new Error("Maintenance in progress");
+  }
   const db2 = getDb();
   const values = buildSettingsRow(input2, /* @__PURE__ */ new Date());
   const existing = await db2.select().from(settings).where(eq(settings.id, 1)).get();
@@ -2586,7 +6535,7 @@ __export(external_exports, {
   uint64: () => uint64,
   ulid: () => ulid2,
   undefined: () => _undefined3,
-  union: () => union,
+  union: () => union2,
   unknown: () => unknown,
   uppercase: () => _uppercase,
   url: () => url,
@@ -3006,7 +6955,7 @@ function assertNotEqual(val) {
   return val;
 }
 function toZod() {
-  return (schema) => schema;
+  return (schema2) => schema2;
 }
 function assertIs(_arg) {
 }
@@ -3099,8 +7048,8 @@ function rawShape(def) {
   const desc2 = Object.getOwnPropertyDescriptor(def, "shape");
   return desc2?.get ? desc2.get.raw : desc2?.value;
 }
-function sourceShape(schema) {
-  return rawShape(schema._zod.def) ?? schema._zod.def.shape;
+function sourceShape(schema2) {
+  return rawShape(schema2._zod.def) ?? schema2._zod.def.shape;
 }
 function deferProp(target, key, getter) {
   Object.defineProperty(target, key, {
@@ -3153,13 +7102,13 @@ function mergeDefs(...defs) {
   }
   return Object.defineProperties({}, mergedDescriptors);
 }
-function cloneDef(schema) {
-  return mergeDefs(schema._zod.def);
+function cloneDef(schema2) {
+  return mergeDefs(schema2._zod.def);
 }
-function getElementAtPath(obj, path2) {
-  if (!path2)
+function getElementAtPath(obj, path6) {
+  if (!path6)
     return obj;
-  return path2.reduce((acc, key) => acc?.[key], obj);
+  return path6.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -3376,19 +7325,19 @@ var BIGINT_FORMAT_RANGES = {
   int64: [/* @__PURE__ */ BigInt("-9223372036854775808"), /* @__PURE__ */ BigInt("9223372036854775807")],
   uint64: [/* @__PURE__ */ BigInt(0), /* @__PURE__ */ BigInt("18446744073709551615")]
 };
-function pick(schema, mask) {
-  const currDef = schema._zod.def;
+function pick(schema2, mask) {
+  const currDef = schema2._zod.def;
   const checks = currDef.checks;
   const hasChecks = checks && checks.length > 0;
   if (hasChecks) {
     throw new Error(".pick() cannot be used on object schemas containing refinements");
   }
   const newShape = {};
-  mirrorShape(newShape, schema, maskedKeys(schema, mask));
-  return clone(schema, mergeDefs(currDef, { shape: newShape, checks: [] }));
+  mirrorShape(newShape, schema2, maskedKeys(schema2, mask));
+  return clone(schema2, mergeDefs(currDef, { shape: newShape, checks: [] }));
 }
-function maskedKeys(schema, mask) {
-  const raw = sourceShape(schema);
+function maskedKeys(schema2, mask) {
+  const raw = sourceShape(schema2);
   const keys = [];
   for (const key of Reflect.ownKeys(mask)) {
     if (!Object.getOwnPropertyDescriptor(raw, key)?.enumerable) {
@@ -3399,45 +7348,45 @@ function maskedKeys(schema, mask) {
   }
   return keys;
 }
-function omit(schema, mask) {
-  const currDef = schema._zod.def;
+function omit(schema2, mask) {
+  const currDef = schema2._zod.def;
   const checks = currDef.checks;
   const hasChecks = checks && checks.length > 0;
   if (hasChecks) {
     throw new Error(".omit() cannot be used on object schemas containing refinements");
   }
-  const omitted = new Set(maskedKeys(schema, mask));
+  const omitted = new Set(maskedKeys(schema2, mask));
   const newShape = {};
-  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)).filter((key) => !omitted.has(key)));
-  return clone(schema, mergeDefs(currDef, { shape: newShape, checks: [] }));
+  mirrorShape(newShape, schema2, Reflect.ownKeys(sourceShape(schema2)).filter((key) => !omitted.has(key)));
+  return clone(schema2, mergeDefs(currDef, { shape: newShape, checks: [] }));
 }
-function extend(schema, shape) {
+function extend(schema2, shape) {
   if (!isPlainObject(shape)) {
     throw new Error("Invalid input to extend: expected a plain object");
   }
-  const checks = schema._zod.def.checks;
+  const checks = schema2._zod.def.checks;
   const hasChecks = checks && checks.length > 0;
   if (hasChecks) {
-    const existingShape = sourceShape(schema);
+    const existingShape = sourceShape(schema2);
     for (const key of Reflect.ownKeys(shape)) {
       if (Object.getOwnPropertyDescriptor(existingShape, key) !== void 0) {
         throw new Error("Cannot overwrite keys on object schemas containing refinements. Use `.safeExtend()` instead.");
       }
     }
   }
-  return clone(schema, mergeDefs(schema._zod.def, { shape: extended(schema, shape) }));
+  return clone(schema2, mergeDefs(schema2._zod.def, { shape: extended(schema2, shape) }));
 }
-function extended(schema, shape) {
+function extended(schema2, shape) {
   const newShape = {};
-  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)));
+  mirrorShape(newShape, schema2, Reflect.ownKeys(sourceShape(schema2)));
   mirrorProps(newShape, shape);
   return newShape;
 }
-function safeExtend(schema, shape) {
+function safeExtend(schema2, shape) {
   if (!isPlainObject(shape)) {
     throw new Error("Invalid input to safeExtend: expected a plain object");
   }
-  return clone(schema, mergeDefs(schema._zod.def, { shape: extended(schema, shape) }));
+  return clone(schema2, mergeDefs(schema2._zod.def, { shape: extended(schema2, shape) }));
 }
 function merge(a, b) {
   if (!b?._zod?.def) {
@@ -3458,26 +7407,26 @@ function merge(a, b) {
   });
   return clone(a, def);
 }
-function partial(Class2, schema, mask, name = "partial") {
-  const currDef = schema._zod.def;
+function partial(Class2, schema2, mask, name = "partial") {
+  const currDef = schema2._zod.def;
   const checks = currDef.checks;
   const hasChecks = checks && checks.length > 0;
   if (hasChecks) {
     throw new Error(`.${name}() cannot be used on object schemas containing refinements`);
   }
-  const selected = mask ? new Set(maskedKeys(schema, mask)) : void 0;
+  const selected = mask ? new Set(maskedKeys(schema2, mask)) : void 0;
   const newShape = {};
-  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)), Class2 && ((value, key) => selected && !selected.has(key) ? value : new Class2({ type: "optional", innerType: value })));
-  return clone(schema, mergeDefs(schema._zod.def, { shape: newShape, checks: [] }));
+  mirrorShape(newShape, schema2, Reflect.ownKeys(sourceShape(schema2)), Class2 && ((value, key) => selected && !selected.has(key) ? value : new Class2({ type: "optional", innerType: value })));
+  return clone(schema2, mergeDefs(schema2._zod.def, { shape: newShape, checks: [] }));
 }
-function required(Class2, schema, mask) {
-  const selected = mask ? new Set(maskedKeys(schema, mask)) : void 0;
+function required(Class2, schema2, mask) {
+  const selected = mask ? new Set(maskedKeys(schema2, mask)) : void 0;
   const newShape = {};
-  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)), (value, key) => (
+  mirrorShape(newShape, schema2, Reflect.ownKeys(sourceShape(schema2)), (value, key) => (
     // overwrite with non-optional
     selected && !selected.has(key) ? value : new Class2({ type: "nonoptional", innerType: value })
   ));
-  return clone(schema, mergeDefs(schema._zod.def, { shape: newShape }));
+  return clone(schema2, mergeDefs(schema2._zod.def, { shape: newShape }));
 }
 function aborted(x, startIndex = 0) {
   if (x.aborted === true)
@@ -3499,11 +7448,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path2, issues) {
+function prefixIssues(path6, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path2);
+    iss.path.unshift(path6);
     return iss;
   });
 }
@@ -3953,16 +7902,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path2 = []) => {
+  const processError = (error63, path6 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path2, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path2, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path2, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
       } else {
-        const fullpath = [...path2, ...issue2.path];
+        const fullpath = [...path6, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -4001,17 +7950,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error63, path2 = []) => {
+  const processError = (error63, path6 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path2, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path2, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path2, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
       } else {
-        const fullpath = [...path2, ...issue2.path];
+        const fullpath = [...path6, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -4050,8 +7999,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path2 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path2) {
+  const path6 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path6) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -4082,9 +8031,9 @@ function finalizeParams(callee, params) {
   return { callee: params?.callee ?? callee, Err: params?.Err };
 }
 var _parse = (_Err) => {
-  const fn = (schema, value, _ctx, _params) => {
+  const fn = (schema2, value, _ctx, _params) => {
     const ctx = _ctx ? { ..._ctx, async: false } : { async: false };
-    const result = schema._zod.run({ value, issues: [] }, ctx);
+    const result = schema2._zod.run({ value, issues: [] }, ctx);
     if (result instanceof Promise) {
       throw new $ZodAsyncError();
     }
@@ -4099,9 +8048,9 @@ var _parse = (_Err) => {
 };
 var parse = /* @__PURE__ */ _parse($ZodRealError);
 var _parseAsync = (_Err) => {
-  const fn = async (schema, value, _ctx, params) => {
+  const fn = async (schema2, value, _ctx, params) => {
     const ctx = _ctx ? { ..._ctx, async: true } : { async: true };
-    let result = schema._zod.run({ value, issues: [] }, ctx);
+    let result = schema2._zod.run({ value, issues: [] }, ctx);
     if (result instanceof Promise)
       result = await result;
     if (result.issues.length) {
@@ -4114,9 +8063,9 @@ var _parseAsync = (_Err) => {
   return fn;
 };
 var parseAsync = /* @__PURE__ */ _parseAsync($ZodRealError);
-var _safeParse = (_Err) => (schema, value, _ctx) => {
+var _safeParse = (_Err) => (schema2, value, _ctx) => {
   const ctx = _ctx ? { ..._ctx, async: false } : { async: false };
-  const result = schema._zod.run({ value, issues: [] }, ctx);
+  const result = schema2._zod.run({ value, issues: [] }, ctx);
   if (result instanceof Promise) {
     throw new $ZodAsyncError();
   }
@@ -4142,9 +8091,9 @@ function failure(Err, issues, ctx) {
     }
   };
 }
-var _safeParseAsync = (_Err) => async (schema, value, _ctx) => {
+var _safeParseAsync = (_Err) => async (schema2, value, _ctx) => {
   const ctx = _ctx ? { ..._ctx, async: true } : { async: true };
-  let result = schema._zod.run({ value, issues: [] }, ctx);
+  let result = schema2._zod.run({ value, issues: [] }, ctx);
   if (result instanceof Promise)
     result = await result;
   return result.issues.length ? failure(_Err, result.issues, ctx) : { success: true, data: result.value };
@@ -4152,88 +8101,88 @@ var _safeParseAsync = (_Err) => async (schema, value, _ctx) => {
 var safeParseAsync = /* @__PURE__ */ _safeParseAsync($ZodRealError);
 var COMPILE_INVALID = /* @__PURE__ */ Symbol.for("zod.compile.invalid");
 var COMPILE_FALLBACK = /* @__PURE__ */ Symbol.for("zod.compile.fallback");
-var validate = (schema, value, _ctx) => {
-  const validator = schema._zod.bag.validator;
+var validate = (schema2, value, _ctx) => {
+  const validator = schema2._zod.bag.validator;
   if (validator !== void 0) {
     if (validator(value) !== COMPILE_INVALID)
       return true;
     if (validator.definite === true && _ctx === void 0)
       return false;
   }
-  return validateFallback(schema, value, _ctx);
+  return validateFallback(schema2, value, _ctx);
 };
-function validateFallback(schema, value, _ctx) {
+function validateFallback(schema2, value, _ctx) {
   const ctx = _ctx ? { ..._ctx, async: false, abortEarly: true } : { async: false, abortEarly: true };
-  const fallbackRun = schema._zod.bag.fallbackRun;
+  const fallbackRun = schema2._zod.bag.fallbackRun;
   let result;
   if (fallbackRun) {
     ctx[COMPILE_FALLBACK] = true;
     result = fallbackRun({ value, issues: [] }, ctx);
   } else {
-    result = schema._zod.run({ value, issues: [] }, ctx);
+    result = schema2._zod.run({ value, issues: [] }, ctx);
   }
   if (result instanceof Promise) {
     throw new $ZodAsyncError();
   }
   return result.issues.length === 0;
 }
-var validateAsync = async (schema, value, _ctx) => {
+var validateAsync = async (schema2, value, _ctx) => {
   const ctx = _ctx ? { ..._ctx, async: true, abortEarly: true } : { async: true, abortEarly: true };
-  let result = schema._zod.run({ value, issues: [] }, ctx);
+  let result = schema2._zod.run({ value, issues: [] }, ctx);
   if (result instanceof Promise)
     result = await result;
   return result.issues.length === 0;
 };
 var _encode = (_Err) => {
   const parse3 = _parse(_Err);
-  const fn = (schema, value, _ctx, _params) => {
+  const fn = (schema2, value, _ctx, _params) => {
     const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
-    return parse3(schema, value, ctx, finalizeParams(fn, _params));
+    return parse3(schema2, value, ctx, finalizeParams(fn, _params));
   };
   return fn;
 };
 var encode = /* @__PURE__ */ _encode($ZodRealError);
 var _decode = (_Err) => {
   const parse3 = _parse(_Err);
-  const fn = (schema, value, _ctx, _params) => {
-    return parse3(schema, value, _ctx, finalizeParams(fn, _params));
+  const fn = (schema2, value, _ctx, _params) => {
+    return parse3(schema2, value, _ctx, finalizeParams(fn, _params));
   };
   return fn;
 };
 var decode = /* @__PURE__ */ _decode($ZodRealError);
 var _encodeAsync = (_Err) => {
   const parseAsync3 = _parseAsync(_Err);
-  const fn = async (schema, value, _ctx, _params) => {
+  const fn = async (schema2, value, _ctx, _params) => {
     const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
-    return await parseAsync3(schema, value, ctx, finalizeParams(fn, _params));
+    return await parseAsync3(schema2, value, ctx, finalizeParams(fn, _params));
   };
   return fn;
 };
 var encodeAsync = /* @__PURE__ */ _encodeAsync($ZodRealError);
 var _decodeAsync = (_Err) => {
   const parseAsync3 = _parseAsync(_Err);
-  const fn = async (schema, value, _ctx, _params) => {
-    return await parseAsync3(schema, value, _ctx, finalizeParams(fn, _params));
+  const fn = async (schema2, value, _ctx, _params) => {
+    return await parseAsync3(schema2, value, _ctx, finalizeParams(fn, _params));
   };
   return fn;
 };
 var decodeAsync = /* @__PURE__ */ _decodeAsync($ZodRealError);
-var _safeEncode = (_Err) => (schema, value, _ctx) => {
+var _safeEncode = (_Err) => (schema2, value, _ctx) => {
   const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
-  return _safeParse(_Err)(schema, value, ctx);
+  return _safeParse(_Err)(schema2, value, ctx);
 };
 var safeEncode = /* @__PURE__ */ _safeEncode($ZodRealError);
-var _safeDecode = (_Err) => (schema, value, _ctx) => {
-  return _safeParse(_Err)(schema, value, _ctx);
+var _safeDecode = (_Err) => (schema2, value, _ctx) => {
+  return _safeParse(_Err)(schema2, value, _ctx);
 };
 var safeDecode = /* @__PURE__ */ _safeDecode($ZodRealError);
-var _safeEncodeAsync = (_Err) => async (schema, value, _ctx) => {
+var _safeEncodeAsync = (_Err) => async (schema2, value, _ctx) => {
   const ctx = _ctx ? { ..._ctx, direction: "backward" } : { direction: "backward" };
-  return _safeParseAsync(_Err)(schema, value, ctx);
+  return _safeParseAsync(_Err)(schema2, value, ctx);
 };
 var safeEncodeAsync = /* @__PURE__ */ _safeEncodeAsync($ZodRealError);
-var _safeDecodeAsync = (_Err) => async (schema, value, _ctx) => {
-  return _safeParseAsync(_Err)(schema, value, _ctx);
+var _safeDecodeAsync = (_Err) => async (schema2, value, _ctx) => {
+  return _safeParseAsync(_Err)(schema2, value, _ctx);
 };
 var safeDecodeAsync = /* @__PURE__ */ _safeDecodeAsync($ZodRealError);
 
@@ -4849,8 +8798,8 @@ var $ZodCheckProperties = /* @__PURE__ */ $constructor("$ZodCheckProperties", (i
     entries ?? (entries = Reflect.ownKeys(def.shape).map((key) => [key, def.shape[key]]));
     const input2 = payload.value;
     let proms;
-    for (const [key, schema] of entries) {
-      const result = schema._zod.run({ value: input2[key], issues: [] }, {});
+    for (const [key, schema2] of entries) {
+      const result = schema2._zod.run({ value: input2[key], issues: [] }, {});
       if (result instanceof Promise) {
         proms ?? (proms = []);
         proms.push(result.then((result2) => handleCheckPropertyResult(result2, payload, key)));
@@ -5944,10 +9893,10 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
       const id = ids[key];
       const k = typeof key === "symbol" ? `syms[${syms.indexOf(key)}]` : esc(key);
       const isPresent = `${k} in input`;
-      const schema = shape[key];
-      const optin = schema?._zod?.optin;
+      const schema2 = shape[key];
+      const optin = schema2?._zod?.optin;
       const isOptionalIn = optin !== void 0;
-      const isOptionalOut = schema?._zod?.optout === "optional";
+      const isOptionalOut = schema2?._zod?.optout === "optional";
       doc.write(`const ${id} = ${parseStr(k)};`);
       if (isOptionalIn && isOptionalOut) {
         const assign = optin === "optional" ? `${id}_present` : `${id}.value !== undefined || ${id}_present`;
@@ -6159,8 +10108,8 @@ var $ZodXor = /* @__PURE__ */ $constructor("$ZodXor", (inst, def) => {
     });
   };
 });
-function getDiscriminatedOption(union2, value) {
-  const internals = union2._zod;
+function getDiscriminatedOption(union3, value) {
+  const internals = union3._zod;
   let map2 = internals.bag.optionsMap;
   if (!map2) {
     map2 = discriminatorMap(internals.def);
@@ -7126,8 +11075,8 @@ function handleReadonlyResult(payload) {
     payload.value = Object.freeze(payload.value);
   return payload;
 }
-function leafPattern(schema) {
-  const def = schema._zod.def;
+function leafPattern(schema2) {
+  const def = schema2._zod.def;
   let pattern = def.pattern;
   let isInt = !!def.format?.includes("int");
   let minimum;
@@ -7150,13 +11099,13 @@ function leafPattern(schema) {
     return "(?!)";
   if (minimum !== void 0 || maximum !== void 0)
     return string({ minimum, maximum }).source;
-  const own2 = schema._zod.pattern;
+  const own2 = schema2._zod.pattern;
   return (isInt && own2 === number ? integer2 : own2)?.source;
 }
-function partPattern(schema) {
-  const def = schema._zod.def;
-  const own2 = schema._zod.pattern?.source;
-  const inner = def.innerType ?? schema._zod.innerType;
+function partPattern(schema2) {
+  const def = schema2._zod.def;
+  const own2 = schema2._zod.pattern?.source;
+  const inner = def.innerType ?? schema2._zod.innerType;
   if (inner) {
     const before2 = inner._zod.pattern?.source;
     const after = partPattern(inner);
@@ -7170,7 +11119,7 @@ function partPattern(schema) {
     if (sources.every(Boolean))
       return `^(${sources.map((s) => cleanRegex(s)).join("|")})$`;
   }
-  return leafPattern(schema);
+  return leafPattern(schema2);
 }
 var $ZodTemplateLiteral = /* @__PURE__ */ $constructor("$ZodTemplateLiteral", (inst, def) => {
   $ZodType.init(inst, def);
@@ -15196,11 +19145,11 @@ var $ZodRegistry = class {
     this._map = /* @__PURE__ */ new WeakMap();
     this._idmap = /* @__PURE__ */ new Map();
   }
-  add(schema, ..._meta) {
+  add(schema2, ..._meta) {
     const meta3 = _meta[0];
-    this._map.set(schema, meta3);
+    this._map.set(schema2, meta3);
     if (meta3 && typeof meta3 === "object" && "id" in meta3) {
-      this._idmap.set(meta3.id, schema);
+      this._idmap.set(meta3.id, schema2);
     }
     return this;
   }
@@ -15209,26 +19158,26 @@ var $ZodRegistry = class {
     this._idmap = /* @__PURE__ */ new Map();
     return this;
   }
-  remove(schema) {
-    const meta3 = this._map.get(schema);
+  remove(schema2) {
+    const meta3 = this._map.get(schema2);
     if (meta3 && typeof meta3 === "object" && "id" in meta3) {
       this._idmap.delete(meta3.id);
     }
-    this._map.delete(schema);
+    this._map.delete(schema2);
     return this;
   }
-  get(schema) {
-    const p = schema._zod.parent;
+  get(schema2) {
+    const p = schema2._zod.parent;
     if (p) {
       const pm = { ...this.get(p) ?? {} };
       delete pm.id;
-      const f = { ...pm, ...this._map.get(schema) };
+      const f = { ...pm, ...this._map.get(schema2) };
       return Object.keys(f).length ? f : void 0;
     }
-    return this._map.get(schema);
+    return this._map.get(schema2);
   }
-  has(schema) {
-    return this._map.has(schema);
+  has(schema2) {
+    return this._map.has(schema2);
   }
 };
 function registry() {
@@ -15253,31 +19202,31 @@ var ZodCompileUnsupportedError = class extends Error {
     this.islandable = islandable;
   }
 };
-function compileValidator(schema, parser) {
+function compileValidator(schema2, parser) {
   try {
-    return compileFn(schema, { assertOnly: true });
+    return compileFn(schema2, { assertOnly: true });
   } catch {
     return parser;
   }
 }
-function compile(schema, options) {
+function compile(schema2, options) {
   try {
-    const parser = compileFn(schema);
-    const clone2 = withParser(schema, parser);
-    clone2._zod.bag.validator = compileValidator(schema, parser);
+    const parser = compileFn(schema2);
+    const clone2 = withParser(schema2, parser);
+    clone2._zod.bag.validator = compileValidator(schema2, parser);
     return clone2;
   } catch (err) {
     if (options?.strict)
       throw err;
-    return schema;
+    return schema2;
   }
 }
-function withParser(schema, parser) {
-  if (isRecursiveSchema(schema)) {
+function withParser(schema2, parser) {
+  if (isRecursiveSchema(schema2)) {
     throw new ZodCompileUnsupportedError("a schema whose subtree contains a reference cycle");
   }
-  const clone2 = clone(schema);
-  const liveRun = schema._zod.run;
+  const clone2 = clone(schema2);
+  const liveRun = schema2._zod.run;
   const originalRun = liveRun.__originalRun ?? liveRun;
   const wrapped = (payload, ctx) => {
     if (ctx?.async || ctx?.direction === "backward" || ctx?.skipChecks || ctx?.[FALLBACK_FLAG]) {
@@ -15300,7 +19249,7 @@ function withParser(schema, parser) {
   clone2._zod.bag.validator = parser;
   clone2._zod.run = wrapped;
   if (!liveRun.__originalRun)
-    installCompiledUserMethods(clone2, schema, parser);
+    installCompiledUserMethods(clone2, schema2, parser);
   return clone2;
 }
 function installCompiledUserMethods(target, source, parser) {
@@ -15327,10 +19276,10 @@ function installCompiledUserMethods(target, source, parser) {
     };
   }
 }
-function compileFn(schema, options) {
+function compileFn(schema2, options) {
   let recursive2 = true;
   try {
-    recursive2 = isRecursiveSchema(schema);
+    recursive2 = isRecursiveSchema(schema2);
   } catch {
   }
   if (recursive2) {
@@ -15343,7 +19292,7 @@ function compileFn(schema, options) {
     definite: true
   };
   const doc = new Doc(["input"]);
-  const outputAccessor = generateCheck(doc, ctx, schema, "input", !options?.assertOnly);
+  const outputAccessor = generateCheck(doc, ctx, schema2, "input", !options?.assertOnly);
   doc.write(outputAccessor === null ? `return true;` : `return ${outputAccessor};`);
   const constantNames = ["INVALID", ...ctx.constants.keys()];
   const constantValues = [INVALID, ...ctx.constants.values()];
@@ -15383,20 +19332,20 @@ function addUserConstant(ctx, fn) {
 function newVar(ctx) {
   return `v${ctx.varCounter++}`;
 }
-function runtimeRun(schema, value) {
-  const result = schema._zod.run({ value, issues: [] }, {});
+function runtimeRun(schema2, value) {
+  const result = schema2._zod.run({ value, issues: [] }, {});
   if (result && typeof result.then === "function")
     return INVALID;
   const r = result;
   return r.issues.length === 0 ? r.value : INVALID;
 }
-function compileChild(doc, ctx, schema, accessor, needsValue = true) {
+function compileChild(doc, ctx, schema2, accessor, needsValue = true) {
   const contentLen = doc.content.length;
   const constantCount = ctx.constants.size;
   const constantCounter = ctx.constantCounter;
   const varCounter = ctx.varCounter;
   try {
-    return generateCheck(doc, ctx, schema, accessor, needsValue);
+    return generateCheck(doc, ctx, schema2, accessor, needsValue);
   } catch (err) {
     if (!(err instanceof ZodCompileUnsupportedError) || !err.islandable)
       throw err;
@@ -15408,12 +19357,12 @@ function compileChild(doc, ctx, schema, accessor, needsValue = true) {
     }
     ctx.constantCounter = constantCounter;
     ctx.varCounter = varCounter;
-    return emitRuntimeIsland(doc, ctx, schema, accessor);
+    return emitRuntimeIsland(doc, ctx, schema2, accessor);
   }
 }
-function emitRuntimeIsland(doc, ctx, schema, accessor) {
+function emitRuntimeIsland(doc, ctx, schema2, accessor) {
   ctx.definite = false;
-  const schemaConst = addConstant(ctx, schema);
+  const schemaConst = addConstant(ctx, schema2);
   const runConst = addConstant(ctx, runtimeRun);
   const outVar = newVar(ctx);
   doc.write(`const ${outVar} = ${runConst}(${schemaConst}, ${accessor});`);
@@ -15428,8 +19377,8 @@ var WHEN_DEFAULTED_CHECKS = /* @__PURE__ */ new Set([
   "min_length",
   "length_equals"
 ]);
-function generateChecks(doc, ctx, schema, accessor) {
-  const schemaChecks = schema._zod.def.checks;
+function generateChecks(doc, ctx, schema2, accessor) {
+  const schemaChecks = schema2._zod.def.checks;
   if (!schemaChecks || schemaChecks.length === 0)
     return accessor;
   let currentAccessor = accessor;
@@ -15800,8 +19749,8 @@ function generateStringFormatCheck(doc, ctx, def, accessor, needsValue = true) {
   }
   return accessor;
 }
-function generateCheck(doc, ctx, schema, accessor, needsValue = true) {
-  const def = schema._zod.def;
+function generateCheck(doc, ctx, schema2, accessor, needsValue = true) {
+  const def = schema2._zod.def;
   const type = def.type;
   if (def.coerce) {
     throw new ZodCompileUnsupportedError(`coercion (z.coerce.${type}())`);
@@ -15810,16 +19759,16 @@ function generateCheck(doc, ctx, schema, accessor, needsValue = true) {
   let typeAccessor;
   switch (type) {
     case "string":
-      typeAccessor = generateStringCheck(doc, ctx, schema, accessor, buildsValue);
+      typeAccessor = generateStringCheck(doc, ctx, schema2, accessor, buildsValue);
       break;
     case "number":
-      typeAccessor = generateNumberCheck(doc, schema, accessor);
+      typeAccessor = generateNumberCheck(doc, schema2, accessor);
       break;
     case "boolean":
       typeAccessor = generateBooleanCheck(doc, accessor);
       break;
     case "bigint":
-      typeAccessor = generateBigIntCheck(doc, schema, accessor);
+      typeAccessor = generateBigIntCheck(doc, schema2, accessor);
       break;
     case "symbol":
       typeAccessor = generateSymbolCheck(doc, accessor);
@@ -15848,79 +19797,79 @@ function generateCheck(doc, ctx, schema, accessor, needsValue = true) {
       typeAccessor = generateDateCheck(doc, accessor);
       break;
     case "object":
-      typeAccessor = generateObjectCheck(doc, ctx, schema, accessor, buildsValue);
+      typeAccessor = generateObjectCheck(doc, ctx, schema2, accessor, buildsValue);
       break;
     case "optional":
-      typeAccessor = generateOptionalCheck(doc, ctx, schema, accessor, buildsValue);
+      typeAccessor = generateOptionalCheck(doc, ctx, schema2, accessor, buildsValue);
       break;
     case "nullable":
-      typeAccessor = generateNullableCheck(doc, ctx, schema, accessor, buildsValue);
+      typeAccessor = generateNullableCheck(doc, ctx, schema2, accessor, buildsValue);
       break;
     case "array":
-      typeAccessor = generateArrayCheck(doc, ctx, schema, accessor, buildsValue);
+      typeAccessor = generateArrayCheck(doc, ctx, schema2, accessor, buildsValue);
       break;
     case "literal":
-      typeAccessor = generateLiteralCheck(doc, ctx, schema, accessor);
+      typeAccessor = generateLiteralCheck(doc, ctx, schema2, accessor);
       break;
     case "enum":
-      typeAccessor = generateEnumCheck(doc, ctx, schema, accessor);
+      typeAccessor = generateEnumCheck(doc, ctx, schema2, accessor);
       break;
     case "readonly": {
-      const innerOut = generateWrapperCheck(doc, ctx, schema, accessor);
+      const innerOut = generateWrapperCheck(doc, ctx, schema2, accessor);
       const frozenVar = newVar(ctx);
       doc.write(`const ${frozenVar} = Object.freeze(${innerOut});`);
       typeAccessor = frozenVar;
       break;
     }
     case "success":
-      generateWrapperCheck(doc, ctx, schema, accessor);
+      generateWrapperCheck(doc, ctx, schema2, accessor);
       typeAccessor = "true";
       break;
     case "default":
     case "prefault":
-      typeAccessor = generateDefaultCheck(doc, ctx, schema, accessor);
+      typeAccessor = generateDefaultCheck(doc, ctx, schema2, accessor);
       break;
     case "nonoptional":
-      typeAccessor = generateNonOptionalCheck(doc, ctx, schema, accessor);
+      typeAccessor = generateNonOptionalCheck(doc, ctx, schema2, accessor);
       break;
     case "tuple":
-      typeAccessor = generateTupleCheck(doc, ctx, schema, accessor);
+      typeAccessor = generateTupleCheck(doc, ctx, schema2, accessor);
       break;
     case "union":
-      typeAccessor = generateUnionCheck(doc, ctx, schema, accessor);
+      typeAccessor = generateUnionCheck(doc, ctx, schema2, accessor);
       break;
     case "intersection":
-      typeAccessor = generateIntersectionCheck(doc, ctx, schema, accessor);
+      typeAccessor = generateIntersectionCheck(doc, ctx, schema2, accessor);
       break;
     case "record":
-      typeAccessor = generateRecordCheck(doc, ctx, schema, accessor);
+      typeAccessor = generateRecordCheck(doc, ctx, schema2, accessor);
       break;
     case "map":
-      typeAccessor = generateMapCheck(doc, ctx, schema, accessor);
+      typeAccessor = generateMapCheck(doc, ctx, schema2, accessor);
       break;
     case "set":
-      typeAccessor = generateSetCheck(doc, ctx, schema, accessor);
+      typeAccessor = generateSetCheck(doc, ctx, schema2, accessor);
       break;
     case "file":
       typeAccessor = generateFileCheck(doc, accessor);
       break;
     case "template_literal":
-      typeAccessor = generateTemplateLiteralCheck(doc, ctx, schema, accessor);
+      typeAccessor = generateTemplateLiteralCheck(doc, ctx, schema2, accessor);
       break;
     case "lazy":
-      typeAccessor = generateLazyCheck(doc, ctx, schema, accessor);
+      typeAccessor = generateLazyCheck(doc, ctx, schema2, accessor);
       break;
     case "pipe":
-      typeAccessor = generatePipeCheck(doc, ctx, schema, accessor);
+      typeAccessor = generatePipeCheck(doc, ctx, schema2, accessor);
       break;
     case "custom":
-      typeAccessor = generateCustomCheck(doc, ctx, schema, accessor);
+      typeAccessor = generateCustomCheck(doc, ctx, schema2, accessor);
       break;
     case "transform":
-      typeAccessor = generateTransformCheck(doc, ctx, schema, accessor);
+      typeAccessor = generateTransformCheck(doc, ctx, schema2, accessor);
       break;
     case "catch":
-      typeAccessor = generateCatchCheck(doc, ctx, schema, accessor);
+      typeAccessor = generateCatchCheck(doc, ctx, schema2, accessor);
       break;
     default: {
       throw new ZodCompileUnsupportedError(`schema type ${type}`);
@@ -15928,18 +19877,18 @@ function generateCheck(doc, ctx, schema, accessor, needsValue = true) {
   }
   if (typeAccessor === null)
     return null;
-  return generateChecks(doc, ctx, schema, typeAccessor);
+  return generateChecks(doc, ctx, schema2, typeAccessor);
 }
-function generateStringCheck(doc, ctx, schema, accessor, needsValue = true) {
+function generateStringCheck(doc, ctx, schema2, accessor, needsValue = true) {
   doc.write(`if (typeof ${accessor} !== "string") return INVALID;`);
-  const def = schema._zod.def;
+  const def = schema2._zod.def;
   if (def.format === void 0)
     return accessor;
   return generateStringFormatCheck(doc, ctx, def, accessor, needsValue);
 }
-function generateNumberCheck(doc, schema, accessor) {
+function generateNumberCheck(doc, schema2, accessor) {
   doc.write(`if (typeof ${accessor} !== "number" || !Number.isFinite(${accessor})) return INVALID;`);
-  const def = schema._zod.def;
+  const def = schema2._zod.def;
   if (def.check === "number_format" && def.format) {
     generateNumberFormatCheck(doc, { format: def.format }, accessor);
   }
@@ -15949,9 +19898,9 @@ function generateBooleanCheck(doc, accessor) {
   doc.write(`if (typeof ${accessor} !== "boolean") return INVALID;`);
   return accessor;
 }
-function generateBigIntCheck(doc, schema, accessor) {
+function generateBigIntCheck(doc, schema2, accessor) {
   doc.write(`if (typeof ${accessor} !== "bigint") return INVALID;`);
-  const def = schema._zod.def;
+  const def = schema2._zod.def;
   if (def.format) {
     switch (def.format) {
       case "int64":
@@ -15988,8 +19937,8 @@ function generateDateCheck(doc, accessor) {
   doc.write(`if (!(${accessor} instanceof Date) || Number.isNaN(${accessor}.getTime())) return INVALID;`);
   return accessor;
 }
-function generateObjectCheck(doc, ctx, schema, accessor, buildsValue = true) {
-  const def = schema._zod.def;
+function generateObjectCheck(doc, ctx, schema2, accessor, buildsValue = true) {
+  const def = schema2._zod.def;
   doc.write(`if (typeof ${accessor} !== "object" || ${accessor} === null || Array.isArray(${accessor})) return INVALID;`);
   const shape = def.shape;
   const keys = Object.keys(shape);
@@ -16107,9 +20056,9 @@ function generateObjectCheck(doc, ctx, schema, accessor, buildsValue = true) {
   }
   return outputVar;
 }
-function generateOptionalCheck(doc, ctx, schema, accessor, buildsValue = true) {
-  const def = schema._zod.def;
-  if (isExactOptional(schema)) {
+function generateOptionalCheck(doc, ctx, schema2, accessor, buildsValue = true) {
+  const def = schema2._zod.def;
+  if (isExactOptional(schema2)) {
     return generateCheck(doc, ctx, def.innerType, accessor, buildsValue);
   }
   if (def.innerType._zod.optin === "defaulted") {
@@ -16146,16 +20095,16 @@ function generateOptionalCheck(doc, ctx, schema, accessor, buildsValue = true) {
   doc.write(`}`);
   return outputVar;
 }
-function isExactOptional(schema) {
-  return schema._zod.traits?.has("$ZodExactOptional") === true;
+function isExactOptional(schema2) {
+  return schema2._zod.traits?.has("$ZodExactOptional") === true;
 }
-function requiresPresenceCheck(schema) {
-  return schema._zod.optin === void 0 && fastPathAcceptsAbsence(schema);
+function requiresPresenceCheck(schema2) {
+  return schema2._zod.optin === void 0 && fastPathAcceptsAbsence(schema2);
 }
-function fastPathAcceptsAbsence(schema) {
-  if (schema._zod.def.coerce)
+function fastPathAcceptsAbsence(schema2) {
+  if (schema2._zod.def.coerce)
     return true;
-  const def = schema._zod.def;
+  const def = schema2._zod.def;
   switch (def.type) {
     case "any":
     case "unknown":
@@ -16190,7 +20139,7 @@ function fastPathAcceptsAbsence(schema) {
     case "literal":
       return !!def.values?.includes(void 0);
     case "enum":
-      return !!schema._zod.values?.has(void 0);
+      return !!schema2._zod.values?.has(void 0);
     case "optional":
     case "nullable":
     case "readonly":
@@ -16210,14 +20159,14 @@ function fastPathAcceptsAbsence(schema) {
       return true;
   }
 }
-function dropsWhenAbsent(schema) {
-  return schema._zod.optin === "optional" && schema._zod.optout === "optional";
+function dropsWhenAbsent(schema2) {
+  return schema2._zod.optin === "optional" && schema2._zod.optout === "optional";
 }
-function mayOmitUndefined(schema) {
-  return (schema._zod.optin !== "defaulted" || schema._zod.optout === "optional") && mayOutputUndefined(schema);
+function mayOmitUndefined(schema2) {
+  return (schema2._zod.optin !== "defaulted" || schema2._zod.optout === "optional") && mayOutputUndefined(schema2);
 }
-function mayOutputUndefined(schema) {
-  const def = schema._zod.def;
+function mayOutputUndefined(schema2) {
+  const def = schema2._zod.def;
   switch (def.type) {
     case "string":
     case "number":
@@ -16241,7 +20190,7 @@ function mayOutputUndefined(schema) {
     case "literal":
       return !!def.values?.includes(void 0);
     case "enum":
-      return !!schema._zod.values?.has(void 0);
+      return !!schema2._zod.values?.has(void 0);
     case "optional":
       return true;
     case "nullable":
@@ -16258,8 +20207,8 @@ function mayOutputUndefined(schema) {
       return true;
   }
 }
-function generateNullableCheck(doc, ctx, schema, accessor, buildsValue = true) {
-  const def = schema._zod.def;
+function generateNullableCheck(doc, ctx, schema2, accessor, buildsValue = true) {
+  const def = schema2._zod.def;
   const outputVar = buildsValue ? newVar(ctx) : null;
   if (outputVar)
     doc.write(`let ${outputVar} = null;`);
@@ -16272,8 +20221,8 @@ function generateNullableCheck(doc, ctx, schema, accessor, buildsValue = true) {
   doc.write(`}`);
   return outputVar;
 }
-function generateArrayCheck(doc, ctx, schema, accessor, buildsValue = true) {
-  const def = schema._zod.def;
+function generateArrayCheck(doc, ctx, schema2, accessor, buildsValue = true) {
+  const def = schema2._zod.def;
   doc.write(`if (!Array.isArray(${accessor})) return INVALID;`);
   const outputVar = buildsValue ? newVar(ctx) : null;
   const iVar = newVar(ctx);
@@ -16290,8 +20239,8 @@ function generateArrayCheck(doc, ctx, schema, accessor, buildsValue = true) {
   doc.write(`}`);
   return outputVar;
 }
-function generateLiteralCheck(doc, ctx, schema, accessor) {
-  const def = schema._zod.def;
+function generateLiteralCheck(doc, ctx, schema2, accessor) {
+  const def = schema2._zod.def;
   const values = def.values;
   if (values.length !== 1) {
     const literalSet = addConstant(ctx, new Set(values));
@@ -16319,8 +20268,8 @@ function generateLiteralCheck(doc, ctx, schema, accessor) {
   }
   return accessor;
 }
-function generateEnumCheck(doc, ctx, schema, accessor) {
-  const values = schema._zod.values;
+function generateEnumCheck(doc, ctx, schema2, accessor) {
+  const values = schema2._zod.values;
   if (!values) {
     throw new ZodCompileUnsupportedError("enum schema without enumerated values");
   }
@@ -16328,15 +20277,15 @@ function generateEnumCheck(doc, ctx, schema, accessor) {
   doc.write(`if (!${enumSet}.has(${accessor})) return INVALID;`);
   return accessor;
 }
-function generateWrapperCheck(doc, ctx, schema, accessor) {
-  const def = schema._zod.def;
+function generateWrapperCheck(doc, ctx, schema2, accessor) {
+  const def = schema2._zod.def;
   return generateCheck(doc, ctx, def.innerType, accessor);
 }
-function generateDefaultCheck(doc, ctx, schema, accessor) {
-  const def = schema._zod.def;
-  const descriptor = Object.getOwnPropertyDescriptor(schema._zod.def, "defaultValue");
-  const defaultGetter = descriptor ? () => schema._zod.def.defaultValue : void 0;
-  if (schema._zod.def.type === "prefault") {
+function generateDefaultCheck(doc, ctx, schema2, accessor) {
+  const def = schema2._zod.def;
+  const descriptor = Object.getOwnPropertyDescriptor(schema2._zod.def, "defaultValue");
+  const defaultGetter = descriptor ? () => schema2._zod.def.defaultValue : void 0;
+  if (schema2._zod.def.type === "prefault") {
     if (!defaultGetter) {
       return generateCheck(doc, ctx, def.innerType, accessor);
     }
@@ -16372,16 +20321,16 @@ function generateDefaultCheck(doc, ctx, schema, accessor) {
   }
   return outputVar;
 }
-function generateNonOptionalCheck(doc, ctx, schema, accessor) {
-  const def = schema._zod.def;
+function generateNonOptionalCheck(doc, ctx, schema2, accessor) {
+  const def = schema2._zod.def;
   const innerOutput = generateCheck(doc, ctx, def.innerType, accessor);
   const outputVar = newVar(ctx);
   doc.write(`const ${outputVar} = ${innerOutput};`);
   doc.write(`if (${outputVar} === undefined) return INVALID;`);
   return outputVar;
 }
-function generateTupleCheck(doc, ctx, schema, accessor) {
-  const def = schema._zod.def;
+function generateTupleCheck(doc, ctx, schema2, accessor) {
+  const def = schema2._zod.def;
   const items = def.items;
   const rest = def.rest;
   doc.write(`if (!Array.isArray(${accessor})) return INVALID;`);
@@ -16455,8 +20404,8 @@ function getTupleOptStart2(items, key) {
   }
   return 0;
 }
-function generateUnionCheck(doc, ctx, schema, accessor) {
-  const def = schema._zod.def;
+function generateUnionCheck(doc, ctx, schema2, accessor) {
+  const def = schema2._zod.def;
   const options = def.options;
   if (def.discriminator) {
     return generateDiscriminatedUnionCheck(doc, ctx, def, accessor);
@@ -16556,8 +20505,8 @@ function literalEquality(ctx, accessor, value) {
   }
   throw new ZodCompileUnsupportedError(`literal discriminator value ${String(value)}`);
 }
-function generateIntersectionCheck(doc, ctx, schema, accessor) {
-  const def = schema._zod.def;
+function generateIntersectionCheck(doc, ctx, schema2, accessor) {
+  const def = schema2._zod.def;
   ctx.definite = false;
   const leftOutput = compileChild(doc, ctx, def.left, accessor);
   const rightOutput = compileChild(doc, ctx, def.right, accessor);
@@ -16567,8 +20516,8 @@ function generateIntersectionCheck(doc, ctx, schema, accessor) {
   doc.write(`if (!${mergedVar}.valid) return INVALID;`);
   return `${mergedVar}.data`;
 }
-function generateRecordCheck(doc, ctx, schema, accessor) {
-  const def = schema._zod.def;
+function generateRecordCheck(doc, ctx, schema2, accessor) {
+  const def = schema2._zod.def;
   const isPlainObjectConst = addConstant(ctx, isPlainObject);
   doc.write(`if (!${isPlainObjectConst}(${accessor})) return INVALID;`);
   const outputVar = newVar(ctx);
@@ -16671,8 +20620,8 @@ function literalPropertyKey(ctx, key) {
     return esc(key);
   return addConstant(ctx, key);
 }
-function generateMapCheck(doc, ctx, schema, accessor) {
-  const def = schema._zod.def;
+function generateMapCheck(doc, ctx, schema2, accessor) {
+  const def = schema2._zod.def;
   doc.write(`if (!(${accessor} instanceof Map)) return INVALID;`);
   const outputVar = newVar(ctx);
   const kVar = newVar(ctx);
@@ -16687,8 +20636,8 @@ function generateMapCheck(doc, ctx, schema, accessor) {
   doc.write(`}`);
   return outputVar;
 }
-function generateSetCheck(doc, ctx, schema, accessor) {
-  const def = schema._zod.def;
+function generateSetCheck(doc, ctx, schema2, accessor) {
+  const def = schema2._zod.def;
   doc.write(`if (!(${accessor} instanceof Set)) return INVALID;`);
   const outputVar = newVar(ctx);
   const valVar = newVar(ctx);
@@ -16705,9 +20654,9 @@ function generateFileCheck(doc, accessor) {
   doc.write(`if (!(${accessor} instanceof File)) return INVALID;`);
   return accessor;
 }
-function generateTemplateLiteralCheck(doc, ctx, schema, accessor) {
+function generateTemplateLiteralCheck(doc, ctx, schema2, accessor) {
   doc.write(`if (typeof ${accessor} !== "string") return INVALID;`);
-  const pattern = schema._zod.pattern;
+  const pattern = schema2._zod.pattern;
   if (pattern) {
     const patternConst = addConstant(ctx, pattern);
     doc.write(`${patternConst}.lastIndex = 0;`);
@@ -16715,8 +20664,8 @@ function generateTemplateLiteralCheck(doc, ctx, schema, accessor) {
   }
   return accessor;
 }
-function generateLazyCheck(doc, ctx, schema, accessor) {
-  const def = schema._zod.def;
+function generateLazyCheck(doc, ctx, schema2, accessor) {
+  const def = schema2._zod.def;
   const getterConst = addUserConstant(ctx, def.getter);
   const cacheConst = addConstant(ctx, { parser: null });
   doc.write(`if (!${cacheConst}.parser) {`);
@@ -16735,8 +20684,8 @@ function generateLazyCheck(doc, ctx, schema, accessor) {
   doc.write(`if (${outputVar} === INVALID) return INVALID;`);
   return outputVar;
 }
-function generatePipeCheck(doc, ctx, schema, accessor) {
-  const def = schema._zod.def;
+function generatePipeCheck(doc, ctx, schema2, accessor) {
+  const def = schema2._zod.def;
   const inputOutput = generateCheck(doc, ctx, def.in, accessor);
   if (def.transform) {
     if (isAsyncFunction(def.transform)) {
@@ -16762,8 +20711,8 @@ function generatePipeCheck(doc, ctx, schema, accessor) {
 function isAsyncFunction(fn) {
   return typeof fn === "function" && (fn.constructor.name === "AsyncFunction" || fn[Symbol.toStringTag] === "AsyncFunction");
 }
-function generateCustomCheck(doc, ctx, schema, accessor) {
-  const def = schema._zod.def;
+function generateCustomCheck(doc, ctx, schema2, accessor) {
+  const def = schema2._zod.def;
   if (def.fn) {
     if (isAsyncFunction(def.fn)) {
       throw new ZodCompileAsyncError("z.compile: async custom predicates are not supported");
@@ -16788,8 +20737,8 @@ function runtimeCatch(innerSchema, catchValue, value) {
     return r.value;
   return catchValue();
 }
-function generateCatchCheck(doc, ctx, schema, accessor) {
-  const def = schema._zod.def;
+function generateCatchCheck(doc, ctx, schema2, accessor) {
+  const def = schema2._zod.def;
   if (!def.catchValue[CONSTANT_CATCH]) {
     throw new ZodCompileUnsupportedError("catch with a callback (only a constant catch value compiles)", false);
   }
@@ -16811,8 +20760,8 @@ function generateCatchCheck(doc, ctx, schema, accessor) {
   doc.write(`}`);
   return outputVar;
 }
-function generateTransformCheck(doc, ctx, schema, accessor) {
-  const def = schema._zod.def;
+function generateTransformCheck(doc, ctx, schema2, accessor) {
+  const def = schema2._zod.def;
   if (def.transform) {
     if (isAsyncFunction(def.transform)) {
       throw new ZodCompileAsyncError("z.compile: async transforms are not supported");
@@ -17487,11 +21436,11 @@ function _endsWith(suffix, params) {
   });
 }
 // @__NO_SIDE_EFFECTS__
-function _property(property, schema, params) {
+function _property(property, schema2, params) {
   return new $ZodCheckProperty({
     check: "property",
     property,
-    schema,
+    schema: schema2,
     ...normalizeParams(params)
   });
 }
@@ -17747,23 +21696,23 @@ function _promise(Class2, innerType) {
 function _custom(Class2, fn, _params) {
   const norm = normalizeParams(_params);
   norm.abort ?? (norm.abort = true);
-  const schema = new Class2({
+  const schema2 = new Class2({
     type: "custom",
     check: "custom",
     fn,
     ...norm
   });
-  return schema;
+  return schema2;
 }
 // @__NO_SIDE_EFFECTS__
 function _refine(Class2, fn, _params) {
-  const schema = new Class2({
+  const schema2 = new Class2({
     type: "custom",
     check: "custom",
     fn,
     ...normalizeParams(_params)
   });
-  return schema;
+  return schema2;
 }
 // @__NO_SIDE_EFFECTS__
 function _superRefine(fn, params) {
@@ -17929,8 +21878,8 @@ function initializeContext(params) {
     external: params?.external ?? void 0
   };
 }
-function handleUnrepresentable(schema, ctx, json2, params, message) {
-  const result = typeof ctx.unrepresentable === "function" ? ctx.unrepresentable({ zodSchema: schema, path: params.path, message }) : ctx.unrepresentable;
+function handleUnrepresentable(schema2, ctx, json2, params, message) {
+  const result = typeof ctx.unrepresentable === "function" ? ctx.unrepresentable({ zodSchema: schema2, path: params.path, message }) : ctx.unrepresentable;
   if (result === "any")
     return false;
   if (result === void 0 || result === "throw")
@@ -17938,42 +21887,42 @@ function handleUnrepresentable(schema, ctx, json2, params, message) {
   Object.assign(json2, result);
   return true;
 }
-function processSchema(schema, ctx, _params = { path: [], schemaPath: [] }) {
+function processSchema(schema2, ctx, _params = { path: [], schemaPath: [] }) {
   var _a3;
-  const def = schema._zod.def;
-  const seen = ctx.seen.get(schema);
+  const def = schema2._zod.def;
+  const seen = ctx.seen.get(schema2);
   if (seen) {
     seen.count++;
-    const isCycle = _params.schemaPath.includes(schema);
+    const isCycle = _params.schemaPath.includes(schema2);
     if (isCycle) {
       seen.cycle = _params.path;
     }
     return seen.schema;
   }
   const result = { schema: {}, count: 1, cycle: void 0, path: _params.path };
-  ctx.seen.set(schema, result);
+  ctx.seen.set(schema2, result);
   ctx.sharedDefsExtractedFor = void 0;
   ctx.sharedEmitDoneFor = void 0;
-  const overrideSchema = schema._zod.toJSONSchema?.();
+  const overrideSchema = schema2._zod.toJSONSchema?.();
   if (overrideSchema) {
     result.schema = overrideSchema;
   } else {
     const params = {
       ..._params,
-      schemaPath: [..._params.schemaPath, schema],
+      schemaPath: [..._params.schemaPath, schema2],
       path: _params.path
     };
-    if (schema._zod.processJSONSchema) {
-      schema._zod.processJSONSchema(ctx, result.schema, params);
+    if (schema2._zod.processJSONSchema) {
+      schema2._zod.processJSONSchema(ctx, result.schema, params);
     } else {
       const _json = result.schema;
       const processor = ctx.processors[def.type];
       if (!processor) {
         throw new Error(`[toJSONSchema]: Non-representable type encountered: ${def.type}`);
       }
-      processor(schema, ctx, _json, params);
+      processor(schema2, ctx, _json, params);
     }
-    const parent = schema._zod.parent;
+    const parent = schema2._zod.parent;
     if (parent) {
       if (!result.ref)
         result.ref = parent;
@@ -17981,24 +21930,24 @@ function processSchema(schema, ctx, _params = { path: [], schemaPath: [] }) {
       ctx.seen.get(parent).isParent = true;
     }
   }
-  const meta3 = ctx.metadataRegistry.get(schema);
+  const meta3 = ctx.metadataRegistry.get(schema2);
   if (meta3)
     assignProps(result.schema, meta3);
-  if (ctx.io === "input" && isTransforming(schema)) {
+  if (ctx.io === "input" && isTransforming(schema2)) {
     delete result.schema.examples;
     delete result.schema.default;
   }
   if (ctx.io === "input" && "_prefault" in result.schema)
     (_a3 = result.schema).default ?? (_a3.default = result.schema._prefault);
   delete result.schema._prefault;
-  const _result = ctx.seen.get(schema);
+  const _result = ctx.seen.get(schema2);
   return _result.schema;
 }
 function encodeJSONPointerSegment(segment) {
   return segment.replace(/~/g, "~0").replace(/\//g, "~1");
 }
-function extractDefs(ctx, schema) {
-  const root = ctx.seen.get(schema);
+function extractDefs(ctx, schema2) {
+  const root = ctx.seen.get(schema2);
   if (!root)
     throw new Error("Unprocessed schema. This is a bug in Zod.");
   if (ctx.external && ctx.sharedDefsExtractedFor === ctx.external)
@@ -18043,11 +21992,11 @@ function extractDefs(ctx, schema) {
     seen.def = { ...seen.schema };
     if (defId)
       seen.defId = defId;
-    const schema2 = seen.schema;
-    for (const key in schema2) {
-      delete schema2[key];
+    const schema3 = seen.schema;
+    for (const key in schema3) {
+      delete schema3[key];
     }
-    schema2.$ref = ref;
+    schema3.$ref = ref;
   };
   if (ctx.cycles === "throw") {
     for (const entry of ctx.seen.entries()) {
@@ -18061,13 +22010,13 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
   }
   for (const entry of ctx.seen.entries()) {
     const seen = entry[1];
-    if (schema === entry[0]) {
+    if (schema2 === entry[0]) {
       extractToDef(entry);
       continue;
     }
     if (ctx.external) {
       const ext = ctx.external.registry.get(entry[0])?.id;
-      if (schema !== entry[0] && ext) {
+      if (schema2 !== entry[0] && ext) {
         extractToDef(entry);
         continue;
       }
@@ -18090,9 +22039,9 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
   if (ctx.external)
     ctx.sharedDefsExtractedFor = ctx.external;
 }
-function compactTypeUnion(schema) {
-  const options = schema.anyOf;
-  if (!Array.isArray(options) || options.length === 0 || schema.type !== void 0)
+function compactTypeUnion(schema2) {
+  const options = schema2.anyOf;
+  if (!Array.isArray(options) || options.length === 0 || schema2.type !== void 0)
     return;
   const types = [];
   for (const option of options) {
@@ -18110,8 +22059,8 @@ function compactTypeUnion(schema) {
         types.push(member);
     }
   }
-  delete schema.anyOf;
-  schema.type = types.length === 1 ? types[0] : types;
+  delete schema2.anyOf;
+  schema2.type = types.length === 1 ? types[0] : types;
 }
 var FOLDABLE_KEYS = /* @__PURE__ */ new Set(["type", "properties", "required", "additionalProperties"]);
 var UNION_KEYS = ["oneOf", "anyOf"];
@@ -18183,12 +22132,12 @@ function foldIntersection(json2) {
   if (!unions.length) {
     folded = foldObjects(allOf);
   } else {
-    const union2 = unions[0];
-    const keyword = UNION_KEYS.find((k) => Array.isArray(union2[k]));
-    if (Object.keys(union2).length !== 1)
+    const union3 = unions[0];
+    const keyword = UNION_KEYS.find((k) => Array.isArray(union3[k]));
+    if (Object.keys(union3).length !== 1)
       return;
-    const rest = allOf.filter((m) => m !== union2);
-    const branches = union2[keyword].map((branch) => foldObjects([...rest, branch]));
+    const rest = allOf.filter((m) => m !== union3);
+    const branches = union3[keyword].map((branch) => foldObjects([...rest, branch]));
     if (branches.some((b) => !b))
       return;
     folded = { [keyword]: branches };
@@ -18198,16 +22147,16 @@ function foldIntersection(json2) {
   delete json2.allOf;
   assignProps(json2, folded);
 }
-function finalize(ctx, schema) {
-  const root = ctx.seen.get(schema);
+function finalize(ctx, schema2) {
+  const root = ctx.seen.get(schema2);
   if (!root)
     throw new Error("Unprocessed schema. This is a bug in Zod.");
   const flattenRef = (zodSchema) => {
     const seen = ctx.seen.get(zodSchema);
     if (seen.ref === null)
       return;
-    const schema2 = seen.def ?? seen.schema;
-    const _cached = { ...schema2 };
+    const schema3 = seen.def ?? seen.schema;
+    const _cached = { ...schema3 };
     const ref = seen.ref;
     seen.ref = null;
     if (ref) {
@@ -18215,28 +22164,28 @@ function finalize(ctx, schema) {
       const refSeen = ctx.seen.get(ref);
       const refSchema = refSeen.schema;
       if (refSchema.$ref && (ctx.target === "draft-07" || ctx.target === "draft-04" || ctx.target === "openapi-3.0")) {
-        schema2.allOf = schema2.allOf ?? [];
-        schema2.allOf.push(refSchema);
+        schema3.allOf = schema3.allOf ?? [];
+        schema3.allOf.push(refSchema);
       } else {
-        assignProps(schema2, refSchema);
+        assignProps(schema3, refSchema);
       }
-      assignProps(schema2, _cached);
+      assignProps(schema3, _cached);
       const isParentRef = zodSchema._zod.parent === ref;
       if (isParentRef) {
-        for (const key in schema2) {
+        for (const key in schema3) {
           if (key === "$ref" || key === "allOf")
             continue;
           if (!(key in _cached)) {
-            delete schema2[key];
+            delete schema3[key];
           }
         }
       }
       if (refSchema.$ref && refSeen.def) {
-        for (const key in schema2) {
+        for (const key in schema3) {
           if (key === "$ref" || key === "allOf")
             continue;
-          if (key in refSeen.def && JSON.stringify(schema2[key]) === JSON.stringify(refSeen.def[key])) {
-            delete schema2[key];
+          if (key in refSeen.def && JSON.stringify(schema3[key]) === JSON.stringify(refSeen.def[key])) {
+            delete schema3[key];
           }
         }
       }
@@ -18246,13 +22195,13 @@ function finalize(ctx, schema) {
       flattenRef(parent);
       const parentSeen = ctx.seen.get(parent);
       if (parentSeen?.schema.$ref) {
-        schema2.$ref = parentSeen.schema.$ref;
+        schema3.$ref = parentSeen.schema.$ref;
         if (parentSeen.def) {
-          for (const key in schema2) {
+          for (const key in schema3) {
             if (key === "$ref" || key === "allOf")
               continue;
-            if (key in parentSeen.def && JSON.stringify(schema2[key]) === JSON.stringify(parentSeen.def[key])) {
-              delete schema2[key];
+            if (key in parentSeen.def && JSON.stringify(schema3[key]) === JSON.stringify(parentSeen.def[key])) {
+              delete schema3[key];
             }
           }
         }
@@ -18260,7 +22209,7 @@ function finalize(ctx, schema) {
     }
     ctx.override({
       zodSchema,
-      jsonSchema: schema2,
+      jsonSchema: schema3,
       path: seen.path ?? []
     });
   };
@@ -18306,13 +22255,13 @@ function finalize(ctx, schema) {
   } else {
   }
   if (ctx.external?.uri) {
-    const id = ctx.external.registry.get(schema)?.id;
+    const id = ctx.external.registry.get(schema2)?.id;
     if (!id)
       throw new Error("Schema is missing an `id` property");
     result.$id = ctx.external.uri(id);
   }
   assignProps(result, root.defId ? root.schema : root.def ?? root.schema);
-  const rootMetaId = ctx.metadataRegistry.get(schema)?.id;
+  const rootMetaId = ctx.metadataRegistry.get(schema2)?.id;
   if (rootMetaId !== void 0 && result.id === rootMetaId)
     delete result.id;
   const defs = ctx.external?.defs ?? {};
@@ -18342,10 +22291,10 @@ function finalize(ctx, schema) {
     const finalized = JSON.parse(JSON.stringify(result));
     Object.defineProperty(finalized, "~standard", {
       value: {
-        ...schema["~standard"],
+        ...schema2["~standard"],
         jsonSchema: {
-          input: createStandardJSONSchemaMethod(schema, "input", ctx.processors),
-          output: createStandardJSONSchemaMethod(schema, "output", ctx.processors)
+          input: createStandardJSONSchemaMethod(schema2, "input", ctx.processors),
+          output: createStandardJSONSchemaMethod(schema2, "output", ctx.processors)
         }
       },
       enumerable: false,
@@ -18409,18 +22358,18 @@ function isTransforming(_schema, _ctx) {
   }
   return false;
 }
-var createToJSONSchemaMethod = (schema, processors = {}) => (params) => {
+var createToJSONSchemaMethod = (schema2, processors = {}) => (params) => {
   const ctx = initializeContext({ ...params, processors });
-  processSchema(schema, ctx);
-  extractDefs(ctx, schema);
-  return finalize(ctx, schema);
+  processSchema(schema2, ctx);
+  extractDefs(ctx, schema2);
+  return finalize(ctx, schema2);
 };
-var createStandardJSONSchemaMethod = (schema, io, processors = {}) => (params) => {
+var createStandardJSONSchemaMethod = (schema2, io, processors = {}) => (params) => {
   const { libraryOptions, target } = params ?? {};
   const ctx = initializeContext({ ...libraryOptions ?? {}, target, io, processors });
-  processSchema(schema, ctx);
-  extractDefs(ctx, schema);
-  return finalize(ctx, schema);
+  processSchema(schema2, ctx);
+  extractDefs(ctx, schema2);
+  return finalize(ctx, schema2);
 };
 
 // node_modules/zod/v4/core/json-schema-processors.js
@@ -18484,13 +22433,13 @@ var contributors = {
   },
   mime_type: (agg, def) => intersectMime(agg, def.mime)
 };
-function aggregateChecks(schema) {
+function aggregateChecks(schema2) {
   const agg = {};
-  const def = schema._zod.def;
-  const list = schema._zod.traits.has("$ZodCheck") ? [schema, ...def.checks ?? []] : def.checks ?? [];
+  const def = schema2._zod.def;
+  const list = schema2._zod.traits.has("$ZodCheck") ? [schema2, ...def.checks ?? []] : def.checks ?? [];
   for (const ch of list)
     contributors[ch._zod.def.check]?.(agg, ch._zod.def);
-  const bag = schema._zod.bag;
+  const bag = schema2._zod.bag;
   if (bag.minimum !== void 0)
     narrowMin(agg, "minimum", bag.minimum);
   if (bag.exclusiveMinimum !== void 0)
@@ -18525,10 +22474,10 @@ var exactPatterns = /* @__PURE__ */ new Map([
   [base64urlCharset, base64url]
 ]);
 var exactPattern = (p) => exactPatterns.get(p) ?? p;
-var stringProcessor = (schema, ctx, _json, _params) => {
+var stringProcessor = (schema2, ctx, _json, _params) => {
   const json2 = _json;
   json2.type = "string";
-  const { minimum, maximum, format, patterns, contentEncoding, laxFormat } = aggregateChecks(schema);
+  const { minimum, maximum, format, patterns, contentEncoding, laxFormat } = aggregateChecks(schema2);
   if (typeof minimum === "number")
     json2.minLength = minimum;
   if (typeof maximum === "number")
@@ -18557,9 +22506,9 @@ var stringProcessor = (schema, ctx, _json, _params) => {
     }
   }
 };
-var numberProcessor = (schema, ctx, _json, params) => {
+var numberProcessor = (schema2, ctx, _json, params) => {
   const json2 = _json;
-  const { minimum, maximum, multipleOf, exclusiveMaximum, exclusiveMinimum, isInt } = aggregateChecks(schema);
+  const { minimum, maximum, multipleOf, exclusiveMaximum, exclusiveMinimum, isInt } = aggregateChecks(schema2);
   json2.type = isInt ? "integer" : "number";
   const exMin = typeof exclusiveMinimum === "number" && exclusiveMinimum >= (minimum ?? Number.NEGATIVE_INFINITY);
   const exMax = typeof exclusiveMaximum === "number" && exclusiveMaximum <= (maximum ?? Number.POSITIVE_INFINITY);
@@ -18590,7 +22539,7 @@ var numberProcessor = (schema, ctx, _json, params) => {
       if (Number.isFinite(divisor) && divisor !== 0)
         divisors.add(Math.abs(divisor));
       else
-        handleUnrepresentable(schema, ctx, json2, params, `A multipleOf divisor of ${divisor} cannot be represented in JSON Schema`);
+        handleUnrepresentable(schema2, ctx, json2, params, `A multipleOf divisor of ${divisor} cannot be represented in JSON Schema`);
     }
     const [first, ...rest] = divisors;
     if (first !== void 0)
@@ -18602,11 +22551,11 @@ var numberProcessor = (schema, ctx, _json, params) => {
 var booleanProcessor = (_schema, _ctx, json2, _params) => {
   json2.type = "boolean";
 };
-var bigintProcessor = (schema, ctx, json2, params) => {
-  handleUnrepresentable(schema, ctx, json2, params, "BigInt cannot be represented in JSON Schema");
+var bigintProcessor = (schema2, ctx, json2, params) => {
+  handleUnrepresentable(schema2, ctx, json2, params, "BigInt cannot be represented in JSON Schema");
 };
-var symbolProcessor = (schema, ctx, json2, params) => {
-  handleUnrepresentable(schema, ctx, json2, params, "Symbols cannot be represented in JSON Schema");
+var symbolProcessor = (schema2, ctx, json2, params) => {
+  handleUnrepresentable(schema2, ctx, json2, params, "Symbols cannot be represented in JSON Schema");
 };
 var nullProcessor = (_schema, ctx, json2, _params) => {
   if (ctx.target === "openapi-3.0") {
@@ -18617,11 +22566,11 @@ var nullProcessor = (_schema, ctx, json2, _params) => {
     json2.type = "null";
   }
 };
-var undefinedProcessor = (schema, ctx, json2, params) => {
-  handleUnrepresentable(schema, ctx, json2, params, "Undefined cannot be represented in JSON Schema");
+var undefinedProcessor = (schema2, ctx, json2, params) => {
+  handleUnrepresentable(schema2, ctx, json2, params, "Undefined cannot be represented in JSON Schema");
 };
-var voidProcessor = (schema, ctx, json2, params) => {
-  handleUnrepresentable(schema, ctx, json2, params, "Void cannot be represented in JSON Schema");
+var voidProcessor = (schema2, ctx, json2, params) => {
+  handleUnrepresentable(schema2, ctx, json2, params, "Void cannot be represented in JSON Schema");
 };
 var neverProcessor = (_schema, _ctx, json2, _params) => {
   json2.not = {};
@@ -18630,11 +22579,11 @@ var anyProcessor = (_schema, _ctx, _json, _params) => {
 };
 var unknownProcessor = (_schema, _ctx, _json, _params) => {
 };
-var dateProcessor = (schema, ctx, json2, params) => {
-  handleUnrepresentable(schema, ctx, json2, params, "Date cannot be represented in JSON Schema");
+var dateProcessor = (schema2, ctx, json2, params) => {
+  handleUnrepresentable(schema2, ctx, json2, params, "Date cannot be represented in JSON Schema");
 };
-var enumProcessor = (schema, _ctx, json2, _params) => {
-  const def = schema._zod.def;
+var enumProcessor = (schema2, _ctx, json2, _params) => {
+  const def = schema2._zod.def;
   const values = getEnumValues(def.entries);
   if (values.length === 0) {
     json2.not = {};
@@ -18646,8 +22595,8 @@ var enumProcessor = (schema, _ctx, json2, _params) => {
     json2.type = "string";
   json2.enum = values;
 };
-var literalProcessor = (schema, ctx, json2, params) => {
-  const def = schema._zod.def;
+var literalProcessor = (schema2, ctx, json2, params) => {
+  const def = schema2._zod.def;
   if (def.values.length === 0) {
     json2.not = {};
     return;
@@ -18655,10 +22604,10 @@ var literalProcessor = (schema, ctx, json2, params) => {
   const vals = [];
   for (const val of def.values) {
     if (val === void 0) {
-      if (handleUnrepresentable(schema, ctx, json2, params, "Literal `undefined` cannot be represented in JSON Schema"))
+      if (handleUnrepresentable(schema2, ctx, json2, params, "Literal `undefined` cannot be represented in JSON Schema"))
         return;
     } else if (typeof val === "bigint") {
-      if (handleUnrepresentable(schema, ctx, json2, params, "BigInt literals cannot be represented in JSON Schema"))
+      if (handleUnrepresentable(schema2, ctx, json2, params, "BigInt literals cannot be represented in JSON Schema"))
         return;
       vals.push(Number(val));
     } else {
@@ -18686,23 +22635,23 @@ var literalProcessor = (schema, ctx, json2, params) => {
     json2.enum = vals;
   }
 };
-var nanProcessor = (schema, ctx, json2, params) => {
-  handleUnrepresentable(schema, ctx, json2, params, "NaN cannot be represented in JSON Schema");
+var nanProcessor = (schema2, ctx, json2, params) => {
+  handleUnrepresentable(schema2, ctx, json2, params, "NaN cannot be represented in JSON Schema");
 };
-var templateLiteralProcessor = (schema, _ctx, json2, _params) => {
+var templateLiteralProcessor = (schema2, _ctx, json2, _params) => {
   const _json = json2;
-  const pattern = schema._zod.pattern;
+  const pattern = schema2._zod.pattern;
   if (!pattern)
     throw new Error("Pattern not found in template literal");
   _json.type = "string";
   _json.pattern = pattern.source;
 };
-var fileProcessor = (schema, _ctx, json2, _params) => {
+var fileProcessor = (schema2, _ctx, json2, _params) => {
   const _json = json2;
   _json.type = "string";
   _json.format = "binary";
   _json.contentEncoding = "binary";
-  const { minimum, maximum, mime } = aggregateChecks(schema);
+  const { minimum, maximum, mime } = aggregateChecks(schema2);
   if (minimum !== void 0)
     _json.minLength = minimum;
   if (maximum !== void 0)
@@ -18719,25 +22668,25 @@ var fileProcessor = (schema, _ctx, json2, _params) => {
 var successProcessor = (_schema, _ctx, json2, _params) => {
   json2.type = "boolean";
 };
-var customProcessor = (schema, ctx, json2, params) => {
-  handleUnrepresentable(schema, ctx, json2, params, "Custom types cannot be represented in JSON Schema");
+var customProcessor = (schema2, ctx, json2, params) => {
+  handleUnrepresentable(schema2, ctx, json2, params, "Custom types cannot be represented in JSON Schema");
 };
-var functionProcessor = (schema, ctx, json2, params) => {
-  handleUnrepresentable(schema, ctx, json2, params, "Function types cannot be represented in JSON Schema");
+var functionProcessor = (schema2, ctx, json2, params) => {
+  handleUnrepresentable(schema2, ctx, json2, params, "Function types cannot be represented in JSON Schema");
 };
-var transformProcessor = (schema, ctx, json2, params) => {
-  handleUnrepresentable(schema, ctx, json2, params, "Transforms cannot be represented in JSON Schema");
+var transformProcessor = (schema2, ctx, json2, params) => {
+  handleUnrepresentable(schema2, ctx, json2, params, "Transforms cannot be represented in JSON Schema");
 };
-var mapProcessor = (schema, ctx, json2, params) => {
-  handleUnrepresentable(schema, ctx, json2, params, "Map cannot be represented in JSON Schema");
+var mapProcessor = (schema2, ctx, json2, params) => {
+  handleUnrepresentable(schema2, ctx, json2, params, "Map cannot be represented in JSON Schema");
 };
-var setProcessor = (schema, ctx, json2, params) => {
-  handleUnrepresentable(schema, ctx, json2, params, "Set cannot be represented in JSON Schema");
+var setProcessor = (schema2, ctx, json2, params) => {
+  handleUnrepresentable(schema2, ctx, json2, params, "Set cannot be represented in JSON Schema");
 };
-var arrayProcessor = (schema, ctx, _json, params) => {
+var arrayProcessor = (schema2, ctx, _json, params) => {
   const json2 = _json;
-  const def = schema._zod.def;
-  const { minimum, maximum } = aggregateChecks(schema);
+  const def = schema2._zod.def;
+  const { minimum, maximum } = aggregateChecks(schema2);
   if (typeof minimum === "number")
     json2.minItems = minimum;
   if (typeof maximum === "number")
@@ -18748,22 +22697,22 @@ var arrayProcessor = (schema, ctx, _json, params) => {
     path: [...params.path, "items"]
   });
 };
-function inputOptin(schema) {
-  const def = schema._zod.def;
+function inputOptin(schema2) {
+  const def = schema2._zod.def;
   if (def.type === "pipe" && def.in._zod.traits.has("$ZodTransform")) {
     return inputOptin(def.out);
   }
   if (def.type === "catch") {
     return inputOptin(def.innerType);
   }
-  return schema._zod.optin;
+  return schema2._zod.optin;
 }
-var objectProcessor = (schema, ctx, _json, params) => {
+var objectProcessor = (schema2, ctx, _json, params) => {
   const json2 = _json;
-  const def = schema._zod.def;
+  const def = schema2._zod.def;
   const shape = def.shape;
   const symbolKeys = Object.getOwnPropertySymbols(shape);
-  if (symbolKeys.length && handleUnrepresentable(schema, ctx, json2, params, "Symbol keys cannot be represented in JSON Schema")) {
+  if (symbolKeys.length && handleUnrepresentable(schema2, ctx, json2, params, "Symbol keys cannot be represented in JSON Schema")) {
     return;
   }
   json2.type = "object";
@@ -18796,8 +22745,8 @@ var objectProcessor = (schema, ctx, _json, params) => {
     });
   }
 };
-var unionProcessor = (schema, ctx, json2, params) => {
-  const def = schema._zod.def;
+var unionProcessor = (schema2, ctx, json2, params) => {
+  const def = schema2._zod.def;
   const isExclusive = def.inclusive === false;
   const options = def.options.map((x, i) => processSchema(x, ctx, {
     ...params,
@@ -18809,8 +22758,8 @@ var unionProcessor = (schema, ctx, json2, params) => {
     json2.anyOf = options;
   }
 };
-var intersectionProcessor = (schema, ctx, json2, params) => {
-  const def = schema._zod.def;
+var intersectionProcessor = (schema2, ctx, json2, params) => {
+  const def = schema2._zod.def;
   const a = processSchema(def.left, ctx, {
     ...params,
     path: [...params.path, "allOf", 0]
@@ -18827,9 +22776,9 @@ var intersectionProcessor = (schema, ctx, json2, params) => {
   json2.allOf = allOf;
   ctx.intersections.push(allOf);
 };
-var tupleProcessor = (schema, ctx, _json, params) => {
+var tupleProcessor = (schema2, ctx, _json, params) => {
   const json2 = _json;
-  const def = schema._zod.def;
+  const def = schema2._zod.def;
   json2.type = "array";
   const prefixPath = ctx.target === "draft-2020-12" ? "prefixItems" : "items";
   const restPath = ctx.target === "draft-2020-12" ? "items" : ctx.target === "openapi-3.0" ? "items" : "additionalItems";
@@ -18885,7 +22834,7 @@ var tupleProcessor = (schema, ctx, _json, params) => {
     if (isClosed)
       json2.maxItems = maxItems;
   }
-  const { minimum, maximum } = aggregateChecks(schema);
+  const { minimum, maximum } = aggregateChecks(schema2);
   if (typeof minimum === "number")
     json2.minItems = minimum;
   if (typeof maximum === "number")
@@ -18954,9 +22903,9 @@ function rewriteKeyNames(ctx) {
     }
   }
 }
-var recordProcessor = (schema, ctx, _json, params) => {
+var recordProcessor = (schema2, ctx, _json, params) => {
   const json2 = _json;
-  const def = schema._zod.def;
+  const def = schema2._zod.def;
   json2.type = "object";
   const keyType = def.keyType;
   const patterns = aggregateChecks(keyType).patterns;
@@ -18981,7 +22930,7 @@ var recordProcessor = (schema, ctx, _json, params) => {
         pendingRecords.set(ctx, pending);
         ctx.deferred.push(() => rewriteKeyNames(ctx));
       }
-      pending.push(schema);
+      pending.push(schema2);
     }
     json2.additionalProperties = processSchema(def.valueType, ctx, {
       ...params,
@@ -18997,10 +22946,10 @@ var recordProcessor = (schema, ctx, _json, params) => {
     }
   }
 };
-var nullableProcessor = (schema, ctx, json2, params) => {
-  const def = schema._zod.def;
+var nullableProcessor = (schema2, ctx, json2, params) => {
+  const def = schema2._zod.def;
   const inner = processSchema(def.innerType, ctx, params);
-  const seen = ctx.seen.get(schema);
+  const seen = ctx.seen.get(schema2);
   if (ctx.target === "openapi-3.0") {
     seen.ref = def.innerType;
     json2.nullable = true;
@@ -19008,14 +22957,14 @@ var nullableProcessor = (schema, ctx, json2, params) => {
     json2.anyOf = [inner, { type: "null" }];
   }
 };
-var nonoptionalProcessor = (schema, ctx, _json, params) => {
-  const def = schema._zod.def;
+var nonoptionalProcessor = (schema2, ctx, _json, params) => {
+  const def = schema2._zod.def;
   processSchema(def.innerType, ctx, params);
-  const seen = ctx.seen.get(schema);
+  const seen = ctx.seen.get(schema2);
   seen.ref = def.innerType;
 };
 var UNREPRESENTABLE_DEFAULT = Symbol();
-function serializeDefaultValue(value, schema, ctx, json2, params) {
+function serializeDefaultValue(value, schema2, ctx, json2, params) {
   let unrepresentable = false;
   const serialized = JSON.stringify(value, (_, val) => {
     if (typeof val !== "bigint")
@@ -19025,74 +22974,74 @@ function serializeDefaultValue(value, schema, ctx, json2, params) {
   });
   if (!unrepresentable)
     return JSON.parse(serialized);
-  handleUnrepresentable(schema, ctx, json2, params, "BigInt defaults cannot be represented in JSON Schema");
+  handleUnrepresentable(schema2, ctx, json2, params, "BigInt defaults cannot be represented in JSON Schema");
   return UNREPRESENTABLE_DEFAULT;
 }
-var defaultProcessor = (schema, ctx, json2, params) => {
-  const def = schema._zod.def;
+var defaultProcessor = (schema2, ctx, json2, params) => {
+  const def = schema2._zod.def;
   processSchema(def.innerType, ctx, params);
-  const seen = ctx.seen.get(schema);
+  const seen = ctx.seen.get(schema2);
   seen.ref = def.innerType;
-  const value = serializeDefaultValue(def.defaultValue, schema, ctx, json2, params);
+  const value = serializeDefaultValue(def.defaultValue, schema2, ctx, json2, params);
   if (value !== UNREPRESENTABLE_DEFAULT)
     json2.default = value;
 };
-var prefaultProcessor = (schema, ctx, json2, params) => {
-  const def = schema._zod.def;
+var prefaultProcessor = (schema2, ctx, json2, params) => {
+  const def = schema2._zod.def;
   processSchema(def.innerType, ctx, params);
-  const seen = ctx.seen.get(schema);
+  const seen = ctx.seen.get(schema2);
   seen.ref = def.innerType;
   if (ctx.io !== "input")
     return;
-  const value = serializeDefaultValue(def.defaultValue, schema, ctx, json2, params);
+  const value = serializeDefaultValue(def.defaultValue, schema2, ctx, json2, params);
   if (value !== UNREPRESENTABLE_DEFAULT)
     json2._prefault = value;
 };
-var catchProcessor = (schema, ctx, json2, params) => {
-  const def = schema._zod.def;
+var catchProcessor = (schema2, ctx, json2, params) => {
+  const def = schema2._zod.def;
   processSchema(def.innerType, ctx, params);
-  const seen = ctx.seen.get(schema);
+  const seen = ctx.seen.get(schema2);
   seen.ref = def.innerType;
   let catchValue;
   try {
     catchValue = def.catchValue(void 0);
   } catch {
-    handleUnrepresentable(schema, ctx, json2, params, "Dynamic catch values are not supported in JSON Schema");
+    handleUnrepresentable(schema2, ctx, json2, params, "Dynamic catch values are not supported in JSON Schema");
     return;
   }
   json2.default = catchValue;
 };
-var pipeProcessor = (schema, ctx, _json, params) => {
-  const def = schema._zod.def;
+var pipeProcessor = (schema2, ctx, _json, params) => {
+  const def = schema2._zod.def;
   const inIsTransform = def.in._zod.traits.has("$ZodTransform");
   const innerType = ctx.io === "input" ? inIsTransform ? def.out : def.in : def.out;
   processSchema(innerType, ctx, params);
-  const seen = ctx.seen.get(schema);
+  const seen = ctx.seen.get(schema2);
   seen.ref = innerType;
 };
-var readonlyProcessor = (schema, ctx, json2, params) => {
-  const def = schema._zod.def;
+var readonlyProcessor = (schema2, ctx, json2, params) => {
+  const def = schema2._zod.def;
   processSchema(def.innerType, ctx, params);
-  const seen = ctx.seen.get(schema);
+  const seen = ctx.seen.get(schema2);
   seen.ref = def.innerType;
   json2.readOnly = true;
 };
-var promiseProcessor = (schema, ctx, _json, params) => {
-  const def = schema._zod.def;
+var promiseProcessor = (schema2, ctx, _json, params) => {
+  const def = schema2._zod.def;
   processSchema(def.innerType, ctx, params);
-  const seen = ctx.seen.get(schema);
+  const seen = ctx.seen.get(schema2);
   seen.ref = def.innerType;
 };
-var optionalProcessor = (schema, ctx, _json, params) => {
-  const def = schema._zod.def;
+var optionalProcessor = (schema2, ctx, _json, params) => {
+  const def = schema2._zod.def;
   processSchema(def.innerType, ctx, params);
-  const seen = ctx.seen.get(schema);
+  const seen = ctx.seen.get(schema2);
   seen.ref = def.innerType;
 };
-var lazyProcessor = (schema, ctx, _json, params) => {
-  const innerType = schema._zod.innerType;
+var lazyProcessor = (schema2, ctx, _json, params) => {
+  const innerType = schema2._zod.innerType;
   processSchema(innerType, ctx, params);
-  const seen = ctx.seen.get(schema);
+  const seen = ctx.seen.get(schema2);
   seen.ref = innerType;
 };
 var allProcessors = {
@@ -19142,8 +23091,8 @@ function toJSONSchema(input2, params) {
     const ctx2 = initializeContext({ ...params, processors: allProcessors });
     const defs = {};
     for (const entry of registry2._idmap.entries()) {
-      const [_, schema] = entry;
-      processSchema(schema, ctx2);
+      const [_, schema2] = entry;
+      processSchema(schema2, ctx2);
     }
     const schemas = {};
     const external = {
@@ -19153,9 +23102,9 @@ function toJSONSchema(input2, params) {
     };
     ctx2.external = external;
     for (const entry of registry2._idmap.entries()) {
-      const [key, schema] = entry;
-      extractDefs(ctx2, schema);
-      assignProp(schemas, key, finalize(ctx2, schema));
+      const [key, schema2] = entry;
+      extractDefs(ctx2, schema2);
+      assignProp(schemas, key, finalize(ctx2, schema2));
     }
     if (Object.keys(defs).length > 0) {
       const defsSegment = ctx2.target === "draft-2020-12" ? "$defs" : "definitions";
@@ -19224,14 +23173,14 @@ var JSONSchemaGenerator = class {
    * Process a schema to prepare it for JSON Schema generation.
    * This must be called before emit().
    */
-  process(schema, _params = { path: [], schemaPath: [] }) {
-    return processSchema(schema, this.ctx, _params);
+  process(schema2, _params = { path: [], schemaPath: [] }) {
+    return processSchema(schema2, this.ctx, _params);
   }
   /**
    * Emit the final JSON Schema after processing.
    * Must call process() first.
    */
-  emit(schema, _params) {
+  emit(schema2, _params) {
     if (_params) {
       if (_params.cycles)
         this.ctx.cycles = _params.cycles;
@@ -19242,8 +23191,8 @@ var JSONSchemaGenerator = class {
     }
     this.ctx.sharedDefsExtractedFor = void 0;
     this.ctx.sharedEmitDoneFor = void 0;
-    extractDefs(this.ctx, schema);
-    const result = finalize(this.ctx, schema);
+    extractDefs(this.ctx, schema2);
+    const result = finalize(this.ctx, schema2);
     const { "~standard": _, ...plainResult } = result;
     return plainResult;
   }
@@ -19421,7 +23370,7 @@ __export(schemas_exports2, {
   uint64: () => uint64,
   ulid: () => ulid2,
   undefined: () => _undefined3,
-  union: () => union,
+  union: () => union2,
   unknown: () => unknown,
   url: () => url,
   uuid: () => uuid2,
@@ -19594,7 +23543,7 @@ var ZodType = /* @__PURE__ */ $constructor("ZodType", (inst, def) => {
     return array(this);
   },
   or(arg) {
-    return union([this, arg]);
+    return union2([this, arg]);
   },
   and(arg) {
     return intersection(this, arg);
@@ -20336,8 +24285,8 @@ var ZodArray = /* @__PURE__ */ $constructor("ZodArray", (inst, def) => {
 function array(element, params) {
   return _array(ZodArray, element, params);
 }
-function keyof(schema) {
-  const shape = schema._zod.def.shape;
+function keyof(schema2) {
+  const shape = schema2._zod.def.shape;
   return _enum2(Object.keys(shape));
 }
 var ZodObject = /* @__PURE__ */ $constructor("ZodObject", (inst, def) => {
@@ -20420,7 +24369,7 @@ var ZodUnion = /* @__PURE__ */ $constructor("ZodUnion", (inst, def) => {
   inst._zod.processJSONSchema = (ctx, json2, params) => unionProcessor(inst, ctx, json2, params);
   inst.options = def.options;
 });
-function union(options, params) {
+function union2(options, params) {
   return new ZodUnion({
     type: "union",
     options,
@@ -20981,15 +24930,15 @@ var stringbool = (...args) => _stringbool({
 }, ...args);
 function json(params) {
   const jsonSchema = lazy(() => {
-    return union([string2(params), number2(), boolean2(), _null3(), array(jsonSchema), record(string2(), jsonSchema)]);
+    return union2([string2(params), number2(), boolean2(), _null3(), array(jsonSchema), record(string2(), jsonSchema)]);
   });
   return jsonSchema;
 }
-function preprocess(fn, schema) {
+function preprocess(fn, schema2) {
   return new ZodPreprocess({
     type: "pipe",
     in: transform(fn),
-    out: schema
+    out: schema2
   });
 }
 
@@ -21121,8 +25070,8 @@ var RECOGNIZED_KEYS = /* @__PURE__ */ new Set([
   "nullable",
   "readOnly"
 ]);
-function detectVersion(schema, defaultTarget) {
-  const $schema = schema.$schema;
+function detectVersion(schema2, defaultTarget) {
+  const $schema = schema2.$schema;
   if ($schema === "https://json-schema.org/draft/2020-12/schema") {
     return "draft-2020-12";
   }
@@ -21144,13 +25093,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path2 = ref.slice(1).split("/").filter(Boolean);
-  if (path2.length === 0) {
+  const path6 = ref.slice(1).split("/").filter(Boolean);
+  if (path6.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path2[0] === defsKey) {
-    const key = path2[1] === void 0 ? void 0 : decodeJSONPointerSegment(path2[1]);
+  if (path6[0] === defsKey) {
+    const key = path6[1] === void 0 ? void 0 : decodeJSONPointerSegment(path6[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -21350,27 +25299,27 @@ function getTupleRest(restSchema, ctx) {
   return convertSchema(restSchema, ctx);
 }
 var fullTime = /^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
-function convertBaseSchema(schema, ctx) {
-  if (schema.not !== void 0) {
-    if (typeof schema.not === "object" && Object.keys(schema.not).length === 0) {
+function convertBaseSchema(schema2, ctx) {
+  if (schema2.not !== void 0) {
+    if (typeof schema2.not === "object" && Object.keys(schema2.not).length === 0) {
       return z.never();
     }
     throw new Error("not is not supported in Zod (except { not: {} } for never)");
   }
-  if (schema.unevaluatedItems !== void 0) {
+  if (schema2.unevaluatedItems !== void 0) {
     throw new Error("unevaluatedItems is not supported");
   }
-  if (schema.unevaluatedProperties !== void 0) {
+  if (schema2.unevaluatedProperties !== void 0) {
     throw new Error("unevaluatedProperties is not supported");
   }
-  if (schema.if !== void 0 || schema.then !== void 0 || schema.else !== void 0) {
+  if (schema2.if !== void 0 || schema2.then !== void 0 || schema2.else !== void 0) {
     throw new Error("Conditional schemas (if/then/else) are not supported");
   }
-  if (schema.dependentSchemas !== void 0 || schema.dependentRequired !== void 0) {
+  if (schema2.dependentSchemas !== void 0 || schema2.dependentRequired !== void 0) {
     throw new Error("dependentSchemas and dependentRequired are not supported");
   }
-  if (schema.$ref) {
-    const refPath = schema.$ref;
+  if (schema2.$ref) {
+    const refPath = schema2.$ref;
     if (ctx.refs.has(refPath)) {
       return ctx.refs.get(refPath);
     }
@@ -21389,9 +25338,9 @@ function convertBaseSchema(schema, ctx) {
     ctx.processing.delete(refPath);
     return zodSchema2;
   }
-  if (schema.enum !== void 0) {
-    const enumValues = schema.enum;
-    if (ctx.version === "openapi-3.0" && schema.nullable === true && enumValues.length === 1 && enumValues[0] === null) {
+  if (schema2.enum !== void 0) {
+    const enumValues = schema2.enum;
+    if (ctx.version === "openapi-3.0" && schema2.nullable === true && enumValues.length === 1 && enumValues[0] === null) {
       return z.null();
     }
     if (enumValues.length === 0) {
@@ -21409,13 +25358,13 @@ function convertBaseSchema(schema, ctx) {
     }
     return z.union([literalSchemas[0], literalSchemas[1], ...literalSchemas.slice(2)]);
   }
-  if (schema.const !== void 0) {
-    return z.literal(schema.const);
+  if (schema2.const !== void 0) {
+    return z.literal(schema2.const);
   }
-  const type = schema.type;
+  const type = schema2.type;
   if (Array.isArray(type)) {
     const typeSchemas = type.map((t) => {
-      const typeSchema = { ...schema, type: t };
+      const typeSchema = { ...schema2, type: t };
       return convertBaseSchema(typeSchema, ctx);
     });
     if (typeSchemas.length === 0) {
@@ -21433,8 +25382,8 @@ function convertBaseSchema(schema, ctx) {
   switch (type) {
     case "string": {
       let stringSchema = z.string();
-      if (schema.format) {
-        const format = schema.format;
+      if (schema2.format) {
+        const format = schema2.format;
         if (format === "email") {
           stringSchema = stringSchema.check(z.email());
         } else if (format === "uri" || format === "uri-reference") {
@@ -21489,14 +25438,14 @@ function convertBaseSchema(schema, ctx) {
           stringSchema = stringSchema.check(z.ksuid());
         }
       }
-      if (typeof schema.minLength === "number") {
-        stringSchema = stringSchema.min(schema.minLength);
+      if (typeof schema2.minLength === "number") {
+        stringSchema = stringSchema.min(schema2.minLength);
       }
-      if (typeof schema.maxLength === "number") {
-        stringSchema = stringSchema.max(schema.maxLength);
+      if (typeof schema2.maxLength === "number") {
+        stringSchema = stringSchema.max(schema2.maxLength);
       }
-      if (schema.pattern) {
-        stringSchema = stringSchema.regex(new RegExp(schema.pattern));
+      if (schema2.pattern) {
+        stringSchema = stringSchema.regex(new RegExp(schema2.pattern));
       }
       zodSchema = stringSchema;
       break;
@@ -21504,24 +25453,24 @@ function convertBaseSchema(schema, ctx) {
     case "number":
     case "integer": {
       let numberSchema = type === "integer" ? z.number().int() : z.number();
-      if (typeof schema.minimum === "number" && schema.exclusiveMinimum !== true) {
-        numberSchema = numberSchema.min(schema.minimum);
+      if (typeof schema2.minimum === "number" && schema2.exclusiveMinimum !== true) {
+        numberSchema = numberSchema.min(schema2.minimum);
       }
-      if (typeof schema.maximum === "number" && schema.exclusiveMaximum !== true) {
-        numberSchema = numberSchema.max(schema.maximum);
+      if (typeof schema2.maximum === "number" && schema2.exclusiveMaximum !== true) {
+        numberSchema = numberSchema.max(schema2.maximum);
       }
-      if (typeof schema.exclusiveMinimum === "number") {
-        numberSchema = numberSchema.gt(schema.exclusiveMinimum);
-      } else if (schema.exclusiveMinimum === true && typeof schema.minimum === "number") {
-        numberSchema = numberSchema.gt(schema.minimum);
+      if (typeof schema2.exclusiveMinimum === "number") {
+        numberSchema = numberSchema.gt(schema2.exclusiveMinimum);
+      } else if (schema2.exclusiveMinimum === true && typeof schema2.minimum === "number") {
+        numberSchema = numberSchema.gt(schema2.minimum);
       }
-      if (typeof schema.exclusiveMaximum === "number") {
-        numberSchema = numberSchema.lt(schema.exclusiveMaximum);
-      } else if (schema.exclusiveMaximum === true && typeof schema.maximum === "number") {
-        numberSchema = numberSchema.lt(schema.maximum);
+      if (typeof schema2.exclusiveMaximum === "number") {
+        numberSchema = numberSchema.lt(schema2.exclusiveMaximum);
+      } else if (schema2.exclusiveMaximum === true && typeof schema2.maximum === "number") {
+        numberSchema = numberSchema.lt(schema2.maximum);
       }
-      if (typeof schema.multipleOf === "number") {
-        numberSchema = numberSchema.multipleOf(schema.multipleOf);
+      if (typeof schema2.multipleOf === "number") {
+        numberSchema = numberSchema.multipleOf(schema2.multipleOf);
       }
       zodSchema = numberSchema;
       break;
@@ -21536,15 +25485,15 @@ function convertBaseSchema(schema, ctx) {
     }
     case "object": {
       const shape = {};
-      const properties = schema.properties || {};
-      const requiredSet = new Set(schema.required || []);
-      const additionalSchema = typeof schema.additionalProperties === "object" ? convertSchema(schema.additionalProperties, ctx) : void 0;
+      const properties = schema2.properties || {};
+      const requiredSet = new Set(schema2.required || []);
+      const additionalSchema = typeof schema2.additionalProperties === "object" ? convertSchema(schema2.additionalProperties, ctx) : void 0;
       for (const [key, propSchema] of Object.entries(properties)) {
         const propZodSchema = convertSchema(propSchema, ctx);
         assignProp(shape, key, requiredSet.has(key) ? propZodSchema : propZodSchema.optional());
       }
-      if (schema.patternProperties) {
-        const patternProps = schema.patternProperties;
+      if (schema2.patternProperties) {
+        const patternProps = schema2.patternProperties;
         const patternKeys = Object.keys(patternProps);
         const looseRecords = [];
         for (const pattern of patternKeys) {
@@ -21568,7 +25517,7 @@ function convertBaseSchema(schema, ctx) {
           }
           zodSchema = result;
         }
-        if (schema.additionalProperties === false) {
+        if (schema2.additionalProperties === false) {
           const propertyKeys = Object.keys(shape);
           const patterns = patternKeys.map((p) => new RegExp(p));
           const basePatternSchema = zodSchema;
@@ -21595,7 +25544,7 @@ function convertBaseSchema(schema, ctx) {
         }
       } else {
         const objectSchema = z.object(shape);
-        if (schema.additionalProperties === false) {
+        if (schema2.additionalProperties === false) {
           zodSchema = objectSchema.strict();
         } else if (additionalSchema) {
           zodSchema = objectSchema.catchall(additionalSchema);
@@ -21603,13 +25552,13 @@ function convertBaseSchema(schema, ctx) {
           zodSchema = objectSchema.passthrough();
         }
       }
-      const hasKeyGuard = schema.propertyNames !== void 0 && schema.propertyNames !== true;
-      const minProperties = typeof schema.minProperties === "number" ? schema.minProperties : void 0;
-      const maxProperties = typeof schema.maxProperties === "number" ? schema.maxProperties : void 0;
+      const hasKeyGuard = schema2.propertyNames !== void 0 && schema2.propertyNames !== true;
+      const minProperties = typeof schema2.minProperties === "number" ? schema2.minProperties : void 0;
+      const maxProperties = typeof schema2.maxProperties === "number" ? schema2.maxProperties : void 0;
       if (hasKeyGuard || minProperties !== void 0 || maxProperties !== void 0) {
         let keySchema;
         if (hasKeyGuard) {
-          const keyJSONSchema = typeof schema.propertyNames === "object" && schema.propertyNames.type === void 0 ? { type: "string", ...schema.propertyNames } : schema.propertyNames;
+          const keyJSONSchema = typeof schema2.propertyNames === "object" && schema2.propertyNames.type === void 0 ? { type: "string", ...schema2.propertyNames } : schema2.propertyNames;
           keySchema = convertSchema(keyJSONSchema, ctx);
         }
         zodSchema = checkObjectGuards(zodSchema, { keySchema, minProperties, maxProperties });
@@ -21617,53 +25566,53 @@ function convertBaseSchema(schema, ctx) {
       break;
     }
     case "array": {
-      const prefixItems = schema.prefixItems;
-      const items = schema.items;
+      const prefixItems = schema2.prefixItems;
+      const items = schema2.items;
       if (prefixItems && Array.isArray(prefixItems)) {
-        const minItems = typeof schema.minItems === "number" ? schema.minItems : 0;
+        const minItems = typeof schema2.minItems === "number" ? schema2.minItems : 0;
         const tupleItems = prefixItems.map((item) => convertSchema(item, ctx));
         const positionalItems = applyMinItems(tupleItems, minItems);
         const rest = !Array.isArray(items) ? getTupleRest(items, ctx) : void 0;
         const tupleSchema = z.tuple(positionalItems);
         zodSchema = rest ? tupleSchema.rest(rest) : tupleSchema;
-        if (typeof schema.minItems === "number") {
-          zodSchema = zodSchema.check(z.minLength(schema.minItems));
+        if (typeof schema2.minItems === "number") {
+          zodSchema = zodSchema.check(z.minLength(schema2.minItems));
         }
-        if (typeof schema.maxItems === "number") {
-          zodSchema = zodSchema.check(z.maxLength(schema.maxItems));
+        if (typeof schema2.maxItems === "number") {
+          zodSchema = zodSchema.check(z.maxLength(schema2.maxItems));
         }
       } else if (Array.isArray(items)) {
-        const minItems = typeof schema.minItems === "number" ? schema.minItems : 0;
+        const minItems = typeof schema2.minItems === "number" ? schema2.minItems : 0;
         const tupleItems = items.map((item) => convertSchema(item, ctx));
         const positionalItems = applyMinItems(tupleItems, minItems);
-        const rest = getTupleRest(schema.additionalItems, ctx);
+        const rest = getTupleRest(schema2.additionalItems, ctx);
         const tupleSchema = z.tuple(positionalItems);
         zodSchema = rest ? tupleSchema.rest(rest) : tupleSchema;
-        if (typeof schema.minItems === "number") {
-          zodSchema = zodSchema.check(z.minLength(schema.minItems));
+        if (typeof schema2.minItems === "number") {
+          zodSchema = zodSchema.check(z.minLength(schema2.minItems));
         }
-        if (typeof schema.maxItems === "number") {
-          zodSchema = zodSchema.check(z.maxLength(schema.maxItems));
+        if (typeof schema2.maxItems === "number") {
+          zodSchema = zodSchema.check(z.maxLength(schema2.maxItems));
         }
       } else if (items !== void 0) {
         const element = convertSchema(items, ctx);
         let arraySchema = z.array(element);
-        if (typeof schema.minItems === "number") {
-          arraySchema = arraySchema.min(schema.minItems);
+        if (typeof schema2.minItems === "number") {
+          arraySchema = arraySchema.min(schema2.minItems);
         }
-        if (typeof schema.maxItems === "number") {
-          arraySchema = arraySchema.max(schema.maxItems);
+        if (typeof schema2.maxItems === "number") {
+          arraySchema = arraySchema.max(schema2.maxItems);
         }
         zodSchema = arraySchema;
       } else {
         zodSchema = z.array(z.any());
       }
-      if (schema.uniqueItems === true || schema.contains !== void 0) {
+      if (schema2.uniqueItems === true || schema2.contains !== void 0) {
         zodSchema = checkArrayGuards(zodSchema, {
-          uniqueItems: schema.uniqueItems === true,
-          containsSchema: schema.contains !== void 0 ? convertSchema(schema.contains, ctx) : void 0,
-          minContains: typeof schema.minContains === "number" ? schema.minContains : void 0,
-          maxContains: typeof schema.maxContains === "number" ? schema.maxContains : void 0
+          uniqueItems: schema2.uniqueItems === true,
+          containsSchema: schema2.contains !== void 0 ? convertSchema(schema2.contains, ctx) : void 0,
+          minContains: typeof schema2.minContains === "number" ? schema2.minContains : void 0,
+          maxContains: typeof schema2.maxContains === "number" ? schema2.maxContains : void 0
         });
       }
       break;
@@ -21673,94 +25622,94 @@ function convertBaseSchema(schema, ctx) {
   }
   return zodSchema;
 }
-function convertSchema(schema, ctx) {
-  if (typeof schema === "boolean") {
-    return schema ? z.any() : z.never();
+function convertSchema(schema2, ctx) {
+  if (typeof schema2 === "boolean") {
+    return schema2 ? z.any() : z.never();
   }
-  let baseSchema = convertBaseSchema(schema, ctx);
-  const hasExplicitType = schema.type || schema.enum !== void 0 || schema.const !== void 0;
-  if (schema.anyOf && Array.isArray(schema.anyOf)) {
-    const options = schema.anyOf.map((s) => convertSchema(s, ctx));
+  let baseSchema = convertBaseSchema(schema2, ctx);
+  const hasExplicitType = schema2.type || schema2.enum !== void 0 || schema2.const !== void 0;
+  if (schema2.anyOf && Array.isArray(schema2.anyOf)) {
+    const options = schema2.anyOf.map((s) => convertSchema(s, ctx));
     const anyOfUnion = z.union(options);
     baseSchema = hasExplicitType ? z.intersection(baseSchema, anyOfUnion) : anyOfUnion;
   }
-  if (schema.oneOf && Array.isArray(schema.oneOf)) {
-    const options = schema.oneOf.map((s) => convertSchema(s, ctx));
+  if (schema2.oneOf && Array.isArray(schema2.oneOf)) {
+    const options = schema2.oneOf.map((s) => convertSchema(s, ctx));
     const oneOfUnion = z.xor(options);
     baseSchema = hasExplicitType ? z.intersection(baseSchema, oneOfUnion) : oneOfUnion;
   }
-  if (schema.allOf && Array.isArray(schema.allOf)) {
-    if (schema.allOf.length === 0) {
+  if (schema2.allOf && Array.isArray(schema2.allOf)) {
+    if (schema2.allOf.length === 0) {
       baseSchema = hasExplicitType ? baseSchema : z.any();
     } else {
-      let result = hasExplicitType ? baseSchema : convertSchema(schema.allOf[0], ctx);
+      let result = hasExplicitType ? baseSchema : convertSchema(schema2.allOf[0], ctx);
       const startIdx = hasExplicitType ? 0 : 1;
-      for (let i = startIdx; i < schema.allOf.length; i++) {
-        result = z.intersection(result, convertSchema(schema.allOf[i], ctx));
+      for (let i = startIdx; i < schema2.allOf.length; i++) {
+        result = z.intersection(result, convertSchema(schema2.allOf[i], ctx));
       }
       baseSchema = result;
     }
   }
-  if (schema.nullable === true && ctx.version === "openapi-3.0") {
+  if (schema2.nullable === true && ctx.version === "openapi-3.0") {
     baseSchema = z.nullable(baseSchema);
   }
-  if (schema.readOnly === true) {
+  if (schema2.readOnly === true) {
     baseSchema = z.readonly(baseSchema);
   }
-  if (schema.default !== void 0) {
-    baseSchema = baseSchema.default(schema.default);
+  if (schema2.default !== void 0) {
+    baseSchema = baseSchema.default(schema2.default);
   }
   const extraMeta = {};
   const coreMetadataKeys = ["$id", "id", "$comment", "$anchor", "$vocabulary", "$dynamicRef", "$dynamicAnchor"];
   for (const key of coreMetadataKeys) {
-    if (key in schema) {
-      extraMeta[key] = schema[key];
+    if (key in schema2) {
+      extraMeta[key] = schema2[key];
     }
   }
   const contentMetadataKeys = ["contentEncoding", "contentMediaType", "contentSchema"];
   for (const key of contentMetadataKeys) {
-    if (key in schema) {
-      extraMeta[key] = schema[key];
+    if (key in schema2) {
+      extraMeta[key] = schema2[key];
     }
   }
-  if (schema.type === "object" && schema.$ref === void 0) {
-    if (schema.propertyNames !== void 0 && !containsRef(schema.propertyNames)) {
-      extraMeta.propertyNames = schema.propertyNames;
+  if (schema2.type === "object" && schema2.$ref === void 0) {
+    if (schema2.propertyNames !== void 0 && !containsRef(schema2.propertyNames)) {
+      extraMeta.propertyNames = schema2.propertyNames;
     }
     for (const key of ["minProperties", "maxProperties"]) {
-      if (schema[key] !== void 0)
-        extraMeta[key] = schema[key];
+      if (schema2[key] !== void 0)
+        extraMeta[key] = schema2[key];
     }
   }
-  if (schema.type === "array" && schema.$ref === void 0) {
-    if (schema.contains !== void 0 && !containsRef(schema.contains)) {
-      extraMeta.contains = schema.contains;
+  if (schema2.type === "array" && schema2.$ref === void 0) {
+    if (schema2.contains !== void 0 && !containsRef(schema2.contains)) {
+      extraMeta.contains = schema2.contains;
     }
     for (const key of ["uniqueItems", "minContains", "maxContains"]) {
-      if (schema[key] !== void 0)
-        extraMeta[key] = schema[key];
+      if (schema2[key] !== void 0)
+        extraMeta[key] = schema2[key];
     }
   }
-  for (const key of Object.keys(schema)) {
+  for (const key of Object.keys(schema2)) {
     if (!RECOGNIZED_KEYS.has(key)) {
-      assignProp(extraMeta, key, schema[key]);
+      assignProp(extraMeta, key, schema2[key]);
     }
   }
   if (Object.keys(extraMeta).length > 0) {
     ctx.registry.add(baseSchema, extraMeta);
   }
-  if (schema.description) {
-    baseSchema = baseSchema.describe(schema.description);
+  if (schema2.description) {
+    baseSchema = baseSchema.describe(schema2.description);
   }
   return baseSchema;
 }
-function fromJSONSchema(schema, params) {
-  if (typeof schema === "boolean") {
-    return schema ? z.any() : z.never();
+function fromJSONSchema(schema2, params) {
+  if (typeof schema2 === "boolean") {
+    return schema2 ? z.any() : z.never();
   }
   let normalized;
   try {
-    normalized = JSON.parse(JSON.stringify(schema));
+    normalized = JSON.parse(JSON.stringify(schema2));
   } catch {
     throw new Error("fromJSONSchema input is not valid JSON (possibly cyclic); use $defs/$ref for recursive schemas");
   }
@@ -21779,7 +25728,7 @@ function fromJSONSchema(schema, params) {
 
 // node_modules/zod/v4/core/visit.js
 var RESOLVING = Symbol("z.visit/resolving");
-function visit(schema, fnOrHandlers) {
+function visit(schema2, fnOrHandlers) {
   const fn = typeof fnOrHandlers === "function" ? fnOrHandlers : (node2, rewritten) => {
     const h = fnOrHandlers[node2._zod.def.type];
     return h ? h(node2, rewritten) : node2;
@@ -21927,17 +25876,17 @@ function visit(schema, fnOrHandlers) {
       }
     }
   }
-  return run(schema);
+  return run(schema2);
 }
 
 // node_modules/zod/v4/classic/deep-partial.js
-function deepPartial(schema) {
-  return visit(schema, {
+function deepPartial(schema2) {
+  return visit(schema2, {
     object: (s) => s.partial(),
     // Every partialed option now admits `undefined`, which the constructor rejects as a duplicate.
     union: (s) => {
       const def = s._zod.def;
-      return def.discriminator === void 0 ? s : union(def.options);
+      return def.discriminator === void 0 ? s : union2(def.options);
     }
   });
 }
@@ -21955,8 +25904,8 @@ function outSide(def) {
 function inSide(def) {
   return def.in._zod.traits.has("$ZodTransform") ? outSide(def) : def.in;
 }
-function input(schema) {
-  return visit(schema, {
+function input(schema2) {
+  return visit(schema2, {
     pipe: (s) => inSide(s._zod.def),
     // A default value belongs to the output side, so a rewritten inner type leaves it stranded. `.default()` widens the declared input type with `undefined`, and `optional` is what carries that across.
     default: (s, rewritten) => rewritten ? optional(s._zod.def.innerType) : s,
@@ -21964,8 +25913,8 @@ function input(schema) {
     catch: (s, rewritten) => rewritten ? s._zod.def.innerType : s
   });
 }
-function output(schema) {
-  return visit(schema, {
+function output(schema2) {
+  return visit(schema2, {
     pipe: (s) => outSide(s._zod.def),
     // A prefault value is fed through the schema, which makes it input-side, so a rewritten inner type leaves it stranded.
     prefault: (s, rewritten) => rewritten ? s._zod.def.innerType : s
@@ -22191,6 +26140,401 @@ function registerAuthIpcHandlers() {
     logout();
     return true;
   });
+}
+
+// electron/services/backupService.ts
+import fs4 from "node:fs";
+import path4 from "node:path";
+import crypto4 from "node:crypto";
+import { fileURLToPath } from "node:url";
+import Database2 from "better-sqlite3";
+var BACKUP_ERRORS = {
+  cancelled: "Sauvegarde annul\xE9e.",
+  backupFailed: "La sauvegarde n'a pas pu \xEAtre effectu\xE9e.",
+  maintenanceInProgress: "Une op\xE9ration de maintenance est en cours. Veuillez r\xE9essayer dans quelques instants.",
+  fileNotFound: "Le fichier s\xE9lectionn\xE9 est introuvable.",
+  corruptedFile: "Le fichier s\xE9lectionn\xE9 est corrompu ou n'est pas une base de donn\xE9es valide.",
+  invalidBackupFile: "Le fichier s\xE9lectionn\xE9 ne contient pas les tables attendues.",
+  foreignKeysViolated: "Le fichier contient des incoh\xE9rences de cl\xE9s \xE9trang\xE8res.",
+  backupVersionTooNew: "La sauvegarde provient d'une version ult\xE9rieure de l'application.",
+  restoreFailed: "La restauration a \xE9chou\xE9. La base de donn\xE9es d'origine a \xE9t\xE9 restaur\xE9e automatiquement.",
+  operationInProgress: "Une op\xE9ration est en cours sur la base de donn\xE9es. Veuillez r\xE9essayer dans quelques instants.",
+  restoreTimeout: "Aucune op\xE9ration en cours n'a fini dans les d\xE9lais. La restauration est annul\xE9e.",
+  unexpected: "Une erreur inattendue est survenue.",
+  emergencyBackupInvalid: "La sauvegarde de secours est invalide. La base de donn\xE9es n'a pas pu \xEAtre restaur\xE9e automatiquement. Fichier de secours conserv\xE9 pour analyse."
+};
+var BackupError = class extends Error {
+  code;
+  constructor(code) {
+    super(BACKUP_ERRORS[code]);
+    this.name = "BackupError";
+    this.code = code;
+  }
+};
+var REQUIRED_TABLES = [
+  "settings",
+  "users",
+  "categories",
+  "products",
+  "clients",
+  "suppliers",
+  "sales",
+  "payments",
+  "sale_items",
+  "stock_movements",
+  "supplies",
+  "supply_items",
+  "transformations"
+];
+function formatDate(date5 = /* @__PURE__ */ new Date()) {
+  const y = date5.getFullYear();
+  const m = String(date5.getMonth() + 1).padStart(2, "0");
+  const d = String(date5.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+function getDatabasePath() {
+  return path4.join(app.getPath("userData"), "database.sqlite");
+}
+function resolveMigrationsFolder() {
+  const appRoot = process.env.APP_ROOT;
+  const dirname = path4.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path4.join(dirname, "database/migrations"),
+    appRoot ? path4.join(appRoot, "dist-electron/database/migrations") : "",
+    appRoot ? path4.join(appRoot, "electron/database/migrations") : "",
+    path4.join(process.cwd(), "electron/database/migrations")
+  ].filter(Boolean);
+  return candidates.find((folder) => fs4.existsSync(folder)) ?? candidates[0];
+}
+function getCurrentMaxMigrationTime() {
+  const journalPath = path4.join(resolveMigrationsFolder(), "meta", "_journal.json");
+  if (!fs4.existsSync(journalPath)) {
+    return 0;
+  }
+  const journal = JSON.parse(fs4.readFileSync(journalPath, "utf8"));
+  return journal.entries.length > 0 ? Math.max(...journal.entries.map((e) => e.when)) : 0;
+}
+function toResult(data) {
+  return { success: true, data };
+}
+function toError(error62, fallbackCode) {
+  if (error62 instanceof BackupError) {
+    return { success: false, error: error62.message };
+  }
+  console.error("[backup] Unexpected error:", error62);
+  return { success: false, error: BACKUP_ERRORS[fallbackCode] };
+}
+function getDatabaseInfo() {
+  try {
+    const dbPath = getDatabasePath();
+    if (!fs4.existsSync(dbPath)) {
+      return toResult({
+        exists: false,
+        filePath: dbPath,
+        sizeBytes: 0,
+        size: "0 octet",
+        modifiedAt: "",
+        sqliteVersion: ""
+      });
+    }
+    const sqlite = new Database2(dbPath, { readonly: true });
+    try {
+      const versionRow = sqlite.prepare("select sqlite_version() as version").get();
+      const stat = fs4.statSync(dbPath);
+      return toResult({
+        exists: true,
+        filePath: dbPath,
+        sizeBytes: stat.size,
+        size: formatSize(stat.size),
+        modifiedAt: stat.mtime.toISOString(),
+        sqliteVersion: versionRow?.version ?? "inconnu"
+      });
+    } finally {
+      sqlite.close();
+    }
+  } catch (error62) {
+    return toError(error62, "unexpected");
+  }
+}
+function formatSize(bytes) {
+  if (bytes < 1024) return `${bytes} octet${bytes > 1 ? "s" : ""}`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} Ko`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} Go`;
+}
+function validateBackupFile(filePath) {
+  try {
+    if (!fs4.existsSync(filePath)) {
+      return { success: false, error: BACKUP_ERRORS.fileNotFound };
+    }
+    let tempDb = null;
+    try {
+      tempDb = new Database2(filePath, { readonly: true, fileMustExist: true });
+    } catch {
+      return { success: false, error: BACKUP_ERRORS.corruptedFile };
+    }
+    try {
+      let integrity;
+      try {
+        integrity = tempDb.prepare("PRAGMA integrity_check").get();
+      } catch {
+        return { success: false, error: BACKUP_ERRORS.corruptedFile };
+      }
+      if (integrity?.integrity_check !== "ok") {
+        return { success: false, error: BACKUP_ERRORS.corruptedFile };
+      }
+      const fkViolations = tempDb.prepare("PRAGMA foreign_key_check").all();
+      if (fkViolations.length > 0) {
+        return { success: false, error: BACKUP_ERRORS.foreignKeysViolated };
+      }
+      const tables = tempDb.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+      ).all();
+      const tableNames = new Set(tables.map((t) => t.name));
+      for (const required2 of REQUIRED_TABLES) {
+        if (!tableNames.has(required2)) {
+          return { success: false, error: BACKUP_ERRORS.invalidBackupFile };
+        }
+      }
+      const currentMax = getCurrentMaxMigrationTime();
+      try {
+        const lastMigration = tempDb.prepare("SELECT MAX(created_at) as max_created FROM __drizzle_migrations").get();
+        if (lastMigration?.max_created && lastMigration.max_created > currentMax) {
+          return { success: false, error: BACKUP_ERRORS.backupVersionTooNew };
+        }
+      } catch {
+      }
+      const stat = fs4.statSync(filePath);
+      return toResult({
+        valid: true,
+        filePath,
+        sizeBytes: stat.size,
+        size: formatSize(stat.size),
+        modifiedAt: stat.mtime.toISOString(),
+        tableCount: tables.length
+      });
+    } finally {
+      tempDb.close();
+    }
+  } catch (error62) {
+    return toError(error62, "unexpected");
+  }
+}
+async function createBackup(onProgress) {
+  let handle = null;
+  let backupPath = null;
+  let fileCreated = false;
+  try {
+    handle = maintenanceLock.acquireForBackup();
+    const db2 = getDb();
+    const sqlite = db2.$client;
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      title: "Sauvegarder les donn\xE9es de la boutique",
+      defaultPath: `gestion-boutique-sauvegarde-${formatDate()}.sqlite`,
+      filters: [{ name: "Base SQLite", extensions: ["sqlite"] }]
+    });
+    if (canceled || !filePath) {
+      return { success: false, error: BACKUP_ERRORS.cancelled };
+    }
+    backupPath = filePath;
+    await sqlite.backup(filePath, {
+      progress: (info) => {
+        const percent = (info.totalPages - info.remainingPages) / info.totalPages * 100;
+        onProgress?.(percent);
+        return 100;
+      }
+    });
+    fileCreated = true;
+    return toResult(filePath);
+  } catch (error62) {
+    if (backupPath && fileCreated) {
+      try {
+        fs4.rmSync(backupPath, { force: true });
+      } catch (cleanupError) {
+        console.error("[backup] Failed to cleanup partial backup file:", cleanupError);
+      }
+    }
+    if (error62 instanceof BackupError) {
+      return { success: false, error: error62.message };
+    }
+    if (error62 instanceof Error && error62.message.includes("Maintenance in progress")) {
+      return { success: false, error: BACKUP_ERRORS.maintenanceInProgress };
+    }
+    return toError(error62, "backupFailed");
+  } finally {
+    handle?.release();
+  }
+}
+function validateEmergencyBackup(emergencyPath) {
+  try {
+    if (!fs4.existsSync(emergencyPath)) {
+      return false;
+    }
+    const tempDb = new Database2(emergencyPath, { readonly: true, fileMustExist: true });
+    try {
+      const integrity = tempDb.prepare("PRAGMA integrity_check").get();
+      if (integrity?.integrity_check !== "ok") {
+        return false;
+      }
+      const fkViolations = tempDb.prepare("PRAGMA foreign_key_check").all();
+      if (fkViolations.length > 0) {
+        return false;
+      }
+      const tables = tempDb.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+      ).all();
+      const tableNames = new Set(tables.map((t) => t.name));
+      for (const required2 of REQUIRED_TABLES) {
+        if (!tableNames.has(required2)) {
+          return false;
+        }
+      }
+      return true;
+    } finally {
+      tempDb.close();
+    }
+  } catch {
+    return false;
+  }
+}
+async function restoreBackup(filePath) {
+  let handle = null;
+  let emergencyPath = null;
+  let selectedPath = filePath;
+  const dbPath = getDatabasePath();
+  let restoreSucceeded = false;
+  try {
+    if (!selectedPath) {
+      const { canceled, filePaths } = await dialog.showOpenDialog({
+        title: "S\xE9lectionner une sauvegarde",
+        defaultPath: app.getPath("documents"),
+        filters: [{ name: "Base SQLite", extensions: ["sqlite"] }],
+        properties: ["openFile"]
+      });
+      if (canceled || filePaths.length === 0) {
+        return toResult({ canceled: true, restarted: false, message: "Restauration annul\xE9e." });
+      }
+      selectedPath = filePaths[0];
+    }
+    const validation = validateBackupFile(selectedPath);
+    if (!validation.success) {
+      return { success: false, error: validation.error };
+    }
+    const db2 = getDb();
+    const sqlite = db2.$client;
+    try {
+      handle = await maintenanceLock.acquireForMaintenance(sqlite);
+    } catch (error62) {
+      if (error62 instanceof Error && error62.message === "Transaction did not complete in time") {
+        return { success: false, error: BACKUP_ERRORS.restoreTimeout };
+      }
+      throw error62;
+    }
+    emergencyPath = `${dbPath}.emergency-${crypto4.randomUUID().replace(/-/g, "")}`;
+    fs4.copyFileSync(dbPath, emergencyPath);
+    closeDatabase();
+    fs4.copyFileSync(selectedPath, dbPath);
+    initializeDatabase();
+    initDatabase(resolveMigrationsFolder());
+    const verifyDb = new Database2(dbPath, { readonly: true });
+    try {
+      const integrity = verifyDb.prepare("PRAGMA integrity_check").get();
+      if (integrity?.integrity_check !== "ok") {
+        throw new BackupError("restoreFailed");
+      }
+    } finally {
+      verifyDb.close();
+    }
+    restoreSucceeded = true;
+    setImmediate(() => {
+      app.relaunch();
+      app.quit();
+    });
+    return toResult({
+      canceled: false,
+      restarted: true,
+      message: "Restauration r\xE9ussie. L'application va red\xE9marrer."
+    });
+  } catch (error62) {
+    if (emergencyPath && fs4.existsSync(emergencyPath)) {
+      const isValid = validateEmergencyBackup(emergencyPath);
+      if (isValid) {
+        try {
+          closeDatabase();
+          fs4.copyFileSync(emergencyPath, getDatabasePath());
+          initializeDatabase();
+          initDatabase(resolveMigrationsFolder());
+        } catch (recoveryError) {
+          console.error("[backup] Emergency recovery failed:", recoveryError);
+        }
+      } else {
+        console.error("[backup] Emergency backup is invalid, NOT restoring:", emergencyPath);
+        return { success: false, error: BACKUP_ERRORS.emergencyBackupInvalid };
+      }
+    } else if (emergencyPath) {
+      console.error("[backup] Emergency backup file not found:", emergencyPath);
+    }
+    return toError(error62, "restoreFailed");
+  } finally {
+    if (emergencyPath && fs4.existsSync(emergencyPath)) {
+      if (restoreSucceeded) {
+        try {
+          fs4.rmSync(emergencyPath, { force: true });
+        } catch (cleanupError) {
+          console.error("[backup] Failed to cleanup emergency backup after success:", cleanupError);
+        }
+      }
+    }
+    handle?.release();
+  }
+}
+
+// electron/ipc/backup.ts
+function toSuccess(data) {
+  return { success: true, data };
+}
+function toFailure2(error62, fallback) {
+  if (error62 instanceof BackupError) {
+    return { success: false, error: error62.message };
+  }
+  console.error("[backup] Unexpected error:", error62);
+  return { success: false, error: BACKUP_ERRORS[fallback] };
+}
+function registerBackupIpcHandlers() {
+  ipcMain.handle("database:backup", async () => {
+    try {
+      return await createBackup();
+    } catch (error62) {
+      return toFailure2(error62, "unexpected");
+    }
+  });
+  ipcMain.handle(
+    "database:restore",
+    async (_event, filePath) => {
+      try {
+        return await restoreBackup(filePath);
+      } catch (error62) {
+        return toFailure2(error62, "unexpected");
+      }
+    }
+  );
+  ipcMain.handle("database:backup-info", async () => {
+    try {
+      return toSuccess(getDatabaseInfo());
+    } catch (error62) {
+      return toFailure2(error62, "unexpected");
+    }
+  });
+  ipcMain.handle(
+    "database:validate",
+    async (_event, filePath) => {
+      try {
+        return validateBackupFile(filePath);
+      } catch (error62) {
+        return toFailure2(error62, "unexpected");
+      }
+    }
+  );
 }
 
 // electron/services/productService.ts
@@ -22451,6 +26795,11 @@ function withMappedErrors(operation) {
     throw error62;
   }
 }
+function assertNotInMaintenance() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new ProductError("unexpected");
+  }
+}
 function listProducts(filters = {}) {
   const conditions = [];
   if (typeof filters?.search === "string") {
@@ -22487,6 +26836,7 @@ function getProductById(id) {
   return product;
 }
 function createProduct(input2) {
+  assertNotInMaintenance();
   const parsed = parseProduct(input2);
   const now = /* @__PURE__ */ new Date();
   assertCategoryExists(parsed.categoryId);
@@ -22500,6 +26850,7 @@ function createProduct(input2) {
   });
 }
 function updateProduct(id, input2) {
+  assertNotInMaintenance();
   const productId = parseProductId(id);
   const parsed = parseProduct(input2);
   const existing = getDb().select({ id: products.id }).from(products).where(eq(products.id, productId)).get();
@@ -22514,6 +26865,7 @@ function updateProduct(id, input2) {
   });
 }
 function setProductActive(id, isActive) {
+  assertNotInMaintenance();
   const productId = parseProductId(id);
   const parsedActive = isActiveSchema.safeParse(isActive);
   if (!parsedActive.success) {
@@ -22610,6 +26962,11 @@ function isUniqueViolation(error62) {
 function isForeignKeyViolation(error62) {
   return error62 instanceof Error && error62.message.includes("FOREIGN KEY");
 }
+function assertNotInMaintenance2() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new CategoryError("unexpected");
+  }
+}
 function listCategories() {
   const rows = getDb().select().from(categories).orderBy(asc(categories.name)).all();
   return rows.map(toCategory);
@@ -22620,6 +26977,7 @@ function getCategoryById(id) {
   return row ? toCategory(row) : null;
 }
 function createCategory(input2) {
+  assertNotInMaintenance2();
   const name = parseCategoryName(input2);
   const db2 = getDb();
   const now = /* @__PURE__ */ new Date();
@@ -22636,6 +26994,7 @@ function createCategory(input2) {
   }
 }
 function updateCategory(id, input2) {
+  assertNotInMaintenance2();
   const categoryId = parseCategoryId(id);
   const name = parseCategoryName(input2);
   const db2 = getDb();
@@ -22657,6 +27016,7 @@ function updateCategory(id, input2) {
   }
 }
 function deleteCategory(id) {
+  assertNotInMaintenance2();
   const categoryId = parseCategoryId(id);
   const db2 = getDb();
   if (!db2.select({ id: categories.id }).from(categories).where(eq(categories.id, categoryId)).get()) {
@@ -22683,10 +27043,10 @@ function isNameAvailable2(name, excludeId) {
 }
 
 // electron/ipc/categories.ts
-function toSuccess(data) {
+function toSuccess2(data) {
   return { success: true, data };
 }
-function toFailure2(error62, fallback) {
+function toFailure3(error62, fallback) {
   if (error62 instanceof CategoryError) {
     return { success: false, error: error62.message };
   }
@@ -22696,18 +27056,18 @@ function toFailure2(error62, fallback) {
 function registerCategoryIpcHandlers() {
   ipcMain.handle("categories:list", () => {
     try {
-      return toSuccess(listCategories());
+      return toSuccess2(listCategories());
     } catch (error62) {
-      return toFailure2(error62, CATEGORY_ERRORS.unexpected);
+      return toFailure3(error62, CATEGORY_ERRORS.unexpected);
     }
   });
   ipcMain.handle(
     "categories:get",
     (_event, id) => {
       try {
-        return toSuccess(getCategoryById(id));
+        return toSuccess2(getCategoryById(id));
       } catch (error62) {
-        return toFailure2(error62, CATEGORY_ERRORS.unexpected);
+        return toFailure3(error62, CATEGORY_ERRORS.unexpected);
       }
     }
   );
@@ -22715,9 +27075,9 @@ function registerCategoryIpcHandlers() {
     "categories:create",
     (_event, input2) => {
       try {
-        return toSuccess(createCategory(input2));
+        return toSuccess2(createCategory(input2));
       } catch (error62) {
-        return toFailure2(error62, CATEGORY_ERRORS.unexpected);
+        return toFailure3(error62, CATEGORY_ERRORS.unexpected);
       }
     }
   );
@@ -22725,9 +27085,9 @@ function registerCategoryIpcHandlers() {
     "categories:update",
     (_event, id, input2) => {
       try {
-        return toSuccess(updateCategory(id, input2));
+        return toSuccess2(updateCategory(id, input2));
       } catch (error62) {
-        return toFailure2(error62, CATEGORY_ERRORS.unexpected);
+        return toFailure3(error62, CATEGORY_ERRORS.unexpected);
       }
     }
   );
@@ -22735,9 +27095,9 @@ function registerCategoryIpcHandlers() {
     "categories:delete",
     (_event, id) => {
       try {
-        return toSuccess(deleteCategory(id));
+        return toSuccess2(deleteCategory(id));
       } catch (error62) {
-        return toFailure2(error62, CATEGORY_ERRORS.unexpected);
+        return toFailure3(error62, CATEGORY_ERRORS.unexpected);
       }
     }
   );
@@ -22745,9 +27105,9 @@ function registerCategoryIpcHandlers() {
     "categories:is-name-available",
     (_event, name, excludeId) => {
       try {
-        return toSuccess(isNameAvailable2(name, excludeId));
+        return toSuccess2(isNameAvailable2(name, excludeId));
       } catch (error62) {
-        return toFailure2(error62, CATEGORY_ERRORS.unexpected);
+        return toFailure3(error62, CATEGORY_ERRORS.unexpected);
       }
     }
   );
@@ -22886,6 +27246,11 @@ function assertPhoneIsAvailable(phone, excludeId) {
 function isUniqueViolation2(error62) {
   return error62 instanceof Error && error62.message.includes("UNIQUE");
 }
+function assertNotInMaintenance3() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new ClientError("unexpected");
+  }
+}
 function listClients(filters = {}) {
   const conditions = [];
   if (typeof filters?.search === "string" && filters.search.trim()) {
@@ -22908,6 +27273,7 @@ function getClientById(id) {
   return row ? toClient(row) : null;
 }
 function createClient(input2) {
+  assertNotInMaintenance3();
   const name = parseClientName(input2);
   const phone = parseClientPhone(input2);
   const address = parseClientAddress(input2);
@@ -22939,6 +27305,7 @@ function createClient(input2) {
   }
 }
 function updateClient(id, input2) {
+  assertNotInMaintenance3();
   const clientId = parseClientId(id);
   const db2 = getDb();
   const existing = db2.select({ id: clients.id, isSystem: clients.isSystem }).from(clients).where(eq(clients.id, clientId)).get();
@@ -22977,6 +27344,7 @@ function updateClient(id, input2) {
   }
 }
 function setClientActive(id, isActive) {
+  assertNotInMaintenance3();
   const clientId = parseClientId(id);
   const db2 = getDb();
   const existing = db2.select({ id: clients.id, isSystem: clients.isSystem }).from(clients).where(eq(clients.id, clientId)).get();
@@ -23010,6 +27378,7 @@ function isPhoneAvailable(phone, excludeClientId) {
   return !duplicate;
 }
 function ensureSystemClient() {
+  assertNotInMaintenance3();
   const existing = getDb().select().from(clients).where(eq(clients.name, SYSTEM_CLIENT_NAME)).get();
   if (existing) {
     return toClient(existing);
@@ -23032,10 +27401,10 @@ function ensureSystemClient() {
 }
 
 // electron/ipc/clients.ts
-function toSuccess2(data) {
+function toSuccess3(data) {
   return { success: true, data };
 }
-function toFailure3(error62, fallback) {
+function toFailure4(error62, fallback) {
   if (error62 instanceof ClientError) {
     return { success: false, error: error62.message };
   }
@@ -23045,25 +27414,25 @@ function toFailure3(error62, fallback) {
 function registerClientIpcHandlers() {
   ipcMain.handle("clients:list", (_event, filters) => {
     try {
-      return toSuccess2(listClients(filters ?? {}));
+      return toSuccess3(listClients(filters ?? {}));
     } catch (error62) {
-      return toFailure3(error62, CLIENT_ERRORS.unexpected);
+      return toFailure4(error62, CLIENT_ERRORS.unexpected);
     }
   });
   ipcMain.handle("clients:get", (_event, id) => {
     try {
-      return toSuccess2(getClientById(id));
+      return toSuccess3(getClientById(id));
     } catch (error62) {
-      return toFailure3(error62, CLIENT_ERRORS.unexpected);
+      return toFailure4(error62, CLIENT_ERRORS.unexpected);
     }
   });
   ipcMain.handle(
     "clients:create",
     (_event, input2) => {
       try {
-        return toSuccess2(createClient(input2));
+        return toSuccess3(createClient(input2));
       } catch (error62) {
-        return toFailure3(error62, CLIENT_ERRORS.unexpected);
+        return toFailure4(error62, CLIENT_ERRORS.unexpected);
       }
     }
   );
@@ -23071,9 +27440,9 @@ function registerClientIpcHandlers() {
     "clients:update",
     (_event, id, input2) => {
       try {
-        return toSuccess2(updateClient(id, input2));
+        return toSuccess3(updateClient(id, input2));
       } catch (error62) {
-        return toFailure3(error62, CLIENT_ERRORS.unexpected);
+        return toFailure4(error62, CLIENT_ERRORS.unexpected);
       }
     }
   );
@@ -23081,9 +27450,9 @@ function registerClientIpcHandlers() {
     "clients:set-active",
     (_event, id, isActive) => {
       try {
-        return toSuccess2(setClientActive(id, isActive));
+        return toSuccess3(setClientActive(id, isActive));
       } catch (error62) {
-        return toFailure3(error62, CLIENT_ERRORS.unexpected);
+        return toFailure4(error62, CLIENT_ERRORS.unexpected);
       }
     }
   );
@@ -23091,9 +27460,9 @@ function registerClientIpcHandlers() {
     "clients:is-name-available",
     (_event, name, excludeClientId) => {
       try {
-        return toSuccess2(isNameAvailable3(name, excludeClientId));
+        return toSuccess3(isNameAvailable3(name, excludeClientId));
       } catch (error62) {
-        return toFailure3(error62, CLIENT_ERRORS.unexpected);
+        return toFailure4(error62, CLIENT_ERRORS.unexpected);
       }
     }
   );
@@ -23101,17 +27470,17 @@ function registerClientIpcHandlers() {
     "clients:is-phone-available",
     (_event, phone, excludeClientId) => {
       try {
-        return toSuccess2(isPhoneAvailable(phone, excludeClientId));
+        return toSuccess3(isPhoneAvailable(phone, excludeClientId));
       } catch (error62) {
-        return toFailure3(error62, CLIENT_ERRORS.unexpected);
+        return toFailure4(error62, CLIENT_ERRORS.unexpected);
       }
     }
   );
   ipcMain.handle("clients:ensure-system", () => {
     try {
-      return toSuccess2(ensureSystemClient());
+      return toSuccess3(ensureSystemClient());
     } catch (error62) {
-      return toFailure3(error62, CLIENT_ERRORS.unexpected);
+      return toFailure4(error62, CLIENT_ERRORS.unexpected);
     }
   });
 }
@@ -23167,6 +27536,11 @@ var INVOICE_QUANTITY_MAX = 1e6;
 var INVOICE_UNIT_PRICE_MAX = 1e9;
 var INVOICE_ITEMS_MAX = 100;
 var INVOICE_ERROR_CODES = Object.keys(INVOICE_ERRORS);
+function assertNotInMaintenance4() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new InvoiceError("unexpected");
+  }
+}
 function formatInvoiceReference(sequence) {
   return `${INVOICE_REFERENCE_PREFIX}-${String(sequence).padStart(
     INVOICE_REFERENCE_PADDING,
@@ -23622,6 +27996,7 @@ function writeLines(db2, saleId, lines) {
   return totalAmount;
 }
 function createInvoice(input2) {
+  assertNotInMaintenance4();
   const { items, clientId, date: date5 } = parsePayload(input2);
   const db2 = getDb();
   return withMappedErrors2(
@@ -23686,6 +28061,7 @@ function readPersistedLineQuantities(db2, saleId) {
   );
 }
 function updateInvoice(id, input2) {
+  assertNotInMaintenance4();
   const saleId = Number(id);
   if (!Number.isInteger(saleId) || saleId <= 0) {
     throw new InvoiceError("notFound");
@@ -23761,6 +28137,7 @@ function updateInvoice(id, input2) {
   );
 }
 function cancelInvoice(id) {
+  assertNotInMaintenance4();
   const saleId = Number(id);
   if (!Number.isInteger(saleId) || saleId <= 0) {
     throw new InvoiceError("notFound");
@@ -23810,6 +28187,7 @@ function cancelInvoice(id) {
   );
 }
 function deleteInvoice(id) {
+  assertNotInMaintenance4();
   const saleId = Number(id);
   if (!Number.isInteger(saleId) || saleId <= 0) {
     throw new InvoiceError("notFound");
@@ -23856,6 +28234,7 @@ function getInvoicePaymentSummary(saleId) {
   return computePaymentSummary(db2, row.totalAmount, id);
 }
 function addPayment(saleId, amount, paymentDate) {
+  assertNotInMaintenance4();
   const id = Number(saleId);
   if (!Number.isInteger(id) || id <= 0) {
     throw new InvoiceError("notFound");
@@ -23891,6 +28270,7 @@ function addPayment(saleId, amount, paymentDate) {
   );
 }
 function updatePayment(paymentId, amount, paymentDate) {
+  assertNotInMaintenance4();
   const id = Number(paymentId);
   if (!Number.isInteger(id) || id <= 0) {
     throw new InvoiceError("paymentNotFound");
@@ -23927,6 +28307,7 @@ function updatePayment(paymentId, amount, paymentDate) {
   );
 }
 function deletePayment(paymentId) {
+  assertNotInMaintenance4();
   const id = Number(paymentId);
   if (!Number.isInteger(id) || id <= 0) {
     throw new InvoiceError("paymentNotFound");
@@ -23949,10 +28330,10 @@ function deletePayment(paymentId) {
 }
 
 // electron/ipc/invoices.ts
-function toSuccess3(data) {
+function toSuccess4(data) {
   return { success: true, data };
 }
-function toFailure4(error62, fallback) {
+function toFailure5(error62, fallback) {
   if (error62 instanceof InvoiceError) {
     return { success: false, error: error62.message };
   }
@@ -23962,18 +28343,18 @@ function toFailure4(error62, fallback) {
 function registerInvoiceIpcHandlers() {
   ipcMain.handle("invoices:create", (_event, input2) => {
     try {
-      return toSuccess3(createInvoice(input2));
+      return toSuccess4(createInvoice(input2));
     } catch (error62) {
-      return toFailure4(error62, INVOICE_ERRORS.unexpected);
+      return toFailure5(error62, INVOICE_ERRORS.unexpected);
     }
   });
   ipcMain.handle(
     "invoices:get-by-id",
     (_event, id) => {
       try {
-        return toSuccess3(getInvoiceById(id));
+        return toSuccess4(getInvoiceById(id));
       } catch (error62) {
-        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+        return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
     }
   );
@@ -23981,9 +28362,9 @@ function registerInvoiceIpcHandlers() {
     "invoices:get-by-reference",
     (_event, reference) => {
       try {
-        return toSuccess3(getInvoiceByReference(reference));
+        return toSuccess4(getInvoiceByReference(reference));
       } catch (error62) {
-        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+        return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
     }
   );
@@ -23991,9 +28372,9 @@ function registerInvoiceIpcHandlers() {
     "invoices:list",
     (_event, filters) => {
       try {
-        return toSuccess3(listInvoices(filters ?? {}));
+        return toSuccess4(listInvoices(filters ?? {}));
       } catch (error62) {
-        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+        return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
     }
   );
@@ -24001,33 +28382,33 @@ function registerInvoiceIpcHandlers() {
     "invoices:update",
     (_event, id, input2) => {
       try {
-        return toSuccess3(updateInvoice(id, input2));
+        return toSuccess4(updateInvoice(id, input2));
       } catch (error62) {
-        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+        return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
     }
   );
   ipcMain.handle("invoices:cancel", (_event, id) => {
     try {
-      return toSuccess3(cancelInvoice(id));
+      return toSuccess4(cancelInvoice(id));
     } catch (error62) {
-      return toFailure4(error62, INVOICE_ERRORS.unexpected);
+      return toFailure5(error62, INVOICE_ERRORS.unexpected);
     }
   });
   ipcMain.handle("invoices:delete", (_event, id) => {
     try {
-      return toSuccess3(deleteInvoice(id));
+      return toSuccess4(deleteInvoice(id));
     } catch (error62) {
-      return toFailure4(error62, INVOICE_ERRORS.unexpected);
+      return toFailure5(error62, INVOICE_ERRORS.unexpected);
     }
   });
   ipcMain.handle(
     "invoices:add-payment",
     (_event, saleId, input2) => {
       try {
-        return toSuccess3(addPayment(saleId, input2.amount, input2.date));
+        return toSuccess4(addPayment(saleId, input2.amount, input2.date));
       } catch (error62) {
-        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+        return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
     }
   );
@@ -24035,9 +28416,9 @@ function registerInvoiceIpcHandlers() {
     "invoices:update-payment",
     (_event, paymentId, input2) => {
       try {
-        return toSuccess3(updatePayment(paymentId, input2.amount, input2.date));
+        return toSuccess4(updatePayment(paymentId, input2.amount, input2.date));
       } catch (error62) {
-        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+        return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
     }
   );
@@ -24045,9 +28426,9 @@ function registerInvoiceIpcHandlers() {
     "invoices:delete-payment",
     (_event, paymentId) => {
       try {
-        return toSuccess3(deletePayment(paymentId));
+        return toSuccess4(deletePayment(paymentId));
       } catch (error62) {
-        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+        return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
     }
   );
@@ -24055,9 +28436,9 @@ function registerInvoiceIpcHandlers() {
     "invoices:get-payment-summary",
     (_event, saleId) => {
       try {
-        return toSuccess3(getInvoicePaymentSummary(saleId));
+        return toSuccess4(getInvoicePaymentSummary(saleId));
       } catch (error62) {
-        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+        return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
     }
   );
@@ -24065,16 +28446,16 @@ function registerInvoiceIpcHandlers() {
     "invoices:list-payments",
     (_event, saleId) => {
       try {
-        return toSuccess3(listInvoicePayments(saleId));
+        return toSuccess4(listInvoicePayments(saleId));
       } catch (error62) {
-        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+        return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
     }
   );
 }
 
 // electron/services/printService.ts
-import fs from "node:fs/promises";
+import fs5 from "node:fs/promises";
 var PRINT_ERRORS = {
   emptyDocument: "Le document \xE0 imprimer est vide.",
   documentTooLarge: "Le document \xE0 imprimer est trop volumineux.",
@@ -24221,7 +28602,7 @@ async function exportHtmlDocumentToPdf(html, title = "Document") {
       if (canceled || !filePath) {
         return null;
       }
-      await fs.writeFile(filePath, pdf);
+      await fs5.writeFile(filePath, pdf);
       return filePath;
     } catch (error62) {
       throw toPrintFailure(error62, "saveFailed");
@@ -24232,10 +28613,10 @@ async function exportHtmlDocumentToPdf(html, title = "Document") {
 }
 
 // electron/ipc/print.ts
-function toSuccess4(data) {
+function toSuccess5(data) {
   return { success: true, data };
 }
-function toFailure5(error62, fallback) {
+function toFailure6(error62, fallback) {
   if (error62 instanceof PrintError) {
     return { success: false, error: error62.message };
   }
@@ -24248,9 +28629,9 @@ function registerPrintIpcHandlers() {
     async (_event, request) => {
       try {
         await printHtmlDocument(request?.html, request?.title);
-        return toSuccess4(null);
+        return toSuccess5(null);
       } catch (error62) {
-        return toFailure5(error62, PRINT_ERRORS.unexpected);
+        return toFailure6(error62, PRINT_ERRORS.unexpected);
       }
     }
   );
@@ -24258,9 +28639,9 @@ function registerPrintIpcHandlers() {
     "print:pdf",
     async (_event, request) => {
       try {
-        return toSuccess4({ path: await exportHtmlDocumentToPdf(request?.html, request?.title) });
+        return toSuccess5({ path: await exportHtmlDocumentToPdf(request?.html, request?.title) });
       } catch (error62) {
-        return toFailure5(error62, PRINT_ERRORS.unexpected);
+        return toFailure6(error62, PRINT_ERRORS.unexpected);
       }
     }
   );
@@ -24269,19 +28650,19 @@ function registerPrintIpcHandlers() {
     async (_event, request) => {
       try {
         await previewHtmlDocument(request?.html, request?.title);
-        return toSuccess4(null);
+        return toSuccess5(null);
       } catch (error62) {
-        return toFailure5(error62, PRINT_ERRORS.unexpected);
+        return toFailure6(error62, PRINT_ERRORS.unexpected);
       }
     }
   );
 }
 
 // electron/ipc/products.ts
-function toSuccess5(data) {
+function toSuccess6(data) {
   return { success: true, data };
 }
-function toFailure6(error62, fallback) {
+function toFailure7(error62, fallback) {
   if (error62 instanceof ProductError) {
     return { success: false, error: error62.message };
   }
@@ -24291,25 +28672,25 @@ function toFailure6(error62, fallback) {
 function registerProductIpcHandlers() {
   ipcMain.handle("products:list", (_event, filters) => {
     try {
-      return toSuccess5(listProducts(filters ?? {}));
+      return toSuccess6(listProducts(filters ?? {}));
     } catch (error62) {
-      return toFailure6(error62, PRODUCT_ERRORS.unexpected);
+      return toFailure7(error62, PRODUCT_ERRORS.unexpected);
     }
   });
   ipcMain.handle("products:get", (_event, id) => {
     try {
-      return toSuccess5(getProductById(id));
+      return toSuccess6(getProductById(id));
     } catch (error62) {
-      return toFailure6(error62, PRODUCT_ERRORS.unexpected);
+      return toFailure7(error62, PRODUCT_ERRORS.unexpected);
     }
   });
   ipcMain.handle(
     "products:create",
     (_event, input2) => {
       try {
-        return toSuccess5(createProduct(input2));
+        return toSuccess6(createProduct(input2));
       } catch (error62) {
-        return toFailure6(error62, PRODUCT_ERRORS.unexpected);
+        return toFailure7(error62, PRODUCT_ERRORS.unexpected);
       }
     }
   );
@@ -24317,9 +28698,9 @@ function registerProductIpcHandlers() {
     "products:update",
     (_event, id, input2) => {
       try {
-        return toSuccess5(updateProduct(id, input2));
+        return toSuccess6(updateProduct(id, input2));
       } catch (error62) {
-        return toFailure6(error62, PRODUCT_ERRORS.unexpected);
+        return toFailure7(error62, PRODUCT_ERRORS.unexpected);
       }
     }
   );
@@ -24327,9 +28708,9 @@ function registerProductIpcHandlers() {
     "products:set-active",
     (_event, id, isActive) => {
       try {
-        return toSuccess5(setProductActive(id, isActive));
+        return toSuccess6(setProductActive(id, isActive));
       } catch (error62) {
-        return toFailure6(error62, PRODUCT_ERRORS.unexpected);
+        return toFailure7(error62, PRODUCT_ERRORS.unexpected);
       }
     }
   );
@@ -24337,9 +28718,9 @@ function registerProductIpcHandlers() {
     "products:is-name-available",
     (_event, name, excludeId) => {
       try {
-        return toSuccess5(isNameAvailable(name, excludeId));
+        return toSuccess6(isNameAvailable(name, excludeId));
       } catch (error62) {
-        return toFailure6(error62, PRODUCT_ERRORS.unexpected);
+        return toFailure7(error62, PRODUCT_ERRORS.unexpected);
       }
     }
   );
@@ -24607,7 +28988,13 @@ function withMappedErrors3(operation) {
     throw error62;
   }
 }
+function assertNotInMaintenance5() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new StockError("unexpected");
+  }
+}
 function initializeStock(productId, input2) {
+  assertNotInMaintenance5();
   const parsedId = parseProductId2(productId);
   const db2 = getDb();
   return withMappedErrors3(
@@ -24645,6 +29032,7 @@ function initializeStock(productId, input2) {
   );
 }
 function adjustStock(productId, input2) {
+  assertNotInMaintenance5();
   const parsedId = parseProductId2(productId);
   const parsedInput = parseAdjustInput(input2, parsedId);
   const db2 = getDb();
@@ -24698,10 +29086,10 @@ function listProductMovements(productId) {
 }
 
 // electron/ipc/stock.ts
-function toSuccess6(data) {
+function toSuccess7(data) {
   return { success: true, data };
 }
-function toFailure7(error62, fallback) {
+function toFailure8(error62, fallback) {
   if (error62 instanceof StockError) {
     return { success: false, error: error62.message };
   }
@@ -24713,9 +29101,9 @@ function registerStockIpcHandlers() {
     "stock:list",
     (_event, filters) => {
       try {
-        return toSuccess6(listStocks(filters ?? {}));
+        return toSuccess7(listStocks(filters ?? {}));
       } catch (error62) {
-        return toFailure7(error62, STOCK_ERRORS.unexpected);
+        return toFailure8(error62, STOCK_ERRORS.unexpected);
       }
     }
   );
@@ -24723,9 +29111,9 @@ function registerStockIpcHandlers() {
     "stock:get",
     (_event, productId) => {
       try {
-        return toSuccess6(getProductStock(productId));
+        return toSuccess7(getProductStock(productId));
       } catch (error62) {
-        return toFailure7(error62, STOCK_ERRORS.unexpected);
+        return toFailure8(error62, STOCK_ERRORS.unexpected);
       }
     }
   );
@@ -24733,9 +29121,9 @@ function registerStockIpcHandlers() {
     "stock:get-form",
     (_event, productId, form) => {
       try {
-        return toSuccess6(getProductFormStock(productId, form));
+        return toSuccess7(getProductFormStock(productId, form));
       } catch (error62) {
-        return toFailure7(error62, STOCK_ERRORS.unexpected);
+        return toFailure8(error62, STOCK_ERRORS.unexpected);
       }
     }
   );
@@ -24743,9 +29131,9 @@ function registerStockIpcHandlers() {
     "stock:initialize",
     (_event, productId, input2) => {
       try {
-        return toSuccess6(initializeStock(productId, input2));
+        return toSuccess7(initializeStock(productId, input2));
       } catch (error62) {
-        return toFailure7(error62, STOCK_ERRORS.unexpected);
+        return toFailure8(error62, STOCK_ERRORS.unexpected);
       }
     }
   );
@@ -24753,9 +29141,9 @@ function registerStockIpcHandlers() {
     "stock:adjust",
     (_event, productId, input2) => {
       try {
-        return toSuccess6(adjustStock(productId, input2));
+        return toSuccess7(adjustStock(productId, input2));
       } catch (error62) {
-        return toFailure7(error62, STOCK_ERRORS.unexpected);
+        return toFailure8(error62, STOCK_ERRORS.unexpected);
       }
     }
   );
@@ -24763,9 +29151,9 @@ function registerStockIpcHandlers() {
     "stock:movements",
     (_event, productId) => {
       try {
-        return toSuccess6(listProductMovements(productId));
+        return toSuccess7(listProductMovements(productId));
       } catch (error62) {
-        return toFailure7(error62, STOCK_ERRORS.unexpected);
+        return toFailure8(error62, STOCK_ERRORS.unexpected);
       }
     }
   );
@@ -24904,6 +29292,11 @@ function assertPhoneIsAvailable2(phone, excludeId) {
 function isUniqueViolation3(error62) {
   return error62 instanceof Error && error62.message.includes("UNIQUE");
 }
+function assertNotInMaintenance6() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new SupplierError("unexpected");
+  }
+}
 function listSuppliers(filters = {}) {
   const conditions = [];
   if (typeof filters?.search === "string" && filters.search.trim()) {
@@ -24926,6 +29319,7 @@ function getSupplierById(id) {
   return row ? toSupplier(row) : null;
 }
 function createSupplier(input2) {
+  assertNotInMaintenance6();
   const name = parseSupplierName(input2);
   const phone = parseSupplierPhone(input2);
   const address = parseSupplierAddress(input2);
@@ -24957,6 +29351,7 @@ function createSupplier(input2) {
   }
 }
 function updateSupplier(id, input2) {
+  assertNotInMaintenance6();
   const supplierId = parseSupplierId(id);
   const db2 = getDb();
   const existing = db2.select({ id: suppliers.id, isSystem: suppliers.isSystem }).from(suppliers).where(eq(suppliers.id, supplierId)).get();
@@ -24995,6 +29390,7 @@ function updateSupplier(id, input2) {
   }
 }
 function setSupplierActive(id, isActive) {
+  assertNotInMaintenance6();
   const supplierId = parseSupplierId(id);
   const db2 = getDb();
   const existing = db2.select({ id: suppliers.id, isSystem: suppliers.isSystem }).from(suppliers).where(eq(suppliers.id, supplierId)).get();
@@ -25028,6 +29424,7 @@ function isPhoneAvailable2(phone, excludeSupplierId) {
   return !duplicate;
 }
 function ensureSystemSupplier() {
+  assertNotInMaintenance6();
   const existing = getDb().select().from(suppliers).where(eq(suppliers.name, SYSTEM_SUPPLIER_NAME)).get();
   if (existing) {
     return toSupplier(existing);
@@ -25050,10 +29447,10 @@ function ensureSystemSupplier() {
 }
 
 // electron/ipc/suppliers.ts
-function toSuccess7(data) {
+function toSuccess8(data) {
   return { success: true, data };
 }
-function toFailure8(error62, fallback) {
+function toFailure9(error62, fallback) {
   if (error62 instanceof SupplierError) {
     return { success: false, error: error62.message };
   }
@@ -25063,25 +29460,25 @@ function toFailure8(error62, fallback) {
 function registerSupplierIpcHandlers() {
   ipcMain.handle("suppliers:list", (_event, filters) => {
     try {
-      return toSuccess7(listSuppliers(filters ?? {}));
+      return toSuccess8(listSuppliers(filters ?? {}));
     } catch (error62) {
-      return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+      return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
     }
   });
   ipcMain.handle("suppliers:get", (_event, id) => {
     try {
-      return toSuccess7(getSupplierById(id));
+      return toSuccess8(getSupplierById(id));
     } catch (error62) {
-      return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+      return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
     }
   });
   ipcMain.handle(
     "suppliers:create",
     (_event, input2) => {
       try {
-        return toSuccess7(createSupplier(input2));
+        return toSuccess8(createSupplier(input2));
       } catch (error62) {
-        return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+        return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
       }
     }
   );
@@ -25089,9 +29486,9 @@ function registerSupplierIpcHandlers() {
     "suppliers:update",
     (_event, id, input2) => {
       try {
-        return toSuccess7(updateSupplier(id, input2));
+        return toSuccess8(updateSupplier(id, input2));
       } catch (error62) {
-        return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+        return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
       }
     }
   );
@@ -25099,9 +29496,9 @@ function registerSupplierIpcHandlers() {
     "suppliers:set-active",
     (_event, id, isActive) => {
       try {
-        return toSuccess7(setSupplierActive(id, isActive));
+        return toSuccess8(setSupplierActive(id, isActive));
       } catch (error62) {
-        return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+        return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
       }
     }
   );
@@ -25109,9 +29506,9 @@ function registerSupplierIpcHandlers() {
     "suppliers:is-name-available",
     (_event, name, excludeSupplierId) => {
       try {
-        return toSuccess7(isNameAvailable4(name, excludeSupplierId));
+        return toSuccess8(isNameAvailable4(name, excludeSupplierId));
       } catch (error62) {
-        return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+        return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
       }
     }
   );
@@ -25119,17 +29516,17 @@ function registerSupplierIpcHandlers() {
     "suppliers:is-phone-available",
     (_event, phone, excludeSupplierId) => {
       try {
-        return toSuccess7(isPhoneAvailable2(phone, excludeSupplierId));
+        return toSuccess8(isPhoneAvailable2(phone, excludeSupplierId));
       } catch (error62) {
-        return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+        return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
       }
     }
   );
   ipcMain.handle("suppliers:ensure-system", () => {
     try {
-      return toSuccess7(ensureSystemSupplier());
+      return toSuccess8(ensureSystemSupplier());
     } catch (error62) {
-      return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+      return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
     }
   });
 }
@@ -25401,6 +29798,11 @@ function withMappedErrors4(operation) {
     throw error62;
   }
 }
+function assertNotInMaintenance7() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new SupplyError("unexpected");
+  }
+}
 function parsePayload2(input2) {
   const rawInput = input2 ?? {};
   const parsed = supplyCreateSchema.safeParse({ items: rawInput.items });
@@ -25443,6 +29845,7 @@ function parsePayload2(input2) {
   };
 }
 function createSupply(input2) {
+  assertNotInMaintenance7();
   const { lines, supplierId, supplierName, date: date5 } = parsePayload2(input2);
   const db2 = getDb();
   return withMappedErrors4(
@@ -25512,10 +29915,10 @@ function createSupply(input2) {
 }
 
 // electron/ipc/supplies.ts
-function toSuccess8(data) {
+function toSuccess9(data) {
   return { success: true, data };
 }
-function toFailure9(error62, fallback) {
+function toFailure10(error62, fallback) {
   if (error62 instanceof SupplyError) {
     return { success: false, error: error62.message };
   }
@@ -25527,9 +29930,9 @@ function registerSupplyIpcHandlers() {
     "supplies:list",
     (_event, filters) => {
       try {
-        return toSuccess8(listSupplies(filters ?? {}));
+        return toSuccess9(listSupplies(filters ?? {}));
       } catch (error62) {
-        return toFailure9(error62, SUPPLY_ERRORS.unexpected);
+        return toFailure10(error62, SUPPLY_ERRORS.unexpected);
       }
     }
   );
@@ -25537,9 +29940,9 @@ function registerSupplyIpcHandlers() {
     "supplies:get",
     (_event, id) => {
       try {
-        return toSuccess8(getSupplyById(id));
+        return toSuccess9(getSupplyById(id));
       } catch (error62) {
-        return toFailure9(error62, SUPPLY_ERRORS.unexpected);
+        return toFailure10(error62, SUPPLY_ERRORS.unexpected);
       }
     }
   );
@@ -25547,9 +29950,9 @@ function registerSupplyIpcHandlers() {
     "supplies:get-by-reference",
     (_event, reference) => {
       try {
-        return toSuccess8(getSupplyByReference(reference));
+        return toSuccess9(getSupplyByReference(reference));
       } catch (error62) {
-        return toFailure9(error62, SUPPLY_ERRORS.unexpected);
+        return toFailure10(error62, SUPPLY_ERRORS.unexpected);
       }
     }
   );
@@ -25557,9 +29960,9 @@ function registerSupplyIpcHandlers() {
     "supplies:create",
     (_event, input2) => {
       try {
-        return toSuccess8(createSupply(input2));
+        return toSuccess9(createSupply(input2));
       } catch (error62) {
-        return toFailure9(error62, SUPPLY_ERRORS.unexpected);
+        return toFailure10(error62, SUPPLY_ERRORS.unexpected);
       }
     }
   );
@@ -25831,6 +30234,11 @@ function withMappedErrors5(operation) {
     throw error62;
   }
 }
+function assertNotInMaintenance8() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new TransformationError("unexpected");
+  }
+}
 function parsePayload3(input2) {
   const rawInput = input2 ?? {};
   const parsed = transformationCreateSchema.safeParse({
@@ -25852,6 +30260,7 @@ function parsePayload3(input2) {
   };
 }
 function createTransformation(input2) {
+  assertNotInMaintenance8();
   const { productId, sourceForm, sourceQuantity, date: date5 } = parsePayload3(input2);
   const db2 = getDb();
   return withMappedErrors5(
@@ -25919,10 +30328,10 @@ function createTransformation(input2) {
 }
 
 // electron/ipc/transformations.ts
-function toSuccess9(data) {
+function toSuccess10(data) {
   return { success: true, data };
 }
-function toFailure10(error62, fallback) {
+function toFailure11(error62, fallback) {
   if (error62 instanceof TransformationError) {
     return { success: false, error: error62.message };
   }
@@ -25934,9 +30343,9 @@ function registerTransformationIpcHandlers() {
     "transformations:list-products",
     () => {
       try {
-        return toSuccess9(listTransformableProducts());
+        return toSuccess10(listTransformableProducts());
       } catch (error62) {
-        return toFailure10(error62, TRANSFORMATION_ERRORS.unexpected);
+        return toFailure11(error62, TRANSFORMATION_ERRORS.unexpected);
       }
     }
   );
@@ -25944,9 +30353,9 @@ function registerTransformationIpcHandlers() {
     "transformations:list",
     (_event, filters) => {
       try {
-        return toSuccess9(listTransformations(filters ?? {}));
+        return toSuccess10(listTransformations(filters ?? {}));
       } catch (error62) {
-        return toFailure10(error62, TRANSFORMATION_ERRORS.unexpected);
+        return toFailure11(error62, TRANSFORMATION_ERRORS.unexpected);
       }
     }
   );
@@ -25954,9 +30363,9 @@ function registerTransformationIpcHandlers() {
     "transformations:get",
     (_event, id) => {
       try {
-        return toSuccess9(getTransformationById(id));
+        return toSuccess10(getTransformationById(id));
       } catch (error62) {
-        return toFailure10(error62, TRANSFORMATION_ERRORS.unexpected);
+        return toFailure11(error62, TRANSFORMATION_ERRORS.unexpected);
       }
     }
   );
@@ -25964,9 +30373,9 @@ function registerTransformationIpcHandlers() {
     "transformations:get-by-reference",
     (_event, reference) => {
       try {
-        return toSuccess9(getTransformationByReference(reference));
+        return toSuccess10(getTransformationByReference(reference));
       } catch (error62) {
-        return toFailure10(error62, TRANSFORMATION_ERRORS.unexpected);
+        return toFailure11(error62, TRANSFORMATION_ERRORS.unexpected);
       }
     }
   );
@@ -25974,9 +30383,9 @@ function registerTransformationIpcHandlers() {
     "transformations:create",
     (_event, input2) => {
       try {
-        return toSuccess9(createTransformation(input2));
+        return toSuccess10(createTransformation(input2));
       } catch (error62) {
-        return toFailure10(error62, TRANSFORMATION_ERRORS.unexpected);
+        return toFailure11(error62, TRANSFORMATION_ERRORS.unexpected);
       }
     }
   );
@@ -25997,6 +30406,7 @@ function registerIpcHandlers() {
   ipcMain.handle("settings:save", (_event, input2) => {
     return saveSettings(input2);
   });
+  registerBackupIpcHandlers();
   registerAuthIpcHandlers();
   registerCategoryIpcHandlers();
   registerProductIpcHandlers();
@@ -26013,6 +30423,12 @@ function registerIpcHandlers() {
 var api = {
   database: {
     getStatus: () => ipcRenderer.invoke("database:status")
+  },
+  backup: {
+    backup: () => ipcRenderer.invoke("database:backup"),
+    restore: (filePath) => ipcRenderer.invoke("database:restore", filePath),
+    info: () => ipcRenderer.invoke("database:backup-info"),
+    validate: (filePath) => ipcRenderer.invoke("database:validate", filePath)
   },
   settings: {
     get: () => ipcRenderer.invoke("settings:get"),
@@ -26114,8 +30530,8 @@ function expectFailure(result) {
   return result.success ? "" : result.error;
 }
 function tempFile(name) {
-  const folder = fs2.mkdtempSync(path.join(os.tmpdir(), "gestion-boutique-print-"));
-  return path.join(folder, name);
+  const folder = fs6.mkdtempSync(path5.join(os2.tmpdir(), "gestion-boutique-print-"));
+  return path5.join(folder, name);
 }
 describe3("impression et PDF", () => {
   before(() => {
@@ -26278,7 +30694,7 @@ describe3("impression et PDF", () => {
       });
       assert2.equal(result.success, true);
       assert2.equal(result.success ? result.data.path : null, target);
-      assert2.equal(fs2.readFileSync(target).toString(), "%PDF-1.4 facture");
+      assert2.equal(fs6.readFileSync(target).toString(), "%PDF-1.4 facture");
       assert2.deepEqual(printStubs.pdfOptions[0], {
         printBackground: true,
         pageSize: "A4",
@@ -26290,7 +30706,7 @@ describe3("impression et PDF", () => {
         "Facture VTE-000001.pdf"
       );
       assert2.equal(printStubs.openWindows, 0);
-      fs2.rmSync(path.dirname(target), { recursive: true, force: true });
+      fs6.rmSync(path5.dirname(target), { recursive: true, force: true });
     });
     it("traite l\u2019annulation de la bo\xEEte de dialogue comme un succ\xE8s sans fichier", async () => {
       printStubs.savePath = null;
@@ -26309,7 +30725,7 @@ describe3("impression et PDF", () => {
         PRINT_ERRORS.pdfFailed
       );
       resetPrintStubs();
-      printStubs.savePath = os.tmpdir();
+      printStubs.savePath = os2.tmpdir();
       assert2.equal(
         expectFailure(await invoke("print:pdf", { html: INVOICE_HTML })),
         PRINT_ERRORS.saveFailed

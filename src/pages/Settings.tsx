@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { settingsService } from '@/services'
-import type { SettingsInput } from '@/types'
+import { backupService, settingsService } from '@/services'
+import type { BackupInfo, RestoreResult, SettingsInput } from '@/types'
 
 const inputClass =
   'mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500'
@@ -22,6 +22,9 @@ function SettingsPage() {
   const [success, setSuccess] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [isBackingUp, setIsBackingUp] = useState(false)
+  const [isRestoring, setIsRestoring] = useState(false)
+  const [backupInfo, setBackupInfo] = useState<BackupInfo | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -54,6 +57,28 @@ function SettingsPage() {
     }
 
     load()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadBackupInfo() {
+      try {
+        const info = await backupService.info()
+
+        if (info && !cancelled) {
+          setBackupInfo(info)
+        }
+      } catch {
+        // Non-blocking: backup info is supplementary
+      }
+    }
+
+    loadBackupInfo()
 
     return () => {
       cancelled = true
@@ -232,6 +257,95 @@ function SettingsPage() {
               onChange={update('ownerName')}
               className={inputClass}
             />
+          </div>
+        </fieldset>
+
+        <fieldset className="space-y-4 rounded-lg border border-orange-100 bg-orange-50 p-6 shadow">
+          <legend className="px-2 text-sm font-semibold uppercase tracking-wide text-orange-800">
+            Maintenance des données
+          </legend>
+
+          <div className="space-y-3">
+            <p className="text-sm text-gray-600">
+              Sauvegardez vos données localement pour les protéger contre une
+              panne, ou restaurez-les depuis une sauvegarde antérieure.
+            </p>
+
+            {backupInfo && backupInfo.exists && (
+              <div className="text-xs text-gray-500">
+                Base actuelle : {backupInfo.size} modifiée le{' '}
+                {new Date(backupInfo.modifiedAt).toLocaleDateString()}
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <button
+              type="button"
+              onClick={async () => {
+                setError(null)
+                setSuccess(null)
+                setIsBackingUp(true)
+                try {
+                  const filePath = await backupService.backup()
+                  setSuccess(`Sauvegarde créée : ${filePath}`)
+                } catch (error) {
+                  setError(
+                    error instanceof Error ? error.message : 'Erreur lors de la sauvegarde.',
+                  )
+                } finally {
+                  setIsBackingUp(false)
+                }
+              }}
+              disabled={isBackingUp || isRestoring}
+              className="flex-1 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isBackingUp ? 'Sauvegarde en cours…' : 'Sauvegarder les données'}
+            </button>
+
+            <button
+              type="button"
+              onClick={async () => {
+                setError(null)
+                setSuccess(null)
+                if (
+                  !confirm(
+                    'La restauration remplacera toutes les données actuelles. Voulez-vous continuer ?\n\nL\'application redémarrera après la restauration.',
+                  )
+                )
+                  return
+                setIsRestoring(true)
+                try {
+                  const result: RestoreResult = await backupService.restore()
+                  if (result.canceled) {
+                    setSuccess('Restauration annulée.')
+                  } else {
+                    setSuccess(result.message)
+                  }
+                } catch (error) {
+                  setError(
+                    error instanceof Error
+                      ? error.message
+                      : 'Erreur lors de la restauration.',
+                  )
+                } finally {
+                  setIsRestoring(false)
+                }
+              }}
+              disabled={isBackingUp || isRestoring}
+              className="flex-1 rounded-md border border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isRestoring ? 'Restauration…' : 'Restaurer depuis un fichier'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => backupService.info()}
+              className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              title="Actualiser les informations sur la base de données"
+            >
+              Actualiser
+            </button>
           </div>
         </fieldset>
 

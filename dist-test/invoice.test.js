@@ -5504,10 +5504,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 var app = {
+  isPackaged: false,
   getPath(name) {
     const userDataDir2 = process.env.GESTION_BOUTIQUE_TEST_USER_DATA ?? path.join(os.tmpdir(), "gestion-boutique-tests");
     fs.mkdirSync(userDataDir2, { recursive: true });
     return name === "userData" ? userDataDir2 : path.join(userDataDir2, name);
+  },
+  quit: () => {
+  },
+  relaunch: () => {
   }
 };
 var printStubs = {
@@ -5518,6 +5523,8 @@ var printStubs = {
   printOptions: [],
   pdfOptions: [],
   saveOptions: [],
+  openOptions: [],
+  errorBoxMessages: [],
   /** What `webContents.print` answers through its callback. */
   printSucceeds: true,
   /** Electron answered through a promise instead of the callback. */
@@ -5526,6 +5533,8 @@ var printStubs = {
   pdfResult: Buffer.from("%PDF-1.4 facture"),
   /** Where the save dialog points, or null when it is cancelled. */
   savePath: "/tmp/gestion-boutique-facture.pdf",
+  /** Where the open dialog points, or null when it is cancelled. */
+  openPath: null,
   failToLoad: false,
   openWindows: 0
 };
@@ -25551,6 +25560,103 @@ function date4(params) {
   return _coercedDate(ZodDate, params);
 }
 
+// electron/services/maintenanceLock.ts
+import { EventEmitter } from "node:events";
+var acquireCount = 0;
+var maintenanceMode = false;
+var ee = new EventEmitter();
+var maintenanceLock = {
+  /**
+   * Acquires a shared lock for backup operations.
+   * Multiple backups can run concurrently, but maintenance (restore) blocks new backups.
+   * Returns a handle that must be released.
+   */
+  acquireForBackup() {
+    if (maintenanceMode) {
+      throw new Error("Maintenance in progress: backup not allowed");
+    }
+    acquireCount++;
+    return {
+      release() {
+        acquireCount--;
+        if (acquireCount <= 0) {
+          ee.emit("unlocked");
+        }
+      }
+    };
+  },
+  /**
+   * Acquires an exclusive lock for maintenance (restore).
+   * Sets maintenance mode, which blocks all new write operations.
+   * Waits for any in-flight transaction to complete before returning.
+   * Returns a handle that must be released (clears maintenance mode).
+   */
+  async acquireForMaintenance(db2, timeoutMs = 3e4) {
+    if (maintenanceMode) {
+      throw new Error("Maintenance already in progress");
+    }
+    maintenanceMode = true;
+    try {
+      if (db2.inTransaction) {
+        await waitForTransactionEnd(db2, timeoutMs);
+      }
+    } catch (error62) {
+      maintenanceMode = false;
+      throw error62;
+    }
+    return {
+      release() {
+        maintenanceMode = false;
+        acquireCount = 0;
+        ee.emit("unlocked");
+      }
+    };
+  },
+  /**
+   * Checks if maintenance mode is active (restore in progress).
+   * Write operations should check this and refuse to start.
+   */
+  isMaintenanceMode() {
+    return maintenanceMode;
+  },
+  /**
+   * Checks if any lock is held (backup or maintenance).
+   * Used by backup to know if it should wait.
+   */
+  isLocked() {
+    return acquireCount > 0 || maintenanceMode;
+  },
+  /**
+   * Waits for all locks to be released, up to timeoutMs.
+   * Returns true if idle, false on timeout.
+   */
+  waitForIdle(timeoutMs = 1e4) {
+    if (acquireCount === 0 && !maintenanceMode) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), timeoutMs);
+      ee.once("unlocked", () => {
+        clearTimeout(timer);
+        resolve(true);
+      });
+    });
+  }
+};
+async function waitForTransactionEnd(db2, timeoutMs) {
+  if (!db2.inTransaction) return;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error("Transaction did not complete in time"));
+    }, timeoutMs);
+    const checkInterval = setInterval(() => {
+      if (!db2.inTransaction) {
+        clearInterval(checkInterval);
+        clearTimeout(timer);
+        resolve();
+      }
+    }, 10);
+  });
+}
+
 // electron/services/clientService.ts
 var CLIENT_ERRORS = {
   nameRequired: "Le nom du client est obligatoire.",
@@ -25683,12 +25789,18 @@ function assertPhoneIsAvailable(phone, excludeId) {
 function isUniqueViolation(error62) {
   return error62 instanceof Error && error62.message.includes("UNIQUE");
 }
+function assertNotInMaintenance() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new ClientError("unexpected");
+  }
+}
 function getClientById(id) {
   const clientId = parseClientId(id);
   const row = getDb().select().from(clients).where(eq(clients.id, clientId)).get();
   return row ? toClient(row) : null;
 }
 function createClient(input2) {
+  assertNotInMaintenance();
   const name = parseClientName(input2);
   const phone = parseClientPhone(input2);
   const address = parseClientAddress(input2);
@@ -25720,6 +25832,7 @@ function createClient(input2) {
   }
 }
 function setClientActive(id, isActive) {
+  assertNotInMaintenance();
   const clientId = parseClientId(id);
   const db2 = getDb();
   const existing = db2.select({ id: clients.id, isSystem: clients.isSystem }).from(clients).where(eq(clients.id, clientId)).get();
@@ -25966,6 +26079,11 @@ function withMappedErrors(operation) {
     throw error62;
   }
 }
+function assertNotInMaintenance2() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new ProductError("unexpected");
+  }
+}
 function getProductById(id) {
   const productId = parseProductId(id);
   const product = selectProductById(productId);
@@ -25975,6 +26093,7 @@ function getProductById(id) {
   return product;
 }
 function createProduct(input2) {
+  assertNotInMaintenance2();
   const parsed = parseProduct(input2);
   const now = /* @__PURE__ */ new Date();
   assertCategoryExists(parsed.categoryId);
@@ -25988,6 +26107,7 @@ function createProduct(input2) {
   });
 }
 function updateProduct(id, input2) {
+  assertNotInMaintenance2();
   const productId = parseProductId(id);
   const parsed = parseProduct(input2);
   const existing = getDb().select({ id: products.id }).from(products).where(eq(products.id, productId)).get();
@@ -26002,6 +26122,7 @@ function updateProduct(id, input2) {
   });
 }
 function setProductActive(id, isActive) {
+  assertNotInMaintenance2();
   const productId = parseProductId(id);
   const parsedActive = isActiveSchema.safeParse(isActive);
   if (!parsedActive.success) {
@@ -26240,7 +26361,13 @@ function withMappedErrors2(operation) {
     throw error62;
   }
 }
+function assertNotInMaintenance3() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new StockError("unexpected");
+  }
+}
 function initializeStock(productId, input2) {
+  assertNotInMaintenance3();
   const parsedId = parseProductId2(productId);
   const db2 = getDb();
   return withMappedErrors2(
@@ -26329,6 +26456,11 @@ var INVOICE_QUANTITY_MAX = 1e6;
 var INVOICE_UNIT_PRICE_MAX = 1e9;
 var INVOICE_ITEMS_MAX = 100;
 var INVOICE_ERROR_CODES = Object.keys(INVOICE_ERRORS);
+function assertNotInMaintenance4() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new InvoiceError("unexpected");
+  }
+}
 function formatInvoiceReference(sequence) {
   return `${INVOICE_REFERENCE_PREFIX}-${String(sequence).padStart(
     INVOICE_REFERENCE_PADDING,
@@ -26784,6 +26916,7 @@ function writeLines(db2, saleId, lines) {
   return totalAmount;
 }
 function createInvoice(input2) {
+  assertNotInMaintenance4();
   const { items, clientId, date: date5 } = parsePayload(input2);
   const db2 = getDb();
   return withMappedErrors3(
@@ -26848,6 +26981,7 @@ function readPersistedLineQuantities(db2, saleId) {
   );
 }
 function updateInvoice(id, input2) {
+  assertNotInMaintenance4();
   const saleId = Number(id);
   if (!Number.isInteger(saleId) || saleId <= 0) {
     throw new InvoiceError("notFound");
@@ -26923,6 +27057,7 @@ function updateInvoice(id, input2) {
   );
 }
 function cancelInvoice(id) {
+  assertNotInMaintenance4();
   const saleId = Number(id);
   if (!Number.isInteger(saleId) || saleId <= 0) {
     throw new InvoiceError("notFound");
@@ -26972,6 +27107,7 @@ function cancelInvoice(id) {
   );
 }
 function deleteInvoice(id) {
+  assertNotInMaintenance4();
   const saleId = Number(id);
   if (!Number.isInteger(saleId) || saleId <= 0) {
     throw new InvoiceError("notFound");
@@ -27018,6 +27154,7 @@ function getInvoicePaymentSummary(saleId) {
   return computePaymentSummary(db2, row.totalAmount, id);
 }
 function addPayment(saleId, amount, paymentDate) {
+  assertNotInMaintenance4();
   const id = Number(saleId);
   if (!Number.isInteger(id) || id <= 0) {
     throw new InvoiceError("notFound");
@@ -27053,6 +27190,7 @@ function addPayment(saleId, amount, paymentDate) {
   );
 }
 function updatePayment(paymentId, amount, paymentDate) {
+  assertNotInMaintenance4();
   const id = Number(paymentId);
   if (!Number.isInteger(id) || id <= 0) {
     throw new InvoiceError("paymentNotFound");
@@ -27089,6 +27227,7 @@ function updatePayment(paymentId, amount, paymentDate) {
   );
 }
 function deletePayment(paymentId) {
+  assertNotInMaintenance4();
   const id = Number(paymentId);
   if (!Number.isInteger(id) || id <= 0) {
     throw new InvoiceError("paymentNotFound");
@@ -27216,7 +27355,13 @@ function assertNameIsAvailable3(name, excludeId) {
 function isUniqueViolation2(error62) {
   return error62 instanceof Error && error62.message.includes("UNIQUE");
 }
+function assertNotInMaintenance5() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new CategoryError("unexpected");
+  }
+}
 function createCategory(input2) {
+  assertNotInMaintenance5();
   const name = parseCategoryName(input2);
   const db2 = getDb();
   const now = /* @__PURE__ */ new Date();

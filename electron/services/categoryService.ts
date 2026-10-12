@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { categories } from '../database/schema'
 import { getDb } from '../database/client'
 import { isCategoryUsedByProducts } from './productService'
+import { maintenanceLock } from './maintenanceLock'
 import type { Category, CategoryInput, CategoryUpdateInput } from '../types'
 
 export const CATEGORY_ERRORS = {
@@ -126,6 +127,12 @@ function isForeignKeyViolation(error: unknown): boolean {
   return error instanceof Error && error.message.includes('FOREIGN KEY')
 }
 
+function assertNotInMaintenance(): void {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new CategoryError('unexpected')
+  }
+}
+
 export function listCategories(): Category[] {
   const rows = getDb().select().from(categories).orderBy(asc(categories.name)).all()
   return rows.map(toCategory)
@@ -138,6 +145,7 @@ export function getCategoryById(id: number): Category | null {
 }
 
 export function createCategory(input: CategoryInput): Category {
+  assertNotInMaintenance()
   const name = parseCategoryName(input)
   const db = getDb()
   const now = new Date()
@@ -157,6 +165,7 @@ export function createCategory(input: CategoryInput): Category {
 }
 
 export function updateCategory(id: number, input: CategoryUpdateInput): Category {
+  assertNotInMaintenance()
   const categoryId = parseCategoryId(id)
   const name = parseCategoryName(input)
   const db = getDb()
@@ -189,6 +198,7 @@ export function updateCategory(id: number, input: CategoryUpdateInput): Category
 }
 
 export function deleteCategory(id: number): null {
+  assertNotInMaintenance()
   const categoryId = parseCategoryId(id)
   const db = getDb()
 

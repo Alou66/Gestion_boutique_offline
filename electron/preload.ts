@@ -5,6 +5,12 @@ const api: ElectronAPI = {
   database: {
     getStatus: () => ipcRenderer.invoke('database:status'),
   },
+  backup: {
+    backup: () => ipcRenderer.invoke('database:backup'),
+    restore: (filePath) => ipcRenderer.invoke('database:restore', filePath),
+    info: () => ipcRenderer.invoke('database:backup-info'),
+    validate: (filePath) => ipcRenderer.invoke('database:validate', filePath),
+  },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     save: (input) => ipcRenderer.invoke('settings:save', input),

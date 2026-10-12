@@ -5504,10 +5504,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 var app = {
+  isPackaged: false,
   getPath(name) {
     const userDataDir2 = process.env.GESTION_BOUTIQUE_TEST_USER_DATA ?? path.join(os.tmpdir(), "gestion-boutique-tests");
     fs.mkdirSync(userDataDir2, { recursive: true });
     return name === "userData" ? userDataDir2 : path.join(userDataDir2, name);
+  },
+  quit: () => {
+  },
+  relaunch: () => {
   }
 };
 var printStubs = {
@@ -5518,6 +5523,8 @@ var printStubs = {
   printOptions: [],
   pdfOptions: [],
   saveOptions: [],
+  openOptions: [],
+  errorBoxMessages: [],
   /** What `webContents.print` answers through its callback. */
   printSucceeds: true,
   /** Electron answered through a promise instead of the callback. */
@@ -5526,6 +5533,8 @@ var printStubs = {
   pdfResult: Buffer.from("%PDF-1.4 facture"),
   /** Where the save dialog points, or null when it is cancelled. */
   savePath: "/tmp/gestion-boutique-facture.pdf",
+  /** Where the open dialog points, or null when it is cancelled. */
+  openPath: null,
   failToLoad: false,
   openWindows: 0
 };
@@ -25551,6 +25560,103 @@ function date4(params) {
   return _coercedDate(ZodDate, params);
 }
 
+// electron/services/maintenanceLock.ts
+import { EventEmitter } from "node:events";
+var acquireCount = 0;
+var maintenanceMode = false;
+var ee = new EventEmitter();
+var maintenanceLock = {
+  /**
+   * Acquires a shared lock for backup operations.
+   * Multiple backups can run concurrently, but maintenance (restore) blocks new backups.
+   * Returns a handle that must be released.
+   */
+  acquireForBackup() {
+    if (maintenanceMode) {
+      throw new Error("Maintenance in progress: backup not allowed");
+    }
+    acquireCount++;
+    return {
+      release() {
+        acquireCount--;
+        if (acquireCount <= 0) {
+          ee.emit("unlocked");
+        }
+      }
+    };
+  },
+  /**
+   * Acquires an exclusive lock for maintenance (restore).
+   * Sets maintenance mode, which blocks all new write operations.
+   * Waits for any in-flight transaction to complete before returning.
+   * Returns a handle that must be released (clears maintenance mode).
+   */
+  async acquireForMaintenance(db2, timeoutMs = 3e4) {
+    if (maintenanceMode) {
+      throw new Error("Maintenance already in progress");
+    }
+    maintenanceMode = true;
+    try {
+      if (db2.inTransaction) {
+        await waitForTransactionEnd(db2, timeoutMs);
+      }
+    } catch (error62) {
+      maintenanceMode = false;
+      throw error62;
+    }
+    return {
+      release() {
+        maintenanceMode = false;
+        acquireCount = 0;
+        ee.emit("unlocked");
+      }
+    };
+  },
+  /**
+   * Checks if maintenance mode is active (restore in progress).
+   * Write operations should check this and refuse to start.
+   */
+  isMaintenanceMode() {
+    return maintenanceMode;
+  },
+  /**
+   * Checks if any lock is held (backup or maintenance).
+   * Used by backup to know if it should wait.
+   */
+  isLocked() {
+    return acquireCount > 0 || maintenanceMode;
+  },
+  /**
+   * Waits for all locks to be released, up to timeoutMs.
+   * Returns true if idle, false on timeout.
+   */
+  waitForIdle(timeoutMs = 1e4) {
+    if (acquireCount === 0 && !maintenanceMode) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), timeoutMs);
+      ee.once("unlocked", () => {
+        clearTimeout(timer);
+        resolve(true);
+      });
+    });
+  }
+};
+async function waitForTransactionEnd(db2, timeoutMs) {
+  if (!db2.inTransaction) return;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error("Transaction did not complete in time"));
+    }, timeoutMs);
+    const checkInterval = setInterval(() => {
+      if (!db2.inTransaction) {
+        clearInterval(checkInterval);
+        clearTimeout(timer);
+        resolve();
+      }
+    }, 10);
+  });
+}
+
 // electron/services/productService.ts
 var PRODUCT_ERRORS = {
   nameRequired: "Le nom du produit est obligatoire.",
@@ -25809,6 +25915,11 @@ function withMappedErrors(operation) {
     throw error62;
   }
 }
+function assertNotInMaintenance() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new ProductError("unexpected");
+  }
+}
 function listProducts(filters = {}) {
   const conditions = [];
   if (typeof filters?.search === "string") {
@@ -25845,6 +25956,7 @@ function getProductById(id) {
   return product;
 }
 function createProduct(input2) {
+  assertNotInMaintenance();
   const parsed = parseProduct(input2);
   const now = /* @__PURE__ */ new Date();
   assertCategoryExists(parsed.categoryId);
@@ -25858,6 +25970,7 @@ function createProduct(input2) {
   });
 }
 function setProductActive(id, isActive) {
+  assertNotInMaintenance();
   const productId = parseProductId(id);
   const parsedActive = isActiveSchema.safeParse(isActive);
   if (!parsedActive.success) {
@@ -26143,7 +26256,13 @@ function withMappedErrors2(operation) {
     throw error62;
   }
 }
+function assertNotInMaintenance2() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new StockError("unexpected");
+  }
+}
 function initializeStock(productId, input2) {
+  assertNotInMaintenance2();
   const parsedId = parseProductId2(productId);
   const db2 = getDb();
   return withMappedErrors2(
@@ -26181,6 +26300,7 @@ function initializeStock(productId, input2) {
   );
 }
 function adjustStock(productId, input2) {
+  assertNotInMaintenance2();
   const parsedId = parseProductId2(productId);
   const parsedInput = parseAdjustInput(input2, parsedId);
   const db2 = getDb();
@@ -26339,7 +26459,13 @@ function assertNameIsAvailable2(name, excludeId) {
 function isUniqueViolation(error62) {
   return error62 instanceof Error && error62.message.includes("UNIQUE");
 }
+function assertNotInMaintenance3() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new CategoryError("unexpected");
+  }
+}
 function createCategory(input2) {
+  assertNotInMaintenance3();
   const name = parseCategoryName(input2);
   const db2 = getDb();
   const now = /* @__PURE__ */ new Date();

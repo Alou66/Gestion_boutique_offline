@@ -13,10 +13,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 var app = {
+  isPackaged: false,
   getPath(name) {
     const userDataDir2 = process.env.GESTION_BOUTIQUE_TEST_USER_DATA ?? path.join(os.tmpdir(), "gestion-boutique-tests");
     fs.mkdirSync(userDataDir2, { recursive: true });
     return name === "userData" ? userDataDir2 : path.join(userDataDir2, name);
+  },
+  quit: () => {
+  },
+  relaunch: () => {
   }
 };
 var handlers = /* @__PURE__ */ new Map();
@@ -63,6 +68,8 @@ var printStubs = {
   printOptions: [],
   pdfOptions: [],
   saveOptions: [],
+  openOptions: [],
+  errorBoxMessages: [],
   /** What `webContents.print` answers through its callback. */
   printSucceeds: true,
   /** Electron answered through a promise instead of the callback. */
@@ -71,6 +78,8 @@ var printStubs = {
   pdfResult: Buffer.from("%PDF-1.4 facture"),
   /** Where the save dialog points, or null when it is cancelled. */
   savePath: "/tmp/gestion-boutique-facture.pdf",
+  /** Where the open dialog points, or null when it is cancelled. */
+  openPath: null,
   failToLoad: false,
   openWindows: 0
 };
@@ -116,6 +125,16 @@ var dialog = {
       canceled: printStubs.savePath === null,
       filePath: printStubs.savePath ?? void 0
     });
+  },
+  showOpenDialog(options) {
+    printStubs.openOptions.push(options);
+    return Promise.resolve({
+      canceled: printStubs.openPath === null,
+      filePaths: printStubs.openPath === null ? [] : [printStubs.openPath]
+    });
+  },
+  showErrorBox(_, content) {
+    printStubs.errorBoxMessages.push(content);
   }
 };
 
@@ -1471,7 +1490,7 @@ var QueryPromise = class {
 function mapResultRow(columns, row, joinsNotNullableMap) {
   const nullifyMap = {};
   const result = columns.reduce(
-    (result2, { path: path4, field }, columnIndex) => {
+    (result2, { path: path6, field }, columnIndex) => {
       let decoder;
       if (is(field, Column)) {
         decoder = field;
@@ -1483,8 +1502,8 @@ function mapResultRow(columns, row, joinsNotNullableMap) {
         decoder = field.sql.decoder;
       }
       let node2 = result2;
-      for (const [pathChunkIndex, pathChunk] of path4.entries()) {
-        if (pathChunkIndex < path4.length - 1) {
+      for (const [pathChunkIndex, pathChunk] of path6.entries()) {
+        if (pathChunkIndex < path6.length - 1) {
           if (!(pathChunk in node2)) {
             node2[pathChunk] = {};
           }
@@ -1492,8 +1511,8 @@ function mapResultRow(columns, row, joinsNotNullableMap) {
         } else {
           const rawValue = row[columnIndex];
           const value = node2[pathChunk] = rawValue === null ? null : decoder.mapFromDriverValue(rawValue);
-          if (joinsNotNullableMap && is(field, Column) && path4.length === 2) {
-            const objectName = path4[0];
+          if (joinsNotNullableMap && is(field, Column) && path6.length === 2) {
+            const objectName = path6[0];
             if (!(objectName in nullifyMap)) {
               nullifyMap[objectName] = value === null ? getTableName(field.table) : false;
             } else if (typeof nullifyMap[objectName] === "string" && nullifyMap[objectName] !== getTableName(field.table)) {
@@ -2056,6 +2075,11 @@ function mapRelationalRow(tablesConfig, tableConfig, row, buildQueryResultSelect
 function count(expression) {
   return sql`count(${expression || sql.raw("*")})`.mapWith(Number);
 }
+
+// electron/services/databaseService.ts
+import fs3 from "node:fs";
+import path3 from "node:path";
+import crypto3 from "node:crypto";
 
 // electron/database/schema.ts
 var schema_exports = {};
@@ -6017,6 +6041,103 @@ function closeDatabase() {
   }
 }
 
+// electron/services/maintenanceLock.ts
+import { EventEmitter } from "node:events";
+var acquireCount = 0;
+var maintenanceMode = false;
+var ee = new EventEmitter();
+var maintenanceLock = {
+  /**
+   * Acquires a shared lock for backup operations.
+   * Multiple backups can run concurrently, but maintenance (restore) blocks new backups.
+   * Returns a handle that must be released.
+   */
+  acquireForBackup() {
+    if (maintenanceMode) {
+      throw new Error("Maintenance in progress: backup not allowed");
+    }
+    acquireCount++;
+    return {
+      release() {
+        acquireCount--;
+        if (acquireCount <= 0) {
+          ee.emit("unlocked");
+        }
+      }
+    };
+  },
+  /**
+   * Acquires an exclusive lock for maintenance (restore).
+   * Sets maintenance mode, which blocks all new write operations.
+   * Waits for any in-flight transaction to complete before returning.
+   * Returns a handle that must be released (clears maintenance mode).
+   */
+  async acquireForMaintenance(db2, timeoutMs = 3e4) {
+    if (maintenanceMode) {
+      throw new Error("Maintenance already in progress");
+    }
+    maintenanceMode = true;
+    try {
+      if (db2.inTransaction) {
+        await waitForTransactionEnd(db2, timeoutMs);
+      }
+    } catch (error62) {
+      maintenanceMode = false;
+      throw error62;
+    }
+    return {
+      release() {
+        maintenanceMode = false;
+        acquireCount = 0;
+        ee.emit("unlocked");
+      }
+    };
+  },
+  /**
+   * Checks if maintenance mode is active (restore in progress).
+   * Write operations should check this and refuse to start.
+   */
+  isMaintenanceMode() {
+    return maintenanceMode;
+  },
+  /**
+   * Checks if any lock is held (backup or maintenance).
+   * Used by backup to know if it should wait.
+   */
+  isLocked() {
+    return acquireCount > 0 || maintenanceMode;
+  },
+  /**
+   * Waits for all locks to be released, up to timeoutMs.
+   * Returns true if idle, false on timeout.
+   */
+  waitForIdle(timeoutMs = 1e4) {
+    if (acquireCount === 0 && !maintenanceMode) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), timeoutMs);
+      ee.once("unlocked", () => {
+        clearTimeout(timer);
+        resolve(true);
+      });
+    });
+  }
+};
+async function waitForTransactionEnd(db2, timeoutMs) {
+  if (!db2.inTransaction) return;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error("Transaction did not complete in time"));
+    }, timeoutMs);
+    const checkInterval = setInterval(() => {
+      if (!db2.inTransaction) {
+        clearInterval(checkInterval);
+        clearTimeout(timer);
+        resolve();
+      }
+    }, 10);
+  });
+}
+
 // electron/services/databaseService.ts
 function buildSettingsRow(input2, now) {
   return {
@@ -6029,6 +6150,72 @@ function buildSettingsRow(input2, now) {
     createdAt: now,
     updatedAt: now
   };
+}
+function initDatabase(migrationsFolder2) {
+  const db2 = initializeDatabase();
+  runMigrationsWithRecovery(db2, migrationsFolder2);
+}
+function runMigrationsWithRecovery(db2, migrationsFolder2) {
+  let done = false;
+  while (!done) {
+    try {
+      migrate(db2, { migrationsFolder: migrationsFolder2 });
+      done = true;
+    } catch (error62) {
+      if (!isAlreadyAppliedError(error62)) {
+        throw error62;
+      }
+      if (!markMigrationAsApplied(db2, migrationsFolder2, error62)) {
+        throw error62;
+      }
+    }
+  }
+}
+function isAlreadyAppliedError(error62) {
+  const messages = [error62.message, error62.cause instanceof Error ? error62.cause.message : ""];
+  return messages.some((msg) => {
+    const lower = msg.toLowerCase();
+    return lower.includes("duplicate column name") || lower.includes("duplicate table name") || lower.includes("already exists");
+  });
+}
+function getErrorMessage(error62) {
+  const parts = [error62.message];
+  const cause = error62.cause;
+  if (cause instanceof Error) {
+    parts.push(cause.message);
+  }
+  return parts.join("\n");
+}
+function markMigrationAsApplied(db2, migrationsFolder2, error62) {
+  const journalPath = path3.join(migrationsFolder2, "meta", "_journal.json");
+  if (!fs3.existsSync(journalPath)) {
+    return false;
+  }
+  const journal = JSON.parse(fs3.readFileSync(journalPath, "utf8"));
+  const fullMessage = getErrorMessage(error62);
+  const sqlMatch = fullMessage.match(/Failed to run the query '([^']+)'/s);
+  if (!sqlMatch) {
+    return false;
+  }
+  const failingSqlFirstLine = sqlMatch[1].trim().replace(/--> statement-breakpoint/, "").trim().split("\n")[0].trim();
+  for (const entry of journal.entries) {
+    const sqlFile = path3.join(migrationsFolder2, `${entry.tag}.sql`);
+    if (!fs3.existsSync(sqlFile)) {
+      continue;
+    }
+    const content = fs3.readFileSync(sqlFile, "utf8");
+    if (content.includes(failingSqlFirstLine)) {
+      const hash2 = crypto3.createHash("sha256").update(content).digest("hex");
+      db2.$client.prepare(
+        "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)"
+      ).run(hash2, entry.when);
+      console.warn(
+        `[migrations] Schema drift detected: marked migration "${entry.tag}" as already applied`
+      );
+      return true;
+    }
+  }
+  return false;
 }
 function getDatabaseStatus() {
   const db2 = getDb();
@@ -6054,6 +6241,9 @@ async function getSettings() {
   }
 }
 async function saveSettings(input2) {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new Error("Maintenance in progress");
+  }
   const db2 = getDb();
   const values = buildSettingsRow(input2, /* @__PURE__ */ new Date());
   const existing = await db2.select().from(settings).where(eq(settings.id, 1)).get();
@@ -6896,10 +7086,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema2) {
   return mergeDefs(schema2._zod.def);
 }
-function getElementAtPath(obj, path4) {
-  if (!path4)
+function getElementAtPath(obj, path6) {
+  if (!path6)
     return obj;
-  return path4.reduce((acc, key) => acc?.[key], obj);
+  return path6.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -7239,11 +7429,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path4, issues) {
+function prefixIssues(path6, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path4);
+    iss.path.unshift(path6);
     return iss;
   });
 }
@@ -7693,16 +7883,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path4 = []) => {
+  const processError = (error63, path6 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path4, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
       } else {
-        const fullpath = [...path4, ...issue2.path];
+        const fullpath = [...path6, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -7741,17 +7931,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error63, path4 = []) => {
+  const processError = (error63, path6 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path4, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
       } else {
-        const fullpath = [...path4, ...issue2.path];
+        const fullpath = [...path6, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -7790,8 +7980,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path4 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path4) {
+  const path6 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path6) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -24884,13 +25074,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path4 = ref.slice(1).split("/").filter(Boolean);
-  if (path4.length === 0) {
+  const path6 = ref.slice(1).split("/").filter(Boolean);
+  if (path6.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path4[0] === defsKey) {
-    const key = path4[1] === void 0 ? void 0 : decodeJSONPointerSegment(path4[1]);
+  if (path6[0] === defsKey) {
+    const key = path6[1] === void 0 ? void 0 : decodeJSONPointerSegment(path6[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -25933,6 +26123,401 @@ function registerAuthIpcHandlers() {
   });
 }
 
+// electron/services/backupService.ts
+import fs4 from "node:fs";
+import path4 from "node:path";
+import crypto4 from "node:crypto";
+import { fileURLToPath } from "node:url";
+import Database2 from "better-sqlite3";
+var BACKUP_ERRORS = {
+  cancelled: "Sauvegarde annul\xE9e.",
+  backupFailed: "La sauvegarde n'a pas pu \xEAtre effectu\xE9e.",
+  maintenanceInProgress: "Une op\xE9ration de maintenance est en cours. Veuillez r\xE9essayer dans quelques instants.",
+  fileNotFound: "Le fichier s\xE9lectionn\xE9 est introuvable.",
+  corruptedFile: "Le fichier s\xE9lectionn\xE9 est corrompu ou n'est pas une base de donn\xE9es valide.",
+  invalidBackupFile: "Le fichier s\xE9lectionn\xE9 ne contient pas les tables attendues.",
+  foreignKeysViolated: "Le fichier contient des incoh\xE9rences de cl\xE9s \xE9trang\xE8res.",
+  backupVersionTooNew: "La sauvegarde provient d'une version ult\xE9rieure de l'application.",
+  restoreFailed: "La restauration a \xE9chou\xE9. La base de donn\xE9es d'origine a \xE9t\xE9 restaur\xE9e automatiquement.",
+  operationInProgress: "Une op\xE9ration est en cours sur la base de donn\xE9es. Veuillez r\xE9essayer dans quelques instants.",
+  restoreTimeout: "Aucune op\xE9ration en cours n'a fini dans les d\xE9lais. La restauration est annul\xE9e.",
+  unexpected: "Une erreur inattendue est survenue.",
+  emergencyBackupInvalid: "La sauvegarde de secours est invalide. La base de donn\xE9es n'a pas pu \xEAtre restaur\xE9e automatiquement. Fichier de secours conserv\xE9 pour analyse."
+};
+var BackupError = class extends Error {
+  code;
+  constructor(code) {
+    super(BACKUP_ERRORS[code]);
+    this.name = "BackupError";
+    this.code = code;
+  }
+};
+var REQUIRED_TABLES = [
+  "settings",
+  "users",
+  "categories",
+  "products",
+  "clients",
+  "suppliers",
+  "sales",
+  "payments",
+  "sale_items",
+  "stock_movements",
+  "supplies",
+  "supply_items",
+  "transformations"
+];
+function formatDate(date5 = /* @__PURE__ */ new Date()) {
+  const y = date5.getFullYear();
+  const m = String(date5.getMonth() + 1).padStart(2, "0");
+  const d = String(date5.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+function getDatabasePath() {
+  return path4.join(app.getPath("userData"), "database.sqlite");
+}
+function resolveMigrationsFolder() {
+  const appRoot = process.env.APP_ROOT;
+  const dirname = path4.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path4.join(dirname, "database/migrations"),
+    appRoot ? path4.join(appRoot, "dist-electron/database/migrations") : "",
+    appRoot ? path4.join(appRoot, "electron/database/migrations") : "",
+    path4.join(process.cwd(), "electron/database/migrations")
+  ].filter(Boolean);
+  return candidates.find((folder) => fs4.existsSync(folder)) ?? candidates[0];
+}
+function getCurrentMaxMigrationTime() {
+  const journalPath = path4.join(resolveMigrationsFolder(), "meta", "_journal.json");
+  if (!fs4.existsSync(journalPath)) {
+    return 0;
+  }
+  const journal = JSON.parse(fs4.readFileSync(journalPath, "utf8"));
+  return journal.entries.length > 0 ? Math.max(...journal.entries.map((e) => e.when)) : 0;
+}
+function toResult(data) {
+  return { success: true, data };
+}
+function toError(error62, fallbackCode) {
+  if (error62 instanceof BackupError) {
+    return { success: false, error: error62.message };
+  }
+  console.error("[backup] Unexpected error:", error62);
+  return { success: false, error: BACKUP_ERRORS[fallbackCode] };
+}
+function getDatabaseInfo() {
+  try {
+    const dbPath = getDatabasePath();
+    if (!fs4.existsSync(dbPath)) {
+      return toResult({
+        exists: false,
+        filePath: dbPath,
+        sizeBytes: 0,
+        size: "0 octet",
+        modifiedAt: "",
+        sqliteVersion: ""
+      });
+    }
+    const sqlite = new Database2(dbPath, { readonly: true });
+    try {
+      const versionRow = sqlite.prepare("select sqlite_version() as version").get();
+      const stat = fs4.statSync(dbPath);
+      return toResult({
+        exists: true,
+        filePath: dbPath,
+        sizeBytes: stat.size,
+        size: formatSize(stat.size),
+        modifiedAt: stat.mtime.toISOString(),
+        sqliteVersion: versionRow?.version ?? "inconnu"
+      });
+    } finally {
+      sqlite.close();
+    }
+  } catch (error62) {
+    return toError(error62, "unexpected");
+  }
+}
+function formatSize(bytes) {
+  if (bytes < 1024) return `${bytes} octet${bytes > 1 ? "s" : ""}`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} Ko`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} Go`;
+}
+function validateBackupFile(filePath) {
+  try {
+    if (!fs4.existsSync(filePath)) {
+      return { success: false, error: BACKUP_ERRORS.fileNotFound };
+    }
+    let tempDb = null;
+    try {
+      tempDb = new Database2(filePath, { readonly: true, fileMustExist: true });
+    } catch {
+      return { success: false, error: BACKUP_ERRORS.corruptedFile };
+    }
+    try {
+      let integrity;
+      try {
+        integrity = tempDb.prepare("PRAGMA integrity_check").get();
+      } catch {
+        return { success: false, error: BACKUP_ERRORS.corruptedFile };
+      }
+      if (integrity?.integrity_check !== "ok") {
+        return { success: false, error: BACKUP_ERRORS.corruptedFile };
+      }
+      const fkViolations = tempDb.prepare("PRAGMA foreign_key_check").all();
+      if (fkViolations.length > 0) {
+        return { success: false, error: BACKUP_ERRORS.foreignKeysViolated };
+      }
+      const tables = tempDb.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+      ).all();
+      const tableNames = new Set(tables.map((t) => t.name));
+      for (const required2 of REQUIRED_TABLES) {
+        if (!tableNames.has(required2)) {
+          return { success: false, error: BACKUP_ERRORS.invalidBackupFile };
+        }
+      }
+      const currentMax = getCurrentMaxMigrationTime();
+      try {
+        const lastMigration = tempDb.prepare("SELECT MAX(created_at) as max_created FROM __drizzle_migrations").get();
+        if (lastMigration?.max_created && lastMigration.max_created > currentMax) {
+          return { success: false, error: BACKUP_ERRORS.backupVersionTooNew };
+        }
+      } catch {
+      }
+      const stat = fs4.statSync(filePath);
+      return toResult({
+        valid: true,
+        filePath,
+        sizeBytes: stat.size,
+        size: formatSize(stat.size),
+        modifiedAt: stat.mtime.toISOString(),
+        tableCount: tables.length
+      });
+    } finally {
+      tempDb.close();
+    }
+  } catch (error62) {
+    return toError(error62, "unexpected");
+  }
+}
+async function createBackup(onProgress) {
+  let handle = null;
+  let backupPath = null;
+  let fileCreated = false;
+  try {
+    handle = maintenanceLock.acquireForBackup();
+    const db2 = getDb();
+    const sqlite = db2.$client;
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      title: "Sauvegarder les donn\xE9es de la boutique",
+      defaultPath: `gestion-boutique-sauvegarde-${formatDate()}.sqlite`,
+      filters: [{ name: "Base SQLite", extensions: ["sqlite"] }]
+    });
+    if (canceled || !filePath) {
+      return { success: false, error: BACKUP_ERRORS.cancelled };
+    }
+    backupPath = filePath;
+    await sqlite.backup(filePath, {
+      progress: (info) => {
+        const percent = (info.totalPages - info.remainingPages) / info.totalPages * 100;
+        onProgress?.(percent);
+        return 100;
+      }
+    });
+    fileCreated = true;
+    return toResult(filePath);
+  } catch (error62) {
+    if (backupPath && fileCreated) {
+      try {
+        fs4.rmSync(backupPath, { force: true });
+      } catch (cleanupError) {
+        console.error("[backup] Failed to cleanup partial backup file:", cleanupError);
+      }
+    }
+    if (error62 instanceof BackupError) {
+      return { success: false, error: error62.message };
+    }
+    if (error62 instanceof Error && error62.message.includes("Maintenance in progress")) {
+      return { success: false, error: BACKUP_ERRORS.maintenanceInProgress };
+    }
+    return toError(error62, "backupFailed");
+  } finally {
+    handle?.release();
+  }
+}
+function validateEmergencyBackup(emergencyPath) {
+  try {
+    if (!fs4.existsSync(emergencyPath)) {
+      return false;
+    }
+    const tempDb = new Database2(emergencyPath, { readonly: true, fileMustExist: true });
+    try {
+      const integrity = tempDb.prepare("PRAGMA integrity_check").get();
+      if (integrity?.integrity_check !== "ok") {
+        return false;
+      }
+      const fkViolations = tempDb.prepare("PRAGMA foreign_key_check").all();
+      if (fkViolations.length > 0) {
+        return false;
+      }
+      const tables = tempDb.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+      ).all();
+      const tableNames = new Set(tables.map((t) => t.name));
+      for (const required2 of REQUIRED_TABLES) {
+        if (!tableNames.has(required2)) {
+          return false;
+        }
+      }
+      return true;
+    } finally {
+      tempDb.close();
+    }
+  } catch {
+    return false;
+  }
+}
+async function restoreBackup(filePath) {
+  let handle = null;
+  let emergencyPath = null;
+  let selectedPath = filePath;
+  const dbPath = getDatabasePath();
+  let restoreSucceeded = false;
+  try {
+    if (!selectedPath) {
+      const { canceled, filePaths } = await dialog.showOpenDialog({
+        title: "S\xE9lectionner une sauvegarde",
+        defaultPath: app.getPath("documents"),
+        filters: [{ name: "Base SQLite", extensions: ["sqlite"] }],
+        properties: ["openFile"]
+      });
+      if (canceled || filePaths.length === 0) {
+        return toResult({ canceled: true, restarted: false, message: "Restauration annul\xE9e." });
+      }
+      selectedPath = filePaths[0];
+    }
+    const validation = validateBackupFile(selectedPath);
+    if (!validation.success) {
+      return { success: false, error: validation.error };
+    }
+    const db2 = getDb();
+    const sqlite = db2.$client;
+    try {
+      handle = await maintenanceLock.acquireForMaintenance(sqlite);
+    } catch (error62) {
+      if (error62 instanceof Error && error62.message === "Transaction did not complete in time") {
+        return { success: false, error: BACKUP_ERRORS.restoreTimeout };
+      }
+      throw error62;
+    }
+    emergencyPath = `${dbPath}.emergency-${crypto4.randomUUID().replace(/-/g, "")}`;
+    fs4.copyFileSync(dbPath, emergencyPath);
+    closeDatabase();
+    fs4.copyFileSync(selectedPath, dbPath);
+    initializeDatabase();
+    initDatabase(resolveMigrationsFolder());
+    const verifyDb = new Database2(dbPath, { readonly: true });
+    try {
+      const integrity = verifyDb.prepare("PRAGMA integrity_check").get();
+      if (integrity?.integrity_check !== "ok") {
+        throw new BackupError("restoreFailed");
+      }
+    } finally {
+      verifyDb.close();
+    }
+    restoreSucceeded = true;
+    setImmediate(() => {
+      app.relaunch();
+      app.quit();
+    });
+    return toResult({
+      canceled: false,
+      restarted: true,
+      message: "Restauration r\xE9ussie. L'application va red\xE9marrer."
+    });
+  } catch (error62) {
+    if (emergencyPath && fs4.existsSync(emergencyPath)) {
+      const isValid = validateEmergencyBackup(emergencyPath);
+      if (isValid) {
+        try {
+          closeDatabase();
+          fs4.copyFileSync(emergencyPath, getDatabasePath());
+          initializeDatabase();
+          initDatabase(resolveMigrationsFolder());
+        } catch (recoveryError) {
+          console.error("[backup] Emergency recovery failed:", recoveryError);
+        }
+      } else {
+        console.error("[backup] Emergency backup is invalid, NOT restoring:", emergencyPath);
+        return { success: false, error: BACKUP_ERRORS.emergencyBackupInvalid };
+      }
+    } else if (emergencyPath) {
+      console.error("[backup] Emergency backup file not found:", emergencyPath);
+    }
+    return toError(error62, "restoreFailed");
+  } finally {
+    if (emergencyPath && fs4.existsSync(emergencyPath)) {
+      if (restoreSucceeded) {
+        try {
+          fs4.rmSync(emergencyPath, { force: true });
+        } catch (cleanupError) {
+          console.error("[backup] Failed to cleanup emergency backup after success:", cleanupError);
+        }
+      }
+    }
+    handle?.release();
+  }
+}
+
+// electron/ipc/backup.ts
+function toSuccess(data) {
+  return { success: true, data };
+}
+function toFailure2(error62, fallback) {
+  if (error62 instanceof BackupError) {
+    return { success: false, error: error62.message };
+  }
+  console.error("[backup] Unexpected error:", error62);
+  return { success: false, error: BACKUP_ERRORS[fallback] };
+}
+function registerBackupIpcHandlers() {
+  ipcMain.handle("database:backup", async () => {
+    try {
+      return await createBackup();
+    } catch (error62) {
+      return toFailure2(error62, "unexpected");
+    }
+  });
+  ipcMain.handle(
+    "database:restore",
+    async (_event, filePath) => {
+      try {
+        return await restoreBackup(filePath);
+      } catch (error62) {
+        return toFailure2(error62, "unexpected");
+      }
+    }
+  );
+  ipcMain.handle("database:backup-info", async () => {
+    try {
+      return toSuccess(getDatabaseInfo());
+    } catch (error62) {
+      return toFailure2(error62, "unexpected");
+    }
+  });
+  ipcMain.handle(
+    "database:validate",
+    async (_event, filePath) => {
+      try {
+        return validateBackupFile(filePath);
+      } catch (error62) {
+        return toFailure2(error62, "unexpected");
+      }
+    }
+  );
+}
+
 // electron/services/productService.ts
 var PRODUCT_ERRORS = {
   nameRequired: "Le nom du produit est obligatoire.",
@@ -26191,6 +26776,11 @@ function withMappedErrors(operation) {
     throw error62;
   }
 }
+function assertNotInMaintenance() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new ProductError("unexpected");
+  }
+}
 function listProducts(filters = {}) {
   const conditions = [];
   if (typeof filters?.search === "string") {
@@ -26227,6 +26817,7 @@ function getProductById(id) {
   return product;
 }
 function createProduct(input2) {
+  assertNotInMaintenance();
   const parsed = parseProduct(input2);
   const now = /* @__PURE__ */ new Date();
   assertCategoryExists(parsed.categoryId);
@@ -26240,6 +26831,7 @@ function createProduct(input2) {
   });
 }
 function updateProduct(id, input2) {
+  assertNotInMaintenance();
   const productId = parseProductId(id);
   const parsed = parseProduct(input2);
   const existing = getDb().select({ id: products.id }).from(products).where(eq(products.id, productId)).get();
@@ -26254,6 +26846,7 @@ function updateProduct(id, input2) {
   });
 }
 function setProductActive(id, isActive) {
+  assertNotInMaintenance();
   const productId = parseProductId(id);
   const parsedActive = isActiveSchema.safeParse(isActive);
   if (!parsedActive.success) {
@@ -26350,6 +26943,11 @@ function isUniqueViolation(error62) {
 function isForeignKeyViolation(error62) {
   return error62 instanceof Error && error62.message.includes("FOREIGN KEY");
 }
+function assertNotInMaintenance2() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new CategoryError("unexpected");
+  }
+}
 function listCategories() {
   const rows = getDb().select().from(categories).orderBy(asc(categories.name)).all();
   return rows.map(toCategory);
@@ -26360,6 +26958,7 @@ function getCategoryById(id) {
   return row ? toCategory(row) : null;
 }
 function createCategory(input2) {
+  assertNotInMaintenance2();
   const name = parseCategoryName(input2);
   const db2 = getDb();
   const now = /* @__PURE__ */ new Date();
@@ -26376,6 +26975,7 @@ function createCategory(input2) {
   }
 }
 function updateCategory(id, input2) {
+  assertNotInMaintenance2();
   const categoryId = parseCategoryId(id);
   const name = parseCategoryName(input2);
   const db2 = getDb();
@@ -26397,6 +26997,7 @@ function updateCategory(id, input2) {
   }
 }
 function deleteCategory(id) {
+  assertNotInMaintenance2();
   const categoryId = parseCategoryId(id);
   const db2 = getDb();
   if (!db2.select({ id: categories.id }).from(categories).where(eq(categories.id, categoryId)).get()) {
@@ -26423,10 +27024,10 @@ function isNameAvailable2(name, excludeId) {
 }
 
 // electron/ipc/categories.ts
-function toSuccess(data) {
+function toSuccess2(data) {
   return { success: true, data };
 }
-function toFailure2(error62, fallback) {
+function toFailure3(error62, fallback) {
   if (error62 instanceof CategoryError) {
     return { success: false, error: error62.message };
   }
@@ -26436,18 +27037,18 @@ function toFailure2(error62, fallback) {
 function registerCategoryIpcHandlers() {
   ipcMain.handle("categories:list", () => {
     try {
-      return toSuccess(listCategories());
+      return toSuccess2(listCategories());
     } catch (error62) {
-      return toFailure2(error62, CATEGORY_ERRORS.unexpected);
+      return toFailure3(error62, CATEGORY_ERRORS.unexpected);
     }
   });
   ipcMain.handle(
     "categories:get",
     (_event, id) => {
       try {
-        return toSuccess(getCategoryById(id));
+        return toSuccess2(getCategoryById(id));
       } catch (error62) {
-        return toFailure2(error62, CATEGORY_ERRORS.unexpected);
+        return toFailure3(error62, CATEGORY_ERRORS.unexpected);
       }
     }
   );
@@ -26455,9 +27056,9 @@ function registerCategoryIpcHandlers() {
     "categories:create",
     (_event, input2) => {
       try {
-        return toSuccess(createCategory(input2));
+        return toSuccess2(createCategory(input2));
       } catch (error62) {
-        return toFailure2(error62, CATEGORY_ERRORS.unexpected);
+        return toFailure3(error62, CATEGORY_ERRORS.unexpected);
       }
     }
   );
@@ -26465,9 +27066,9 @@ function registerCategoryIpcHandlers() {
     "categories:update",
     (_event, id, input2) => {
       try {
-        return toSuccess(updateCategory(id, input2));
+        return toSuccess2(updateCategory(id, input2));
       } catch (error62) {
-        return toFailure2(error62, CATEGORY_ERRORS.unexpected);
+        return toFailure3(error62, CATEGORY_ERRORS.unexpected);
       }
     }
   );
@@ -26475,9 +27076,9 @@ function registerCategoryIpcHandlers() {
     "categories:delete",
     (_event, id) => {
       try {
-        return toSuccess(deleteCategory(id));
+        return toSuccess2(deleteCategory(id));
       } catch (error62) {
-        return toFailure2(error62, CATEGORY_ERRORS.unexpected);
+        return toFailure3(error62, CATEGORY_ERRORS.unexpected);
       }
     }
   );
@@ -26485,9 +27086,9 @@ function registerCategoryIpcHandlers() {
     "categories:is-name-available",
     (_event, name, excludeId) => {
       try {
-        return toSuccess(isNameAvailable2(name, excludeId));
+        return toSuccess2(isNameAvailable2(name, excludeId));
       } catch (error62) {
-        return toFailure2(error62, CATEGORY_ERRORS.unexpected);
+        return toFailure3(error62, CATEGORY_ERRORS.unexpected);
       }
     }
   );
@@ -26626,6 +27227,11 @@ function assertPhoneIsAvailable(phone, excludeId) {
 function isUniqueViolation2(error62) {
   return error62 instanceof Error && error62.message.includes("UNIQUE");
 }
+function assertNotInMaintenance3() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new ClientError("unexpected");
+  }
+}
 function listClients(filters = {}) {
   const conditions = [];
   if (typeof filters?.search === "string" && filters.search.trim()) {
@@ -26648,6 +27254,7 @@ function getClientById(id) {
   return row ? toClient(row) : null;
 }
 function createClient(input2) {
+  assertNotInMaintenance3();
   const name = parseClientName(input2);
   const phone = parseClientPhone(input2);
   const address = parseClientAddress(input2);
@@ -26679,6 +27286,7 @@ function createClient(input2) {
   }
 }
 function updateClient(id, input2) {
+  assertNotInMaintenance3();
   const clientId = parseClientId(id);
   const db2 = getDb();
   const existing = db2.select({ id: clients.id, isSystem: clients.isSystem }).from(clients).where(eq(clients.id, clientId)).get();
@@ -26717,6 +27325,7 @@ function updateClient(id, input2) {
   }
 }
 function setClientActive(id, isActive) {
+  assertNotInMaintenance3();
   const clientId = parseClientId(id);
   const db2 = getDb();
   const existing = db2.select({ id: clients.id, isSystem: clients.isSystem }).from(clients).where(eq(clients.id, clientId)).get();
@@ -26750,6 +27359,7 @@ function isPhoneAvailable(phone, excludeClientId) {
   return !duplicate;
 }
 function ensureSystemClient() {
+  assertNotInMaintenance3();
   const existing = getDb().select().from(clients).where(eq(clients.name, SYSTEM_CLIENT_NAME)).get();
   if (existing) {
     return toClient(existing);
@@ -26772,10 +27382,10 @@ function ensureSystemClient() {
 }
 
 // electron/ipc/clients.ts
-function toSuccess2(data) {
+function toSuccess3(data) {
   return { success: true, data };
 }
-function toFailure3(error62, fallback) {
+function toFailure4(error62, fallback) {
   if (error62 instanceof ClientError) {
     return { success: false, error: error62.message };
   }
@@ -26785,25 +27395,25 @@ function toFailure3(error62, fallback) {
 function registerClientIpcHandlers() {
   ipcMain.handle("clients:list", (_event, filters) => {
     try {
-      return toSuccess2(listClients(filters ?? {}));
+      return toSuccess3(listClients(filters ?? {}));
     } catch (error62) {
-      return toFailure3(error62, CLIENT_ERRORS.unexpected);
+      return toFailure4(error62, CLIENT_ERRORS.unexpected);
     }
   });
   ipcMain.handle("clients:get", (_event, id) => {
     try {
-      return toSuccess2(getClientById(id));
+      return toSuccess3(getClientById(id));
     } catch (error62) {
-      return toFailure3(error62, CLIENT_ERRORS.unexpected);
+      return toFailure4(error62, CLIENT_ERRORS.unexpected);
     }
   });
   ipcMain.handle(
     "clients:create",
     (_event, input2) => {
       try {
-        return toSuccess2(createClient(input2));
+        return toSuccess3(createClient(input2));
       } catch (error62) {
-        return toFailure3(error62, CLIENT_ERRORS.unexpected);
+        return toFailure4(error62, CLIENT_ERRORS.unexpected);
       }
     }
   );
@@ -26811,9 +27421,9 @@ function registerClientIpcHandlers() {
     "clients:update",
     (_event, id, input2) => {
       try {
-        return toSuccess2(updateClient(id, input2));
+        return toSuccess3(updateClient(id, input2));
       } catch (error62) {
-        return toFailure3(error62, CLIENT_ERRORS.unexpected);
+        return toFailure4(error62, CLIENT_ERRORS.unexpected);
       }
     }
   );
@@ -26821,9 +27431,9 @@ function registerClientIpcHandlers() {
     "clients:set-active",
     (_event, id, isActive) => {
       try {
-        return toSuccess2(setClientActive(id, isActive));
+        return toSuccess3(setClientActive(id, isActive));
       } catch (error62) {
-        return toFailure3(error62, CLIENT_ERRORS.unexpected);
+        return toFailure4(error62, CLIENT_ERRORS.unexpected);
       }
     }
   );
@@ -26831,9 +27441,9 @@ function registerClientIpcHandlers() {
     "clients:is-name-available",
     (_event, name, excludeClientId) => {
       try {
-        return toSuccess2(isNameAvailable3(name, excludeClientId));
+        return toSuccess3(isNameAvailable3(name, excludeClientId));
       } catch (error62) {
-        return toFailure3(error62, CLIENT_ERRORS.unexpected);
+        return toFailure4(error62, CLIENT_ERRORS.unexpected);
       }
     }
   );
@@ -26841,17 +27451,17 @@ function registerClientIpcHandlers() {
     "clients:is-phone-available",
     (_event, phone, excludeClientId) => {
       try {
-        return toSuccess2(isPhoneAvailable(phone, excludeClientId));
+        return toSuccess3(isPhoneAvailable(phone, excludeClientId));
       } catch (error62) {
-        return toFailure3(error62, CLIENT_ERRORS.unexpected);
+        return toFailure4(error62, CLIENT_ERRORS.unexpected);
       }
     }
   );
   ipcMain.handle("clients:ensure-system", () => {
     try {
-      return toSuccess2(ensureSystemClient());
+      return toSuccess3(ensureSystemClient());
     } catch (error62) {
-      return toFailure3(error62, CLIENT_ERRORS.unexpected);
+      return toFailure4(error62, CLIENT_ERRORS.unexpected);
     }
   });
 }
@@ -26907,6 +27517,11 @@ var INVOICE_QUANTITY_MAX = 1e6;
 var INVOICE_UNIT_PRICE_MAX = 1e9;
 var INVOICE_ITEMS_MAX = 100;
 var INVOICE_ERROR_CODES = Object.keys(INVOICE_ERRORS);
+function assertNotInMaintenance4() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new InvoiceError("unexpected");
+  }
+}
 function formatInvoiceReference(sequence) {
   return `${INVOICE_REFERENCE_PREFIX}-${String(sequence).padStart(
     INVOICE_REFERENCE_PADDING,
@@ -27362,6 +27977,7 @@ function writeLines(db2, saleId, lines) {
   return totalAmount;
 }
 function createInvoice(input2) {
+  assertNotInMaintenance4();
   const { items, clientId, date: date5 } = parsePayload(input2);
   const db2 = getDb();
   return withMappedErrors2(
@@ -27426,6 +28042,7 @@ function readPersistedLineQuantities(db2, saleId) {
   );
 }
 function updateInvoice(id, input2) {
+  assertNotInMaintenance4();
   const saleId = Number(id);
   if (!Number.isInteger(saleId) || saleId <= 0) {
     throw new InvoiceError("notFound");
@@ -27501,6 +28118,7 @@ function updateInvoice(id, input2) {
   );
 }
 function cancelInvoice(id) {
+  assertNotInMaintenance4();
   const saleId = Number(id);
   if (!Number.isInteger(saleId) || saleId <= 0) {
     throw new InvoiceError("notFound");
@@ -27550,6 +28168,7 @@ function cancelInvoice(id) {
   );
 }
 function deleteInvoice(id) {
+  assertNotInMaintenance4();
   const saleId = Number(id);
   if (!Number.isInteger(saleId) || saleId <= 0) {
     throw new InvoiceError("notFound");
@@ -27596,6 +28215,7 @@ function getInvoicePaymentSummary(saleId) {
   return computePaymentSummary(db2, row.totalAmount, id);
 }
 function addPayment(saleId, amount, paymentDate) {
+  assertNotInMaintenance4();
   const id = Number(saleId);
   if (!Number.isInteger(id) || id <= 0) {
     throw new InvoiceError("notFound");
@@ -27631,6 +28251,7 @@ function addPayment(saleId, amount, paymentDate) {
   );
 }
 function updatePayment(paymentId, amount, paymentDate) {
+  assertNotInMaintenance4();
   const id = Number(paymentId);
   if (!Number.isInteger(id) || id <= 0) {
     throw new InvoiceError("paymentNotFound");
@@ -27667,6 +28288,7 @@ function updatePayment(paymentId, amount, paymentDate) {
   );
 }
 function deletePayment(paymentId) {
+  assertNotInMaintenance4();
   const id = Number(paymentId);
   if (!Number.isInteger(id) || id <= 0) {
     throw new InvoiceError("paymentNotFound");
@@ -27689,10 +28311,10 @@ function deletePayment(paymentId) {
 }
 
 // electron/ipc/invoices.ts
-function toSuccess3(data) {
+function toSuccess4(data) {
   return { success: true, data };
 }
-function toFailure4(error62, fallback) {
+function toFailure5(error62, fallback) {
   if (error62 instanceof InvoiceError) {
     return { success: false, error: error62.message };
   }
@@ -27702,18 +28324,18 @@ function toFailure4(error62, fallback) {
 function registerInvoiceIpcHandlers() {
   ipcMain.handle("invoices:create", (_event, input2) => {
     try {
-      return toSuccess3(createInvoice(input2));
+      return toSuccess4(createInvoice(input2));
     } catch (error62) {
-      return toFailure4(error62, INVOICE_ERRORS.unexpected);
+      return toFailure5(error62, INVOICE_ERRORS.unexpected);
     }
   });
   ipcMain.handle(
     "invoices:get-by-id",
     (_event, id) => {
       try {
-        return toSuccess3(getInvoiceById(id));
+        return toSuccess4(getInvoiceById(id));
       } catch (error62) {
-        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+        return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
     }
   );
@@ -27721,9 +28343,9 @@ function registerInvoiceIpcHandlers() {
     "invoices:get-by-reference",
     (_event, reference) => {
       try {
-        return toSuccess3(getInvoiceByReference(reference));
+        return toSuccess4(getInvoiceByReference(reference));
       } catch (error62) {
-        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+        return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
     }
   );
@@ -27731,9 +28353,9 @@ function registerInvoiceIpcHandlers() {
     "invoices:list",
     (_event, filters) => {
       try {
-        return toSuccess3(listInvoices(filters ?? {}));
+        return toSuccess4(listInvoices(filters ?? {}));
       } catch (error62) {
-        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+        return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
     }
   );
@@ -27741,33 +28363,33 @@ function registerInvoiceIpcHandlers() {
     "invoices:update",
     (_event, id, input2) => {
       try {
-        return toSuccess3(updateInvoice(id, input2));
+        return toSuccess4(updateInvoice(id, input2));
       } catch (error62) {
-        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+        return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
     }
   );
   ipcMain.handle("invoices:cancel", (_event, id) => {
     try {
-      return toSuccess3(cancelInvoice(id));
+      return toSuccess4(cancelInvoice(id));
     } catch (error62) {
-      return toFailure4(error62, INVOICE_ERRORS.unexpected);
+      return toFailure5(error62, INVOICE_ERRORS.unexpected);
     }
   });
   ipcMain.handle("invoices:delete", (_event, id) => {
     try {
-      return toSuccess3(deleteInvoice(id));
+      return toSuccess4(deleteInvoice(id));
     } catch (error62) {
-      return toFailure4(error62, INVOICE_ERRORS.unexpected);
+      return toFailure5(error62, INVOICE_ERRORS.unexpected);
     }
   });
   ipcMain.handle(
     "invoices:add-payment",
     (_event, saleId, input2) => {
       try {
-        return toSuccess3(addPayment(saleId, input2.amount, input2.date));
+        return toSuccess4(addPayment(saleId, input2.amount, input2.date));
       } catch (error62) {
-        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+        return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
     }
   );
@@ -27775,9 +28397,9 @@ function registerInvoiceIpcHandlers() {
     "invoices:update-payment",
     (_event, paymentId, input2) => {
       try {
-        return toSuccess3(updatePayment(paymentId, input2.amount, input2.date));
+        return toSuccess4(updatePayment(paymentId, input2.amount, input2.date));
       } catch (error62) {
-        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+        return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
     }
   );
@@ -27785,9 +28407,9 @@ function registerInvoiceIpcHandlers() {
     "invoices:delete-payment",
     (_event, paymentId) => {
       try {
-        return toSuccess3(deletePayment(paymentId));
+        return toSuccess4(deletePayment(paymentId));
       } catch (error62) {
-        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+        return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
     }
   );
@@ -27795,9 +28417,9 @@ function registerInvoiceIpcHandlers() {
     "invoices:get-payment-summary",
     (_event, saleId) => {
       try {
-        return toSuccess3(getInvoicePaymentSummary(saleId));
+        return toSuccess4(getInvoicePaymentSummary(saleId));
       } catch (error62) {
-        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+        return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
     }
   );
@@ -27805,16 +28427,16 @@ function registerInvoiceIpcHandlers() {
     "invoices:list-payments",
     (_event, saleId) => {
       try {
-        return toSuccess3(listInvoicePayments(saleId));
+        return toSuccess4(listInvoicePayments(saleId));
       } catch (error62) {
-        return toFailure4(error62, INVOICE_ERRORS.unexpected);
+        return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
     }
   );
 }
 
 // electron/services/printService.ts
-import fs3 from "node:fs/promises";
+import fs5 from "node:fs/promises";
 var PRINT_ERRORS = {
   emptyDocument: "Le document \xE0 imprimer est vide.",
   documentTooLarge: "Le document \xE0 imprimer est trop volumineux.",
@@ -27961,7 +28583,7 @@ async function exportHtmlDocumentToPdf(html, title = "Document") {
       if (canceled || !filePath) {
         return null;
       }
-      await fs3.writeFile(filePath, pdf);
+      await fs5.writeFile(filePath, pdf);
       return filePath;
     } catch (error62) {
       throw toPrintFailure(error62, "saveFailed");
@@ -27972,10 +28594,10 @@ async function exportHtmlDocumentToPdf(html, title = "Document") {
 }
 
 // electron/ipc/print.ts
-function toSuccess4(data) {
+function toSuccess5(data) {
   return { success: true, data };
 }
-function toFailure5(error62, fallback) {
+function toFailure6(error62, fallback) {
   if (error62 instanceof PrintError) {
     return { success: false, error: error62.message };
   }
@@ -27988,9 +28610,9 @@ function registerPrintIpcHandlers() {
     async (_event, request) => {
       try {
         await printHtmlDocument(request?.html, request?.title);
-        return toSuccess4(null);
+        return toSuccess5(null);
       } catch (error62) {
-        return toFailure5(error62, PRINT_ERRORS.unexpected);
+        return toFailure6(error62, PRINT_ERRORS.unexpected);
       }
     }
   );
@@ -27998,9 +28620,9 @@ function registerPrintIpcHandlers() {
     "print:pdf",
     async (_event, request) => {
       try {
-        return toSuccess4({ path: await exportHtmlDocumentToPdf(request?.html, request?.title) });
+        return toSuccess5({ path: await exportHtmlDocumentToPdf(request?.html, request?.title) });
       } catch (error62) {
-        return toFailure5(error62, PRINT_ERRORS.unexpected);
+        return toFailure6(error62, PRINT_ERRORS.unexpected);
       }
     }
   );
@@ -28009,19 +28631,19 @@ function registerPrintIpcHandlers() {
     async (_event, request) => {
       try {
         await previewHtmlDocument(request?.html, request?.title);
-        return toSuccess4(null);
+        return toSuccess5(null);
       } catch (error62) {
-        return toFailure5(error62, PRINT_ERRORS.unexpected);
+        return toFailure6(error62, PRINT_ERRORS.unexpected);
       }
     }
   );
 }
 
 // electron/ipc/products.ts
-function toSuccess5(data) {
+function toSuccess6(data) {
   return { success: true, data };
 }
-function toFailure6(error62, fallback) {
+function toFailure7(error62, fallback) {
   if (error62 instanceof ProductError) {
     return { success: false, error: error62.message };
   }
@@ -28031,25 +28653,25 @@ function toFailure6(error62, fallback) {
 function registerProductIpcHandlers() {
   ipcMain.handle("products:list", (_event, filters) => {
     try {
-      return toSuccess5(listProducts(filters ?? {}));
+      return toSuccess6(listProducts(filters ?? {}));
     } catch (error62) {
-      return toFailure6(error62, PRODUCT_ERRORS.unexpected);
+      return toFailure7(error62, PRODUCT_ERRORS.unexpected);
     }
   });
   ipcMain.handle("products:get", (_event, id) => {
     try {
-      return toSuccess5(getProductById(id));
+      return toSuccess6(getProductById(id));
     } catch (error62) {
-      return toFailure6(error62, PRODUCT_ERRORS.unexpected);
+      return toFailure7(error62, PRODUCT_ERRORS.unexpected);
     }
   });
   ipcMain.handle(
     "products:create",
     (_event, input2) => {
       try {
-        return toSuccess5(createProduct(input2));
+        return toSuccess6(createProduct(input2));
       } catch (error62) {
-        return toFailure6(error62, PRODUCT_ERRORS.unexpected);
+        return toFailure7(error62, PRODUCT_ERRORS.unexpected);
       }
     }
   );
@@ -28057,9 +28679,9 @@ function registerProductIpcHandlers() {
     "products:update",
     (_event, id, input2) => {
       try {
-        return toSuccess5(updateProduct(id, input2));
+        return toSuccess6(updateProduct(id, input2));
       } catch (error62) {
-        return toFailure6(error62, PRODUCT_ERRORS.unexpected);
+        return toFailure7(error62, PRODUCT_ERRORS.unexpected);
       }
     }
   );
@@ -28067,9 +28689,9 @@ function registerProductIpcHandlers() {
     "products:set-active",
     (_event, id, isActive) => {
       try {
-        return toSuccess5(setProductActive(id, isActive));
+        return toSuccess6(setProductActive(id, isActive));
       } catch (error62) {
-        return toFailure6(error62, PRODUCT_ERRORS.unexpected);
+        return toFailure7(error62, PRODUCT_ERRORS.unexpected);
       }
     }
   );
@@ -28077,9 +28699,9 @@ function registerProductIpcHandlers() {
     "products:is-name-available",
     (_event, name, excludeId) => {
       try {
-        return toSuccess5(isNameAvailable(name, excludeId));
+        return toSuccess6(isNameAvailable(name, excludeId));
       } catch (error62) {
-        return toFailure6(error62, PRODUCT_ERRORS.unexpected);
+        return toFailure7(error62, PRODUCT_ERRORS.unexpected);
       }
     }
   );
@@ -28347,7 +28969,13 @@ function withMappedErrors3(operation) {
     throw error62;
   }
 }
+function assertNotInMaintenance5() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new StockError("unexpected");
+  }
+}
 function initializeStock(productId, input2) {
+  assertNotInMaintenance5();
   const parsedId = parseProductId2(productId);
   const db2 = getDb();
   return withMappedErrors3(
@@ -28385,6 +29013,7 @@ function initializeStock(productId, input2) {
   );
 }
 function adjustStock(productId, input2) {
+  assertNotInMaintenance5();
   const parsedId = parseProductId2(productId);
   const parsedInput = parseAdjustInput(input2, parsedId);
   const db2 = getDb();
@@ -28438,10 +29067,10 @@ function listProductMovements(productId) {
 }
 
 // electron/ipc/stock.ts
-function toSuccess6(data) {
+function toSuccess7(data) {
   return { success: true, data };
 }
-function toFailure7(error62, fallback) {
+function toFailure8(error62, fallback) {
   if (error62 instanceof StockError) {
     return { success: false, error: error62.message };
   }
@@ -28453,9 +29082,9 @@ function registerStockIpcHandlers() {
     "stock:list",
     (_event, filters) => {
       try {
-        return toSuccess6(listStocks(filters ?? {}));
+        return toSuccess7(listStocks(filters ?? {}));
       } catch (error62) {
-        return toFailure7(error62, STOCK_ERRORS.unexpected);
+        return toFailure8(error62, STOCK_ERRORS.unexpected);
       }
     }
   );
@@ -28463,9 +29092,9 @@ function registerStockIpcHandlers() {
     "stock:get",
     (_event, productId) => {
       try {
-        return toSuccess6(getProductStock(productId));
+        return toSuccess7(getProductStock(productId));
       } catch (error62) {
-        return toFailure7(error62, STOCK_ERRORS.unexpected);
+        return toFailure8(error62, STOCK_ERRORS.unexpected);
       }
     }
   );
@@ -28473,9 +29102,9 @@ function registerStockIpcHandlers() {
     "stock:get-form",
     (_event, productId, form) => {
       try {
-        return toSuccess6(getProductFormStock(productId, form));
+        return toSuccess7(getProductFormStock(productId, form));
       } catch (error62) {
-        return toFailure7(error62, STOCK_ERRORS.unexpected);
+        return toFailure8(error62, STOCK_ERRORS.unexpected);
       }
     }
   );
@@ -28483,9 +29112,9 @@ function registerStockIpcHandlers() {
     "stock:initialize",
     (_event, productId, input2) => {
       try {
-        return toSuccess6(initializeStock(productId, input2));
+        return toSuccess7(initializeStock(productId, input2));
       } catch (error62) {
-        return toFailure7(error62, STOCK_ERRORS.unexpected);
+        return toFailure8(error62, STOCK_ERRORS.unexpected);
       }
     }
   );
@@ -28493,9 +29122,9 @@ function registerStockIpcHandlers() {
     "stock:adjust",
     (_event, productId, input2) => {
       try {
-        return toSuccess6(adjustStock(productId, input2));
+        return toSuccess7(adjustStock(productId, input2));
       } catch (error62) {
-        return toFailure7(error62, STOCK_ERRORS.unexpected);
+        return toFailure8(error62, STOCK_ERRORS.unexpected);
       }
     }
   );
@@ -28503,9 +29132,9 @@ function registerStockIpcHandlers() {
     "stock:movements",
     (_event, productId) => {
       try {
-        return toSuccess6(listProductMovements(productId));
+        return toSuccess7(listProductMovements(productId));
       } catch (error62) {
-        return toFailure7(error62, STOCK_ERRORS.unexpected);
+        return toFailure8(error62, STOCK_ERRORS.unexpected);
       }
     }
   );
@@ -28644,6 +29273,11 @@ function assertPhoneIsAvailable2(phone, excludeId) {
 function isUniqueViolation3(error62) {
   return error62 instanceof Error && error62.message.includes("UNIQUE");
 }
+function assertNotInMaintenance6() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new SupplierError("unexpected");
+  }
+}
 function listSuppliers(filters = {}) {
   const conditions = [];
   if (typeof filters?.search === "string" && filters.search.trim()) {
@@ -28666,6 +29300,7 @@ function getSupplierById(id) {
   return row ? toSupplier(row) : null;
 }
 function createSupplier(input2) {
+  assertNotInMaintenance6();
   const name = parseSupplierName(input2);
   const phone = parseSupplierPhone(input2);
   const address = parseSupplierAddress(input2);
@@ -28697,6 +29332,7 @@ function createSupplier(input2) {
   }
 }
 function updateSupplier(id, input2) {
+  assertNotInMaintenance6();
   const supplierId = parseSupplierId(id);
   const db2 = getDb();
   const existing = db2.select({ id: suppliers.id, isSystem: suppliers.isSystem }).from(suppliers).where(eq(suppliers.id, supplierId)).get();
@@ -28735,6 +29371,7 @@ function updateSupplier(id, input2) {
   }
 }
 function setSupplierActive(id, isActive) {
+  assertNotInMaintenance6();
   const supplierId = parseSupplierId(id);
   const db2 = getDb();
   const existing = db2.select({ id: suppliers.id, isSystem: suppliers.isSystem }).from(suppliers).where(eq(suppliers.id, supplierId)).get();
@@ -28768,6 +29405,7 @@ function isPhoneAvailable2(phone, excludeSupplierId) {
   return !duplicate;
 }
 function ensureSystemSupplier() {
+  assertNotInMaintenance6();
   const existing = getDb().select().from(suppliers).where(eq(suppliers.name, SYSTEM_SUPPLIER_NAME)).get();
   if (existing) {
     return toSupplier(existing);
@@ -28790,10 +29428,10 @@ function ensureSystemSupplier() {
 }
 
 // electron/ipc/suppliers.ts
-function toSuccess7(data) {
+function toSuccess8(data) {
   return { success: true, data };
 }
-function toFailure8(error62, fallback) {
+function toFailure9(error62, fallback) {
   if (error62 instanceof SupplierError) {
     return { success: false, error: error62.message };
   }
@@ -28803,25 +29441,25 @@ function toFailure8(error62, fallback) {
 function registerSupplierIpcHandlers() {
   ipcMain.handle("suppliers:list", (_event, filters) => {
     try {
-      return toSuccess7(listSuppliers(filters ?? {}));
+      return toSuccess8(listSuppliers(filters ?? {}));
     } catch (error62) {
-      return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+      return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
     }
   });
   ipcMain.handle("suppliers:get", (_event, id) => {
     try {
-      return toSuccess7(getSupplierById(id));
+      return toSuccess8(getSupplierById(id));
     } catch (error62) {
-      return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+      return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
     }
   });
   ipcMain.handle(
     "suppliers:create",
     (_event, input2) => {
       try {
-        return toSuccess7(createSupplier(input2));
+        return toSuccess8(createSupplier(input2));
       } catch (error62) {
-        return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+        return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
       }
     }
   );
@@ -28829,9 +29467,9 @@ function registerSupplierIpcHandlers() {
     "suppliers:update",
     (_event, id, input2) => {
       try {
-        return toSuccess7(updateSupplier(id, input2));
+        return toSuccess8(updateSupplier(id, input2));
       } catch (error62) {
-        return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+        return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
       }
     }
   );
@@ -28839,9 +29477,9 @@ function registerSupplierIpcHandlers() {
     "suppliers:set-active",
     (_event, id, isActive) => {
       try {
-        return toSuccess7(setSupplierActive(id, isActive));
+        return toSuccess8(setSupplierActive(id, isActive));
       } catch (error62) {
-        return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+        return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
       }
     }
   );
@@ -28849,9 +29487,9 @@ function registerSupplierIpcHandlers() {
     "suppliers:is-name-available",
     (_event, name, excludeSupplierId) => {
       try {
-        return toSuccess7(isNameAvailable4(name, excludeSupplierId));
+        return toSuccess8(isNameAvailable4(name, excludeSupplierId));
       } catch (error62) {
-        return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+        return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
       }
     }
   );
@@ -28859,17 +29497,17 @@ function registerSupplierIpcHandlers() {
     "suppliers:is-phone-available",
     (_event, phone, excludeSupplierId) => {
       try {
-        return toSuccess7(isPhoneAvailable2(phone, excludeSupplierId));
+        return toSuccess8(isPhoneAvailable2(phone, excludeSupplierId));
       } catch (error62) {
-        return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+        return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
       }
     }
   );
   ipcMain.handle("suppliers:ensure-system", () => {
     try {
-      return toSuccess7(ensureSystemSupplier());
+      return toSuccess8(ensureSystemSupplier());
     } catch (error62) {
-      return toFailure8(error62, SUPPLIER_ERRORS.unexpected);
+      return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
     }
   });
 }
@@ -29141,6 +29779,11 @@ function withMappedErrors4(operation) {
     throw error62;
   }
 }
+function assertNotInMaintenance7() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new SupplyError("unexpected");
+  }
+}
 function parsePayload2(input2) {
   const rawInput = input2 ?? {};
   const parsed = supplyCreateSchema.safeParse({ items: rawInput.items });
@@ -29183,6 +29826,7 @@ function parsePayload2(input2) {
   };
 }
 function createSupply(input2) {
+  assertNotInMaintenance7();
   const { lines, supplierId, supplierName, date: date5 } = parsePayload2(input2);
   const db2 = getDb();
   return withMappedErrors4(
@@ -29252,10 +29896,10 @@ function createSupply(input2) {
 }
 
 // electron/ipc/supplies.ts
-function toSuccess8(data) {
+function toSuccess9(data) {
   return { success: true, data };
 }
-function toFailure9(error62, fallback) {
+function toFailure10(error62, fallback) {
   if (error62 instanceof SupplyError) {
     return { success: false, error: error62.message };
   }
@@ -29267,9 +29911,9 @@ function registerSupplyIpcHandlers() {
     "supplies:list",
     (_event, filters) => {
       try {
-        return toSuccess8(listSupplies(filters ?? {}));
+        return toSuccess9(listSupplies(filters ?? {}));
       } catch (error62) {
-        return toFailure9(error62, SUPPLY_ERRORS.unexpected);
+        return toFailure10(error62, SUPPLY_ERRORS.unexpected);
       }
     }
   );
@@ -29277,9 +29921,9 @@ function registerSupplyIpcHandlers() {
     "supplies:get",
     (_event, id) => {
       try {
-        return toSuccess8(getSupplyById(id));
+        return toSuccess9(getSupplyById(id));
       } catch (error62) {
-        return toFailure9(error62, SUPPLY_ERRORS.unexpected);
+        return toFailure10(error62, SUPPLY_ERRORS.unexpected);
       }
     }
   );
@@ -29287,9 +29931,9 @@ function registerSupplyIpcHandlers() {
     "supplies:get-by-reference",
     (_event, reference) => {
       try {
-        return toSuccess8(getSupplyByReference(reference));
+        return toSuccess9(getSupplyByReference(reference));
       } catch (error62) {
-        return toFailure9(error62, SUPPLY_ERRORS.unexpected);
+        return toFailure10(error62, SUPPLY_ERRORS.unexpected);
       }
     }
   );
@@ -29297,9 +29941,9 @@ function registerSupplyIpcHandlers() {
     "supplies:create",
     (_event, input2) => {
       try {
-        return toSuccess8(createSupply(input2));
+        return toSuccess9(createSupply(input2));
       } catch (error62) {
-        return toFailure9(error62, SUPPLY_ERRORS.unexpected);
+        return toFailure10(error62, SUPPLY_ERRORS.unexpected);
       }
     }
   );
@@ -29571,6 +30215,11 @@ function withMappedErrors5(operation) {
     throw error62;
   }
 }
+function assertNotInMaintenance8() {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new TransformationError("unexpected");
+  }
+}
 function parsePayload3(input2) {
   const rawInput = input2 ?? {};
   const parsed = transformationCreateSchema.safeParse({
@@ -29592,6 +30241,7 @@ function parsePayload3(input2) {
   };
 }
 function createTransformation(input2) {
+  assertNotInMaintenance8();
   const { productId, sourceForm, sourceQuantity, date: date5 } = parsePayload3(input2);
   const db2 = getDb();
   return withMappedErrors5(
@@ -29659,10 +30309,10 @@ function createTransformation(input2) {
 }
 
 // electron/ipc/transformations.ts
-function toSuccess9(data) {
+function toSuccess10(data) {
   return { success: true, data };
 }
-function toFailure10(error62, fallback) {
+function toFailure11(error62, fallback) {
   if (error62 instanceof TransformationError) {
     return { success: false, error: error62.message };
   }
@@ -29674,9 +30324,9 @@ function registerTransformationIpcHandlers() {
     "transformations:list-products",
     () => {
       try {
-        return toSuccess9(listTransformableProducts());
+        return toSuccess10(listTransformableProducts());
       } catch (error62) {
-        return toFailure10(error62, TRANSFORMATION_ERRORS.unexpected);
+        return toFailure11(error62, TRANSFORMATION_ERRORS.unexpected);
       }
     }
   );
@@ -29684,9 +30334,9 @@ function registerTransformationIpcHandlers() {
     "transformations:list",
     (_event, filters) => {
       try {
-        return toSuccess9(listTransformations(filters ?? {}));
+        return toSuccess10(listTransformations(filters ?? {}));
       } catch (error62) {
-        return toFailure10(error62, TRANSFORMATION_ERRORS.unexpected);
+        return toFailure11(error62, TRANSFORMATION_ERRORS.unexpected);
       }
     }
   );
@@ -29694,9 +30344,9 @@ function registerTransformationIpcHandlers() {
     "transformations:get",
     (_event, id) => {
       try {
-        return toSuccess9(getTransformationById(id));
+        return toSuccess10(getTransformationById(id));
       } catch (error62) {
-        return toFailure10(error62, TRANSFORMATION_ERRORS.unexpected);
+        return toFailure11(error62, TRANSFORMATION_ERRORS.unexpected);
       }
     }
   );
@@ -29704,9 +30354,9 @@ function registerTransformationIpcHandlers() {
     "transformations:get-by-reference",
     (_event, reference) => {
       try {
-        return toSuccess9(getTransformationByReference(reference));
+        return toSuccess10(getTransformationByReference(reference));
       } catch (error62) {
-        return toFailure10(error62, TRANSFORMATION_ERRORS.unexpected);
+        return toFailure11(error62, TRANSFORMATION_ERRORS.unexpected);
       }
     }
   );
@@ -29714,9 +30364,9 @@ function registerTransformationIpcHandlers() {
     "transformations:create",
     (_event, input2) => {
       try {
-        return toSuccess9(createTransformation(input2));
+        return toSuccess10(createTransformation(input2));
       } catch (error62) {
-        return toFailure10(error62, TRANSFORMATION_ERRORS.unexpected);
+        return toFailure11(error62, TRANSFORMATION_ERRORS.unexpected);
       }
     }
   );
@@ -29737,6 +30387,7 @@ function registerIpcHandlers() {
   ipcMain.handle("settings:save", (_event, input2) => {
     return saveSettings(input2);
   });
+  registerBackupIpcHandlers();
   registerAuthIpcHandlers();
   registerCategoryIpcHandlers();
   registerProductIpcHandlers();
@@ -29752,11 +30403,11 @@ function registerIpcHandlers() {
 // tests/helpers/database.ts
 import { mkdtempSync, rmSync } from "node:fs";
 import os2 from "node:os";
-import path3 from "node:path";
-var migrationsFolder = path3.join(process.cwd(), "electron", "database", "migrations");
+import path5 from "node:path";
+var migrationsFolder = path5.join(process.cwd(), "electron", "database", "migrations");
 var userDataDir = null;
 function openTestDatabase() {
-  userDataDir = mkdtempSync(path3.join(os2.tmpdir(), "gestion-boutique-test-"));
+  userDataDir = mkdtempSync(path5.join(os2.tmpdir(), "gestion-boutique-test-"));
   process.env.GESTION_BOUTIQUE_TEST_USER_DATA = userDataDir;
   migrate(initializeDatabase(), { migrationsFolder });
 }
@@ -29808,6 +30459,12 @@ function seedTransformableProduct(category, name = "CHOCOPAIN 5 KG", overrides =
 var api = {
   database: {
     getStatus: () => ipcRenderer.invoke("database:status")
+  },
+  backup: {
+    backup: () => ipcRenderer.invoke("database:backup"),
+    restore: (filePath) => ipcRenderer.invoke("database:restore", filePath),
+    info: () => ipcRenderer.invoke("database:backup-info"),
+    validate: (filePath) => ipcRenderer.invoke("database:validate", filePath)
   },
   settings: {
     get: () => ipcRenderer.invoke("settings:get"),

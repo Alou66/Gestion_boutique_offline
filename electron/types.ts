@@ -39,6 +39,41 @@ export interface DatabaseAPI {
   getStatus: () => Promise<DatabaseStatus>
 }
 
+export type DatabaseResult<T = unknown> =
+  | { success: true; data: T }
+  | { success: false; error: string }
+
+export interface BackupInfo {
+  exists: boolean
+  filePath: string
+  sizeBytes: number
+  size: string
+  modifiedAt: string
+  sqliteVersion: string
+}
+
+export interface RestoreResult {
+  canceled: boolean
+  restarted: boolean
+  message: string
+}
+
+export interface DatabaseBackupAPI {
+  backup: () => Promise<DatabaseResult<string>>
+  restore: (filePath?: string) => Promise<DatabaseResult<RestoreResult>>
+  info: () => Promise<DatabaseResult<BackupInfo>>
+  validate: (filePath: string) => Promise<DatabaseResult<ValidationInfo>>
+}
+
+export interface ValidationInfo {
+  valid: true
+  filePath: string
+  sizeBytes: number
+  size: string
+  modifiedAt: string
+  tableCount: number
+}
+
 export interface SettingsAPI {
   get: () => Promise<Settings | null>
   save: (settings: SettingsInput) => Promise<Settings>
@@ -683,6 +718,7 @@ export interface PrintAPI {
 
 export interface ElectronAPI {
   database: DatabaseAPI
+  backup: DatabaseBackupAPI
   settings: SettingsAPI
   auth: AuthAPI
   categories: CategoryAPI

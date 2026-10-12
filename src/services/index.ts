@@ -1,4 +1,5 @@
 export { authService } from './auth.service'
+export { backupService } from './backup.service'
 export { categoryService } from './category.service'
 export { clientService } from './client.service'
 export { invoiceService } from './invoice.service'

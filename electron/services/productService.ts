@@ -2,6 +2,7 @@ import { and, asc, eq, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { categories, products } from '../database/schema'
 import { getDb, removeDiacritics } from '../database/client'
+import { maintenanceLock } from './maintenanceLock'
 import type {
   Product,
   ProductFilters,
@@ -433,6 +434,12 @@ function withMappedErrors<T>(operation: () => T): T {
   }
 }
 
+function assertNotInMaintenance(): void {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new ProductError('unexpected')
+  }
+}
+
 export function listProducts(filters: ProductFilters = {}): Product[] {
   const conditions = []
 
@@ -487,6 +494,7 @@ export function getProductById(id: number): Product {
 }
 
 export function createProduct(input: ProductInput): Product {
+  assertNotInMaintenance()
   const parsed = parseProduct(input)
   const now = new Date()
 
@@ -509,6 +517,7 @@ export function createProduct(input: ProductInput): Product {
 }
 
 export function updateProduct(id: number, input: ProductUpdateInput): Product {
+  assertNotInMaintenance()
   const productId = parseProductId(id)
   const parsed = parseProduct(input)
 
@@ -537,6 +546,7 @@ export function updateProduct(id: number, input: ProductUpdateInput): Product {
 }
 
 export function setProductActive(id: number, isActive: boolean): Product {
+  assertNotInMaintenance()
   const productId = parseProductId(id)
   const parsedActive = isActiveSchema.safeParse(isActive)
 

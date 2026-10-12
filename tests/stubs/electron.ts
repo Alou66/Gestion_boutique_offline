@@ -11,6 +11,7 @@ import path from 'node:path'
  * its real pragmas (`foreign_keys = ON`) and its real `unaccent` function.
  */
 export const app = {
+  isPackaged: false,
   getPath(name: string): string {
     const userDataDir =
       process.env.GESTION_BOUTIQUE_TEST_USER_DATA ??
@@ -20,6 +21,8 @@ export const app = {
 
     return name === 'userData' ? userDataDir : path.join(userDataDir, name)
   },
+  quit: () => {},
+  relaunch: () => {},
 }
 
 /** Handlers are registered by electron/ipc and can be called back from a test. */
@@ -90,6 +93,8 @@ export const printStubs = {
   printOptions: [] as unknown[],
   pdfOptions: [] as unknown[],
   saveOptions: [] as unknown[],
+  openOptions: [] as unknown[],
+  errorBoxMessages: [] as string[],
   /** What `webContents.print` answers through its callback. */
   printSucceeds: true,
   /** Electron answered through a promise instead of the callback. */
@@ -98,6 +103,8 @@ export const printStubs = {
   pdfResult: Buffer.from('%PDF-1.4 facture') as Buffer | Error,
   /** Where the save dialog points, or null when it is cancelled. */
   savePath: '/tmp/gestion-boutique-facture.pdf' as string | null,
+  /** Where the open dialog points, or null when it is cancelled. */
+  openPath: null as string | null,
   failToLoad: false,
   openWindows: 0,
 }
@@ -108,10 +115,13 @@ export function resetPrintStubs(): void {
   printStubs.printOptions = []
   printStubs.pdfOptions = []
   printStubs.saveOptions = []
+  printStubs.openOptions = []
+  printStubs.errorBoxMessages = []
   printStubs.printSucceeds = true
   printStubs.printReturnsPromise = false
   printStubs.pdfResult = Buffer.from('%PDF-1.4 facture')
   printStubs.savePath = '/tmp/gestion-boutique-facture.pdf'
+  printStubs.openPath = null
   printStubs.failToLoad = false
   printStubs.openWindows = 0
 }
@@ -179,5 +189,18 @@ export const dialog = {
       canceled: printStubs.savePath === null,
       filePath: printStubs.savePath ?? undefined,
     })
+  },
+  showOpenDialog(
+    options: unknown,
+  ): Promise<{ canceled: boolean; filePaths: string[] }> {
+    printStubs.openOptions.push(options)
+
+    return Promise.resolve({
+      canceled: printStubs.openPath === null,
+      filePaths: printStubs.openPath === null ? [] : [printStubs.openPath!],
+    })
+  },
+  showErrorBox(_: string, content: string): void {
+    printStubs.errorBoxMessages.push(content)
   },
 }

@@ -11,6 +11,7 @@ import {
   getProductById,
   normalizeFormName,
 } from './productService'
+import { maintenanceLock } from './maintenanceLock'
 import type {
   Payment,
   PaymentStatus,
@@ -86,6 +87,12 @@ export const INVOICE_UNIT_PRICE_MAX = 1_000_000_000
 export const INVOICE_ITEMS_MAX = 100
 
 const INVOICE_ERROR_CODES = Object.keys(INVOICE_ERRORS) as InvoiceErrorCode[]
+
+function assertNotInMaintenance(): void {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new InvoiceError('unexpected')
+  }
+}
 
 /**
  * The ledger is only read here: the balance of a form stays the sum of its
@@ -972,6 +979,7 @@ function writeLines(
  * lines or its movements) is impossible.
  */
 export function createInvoice(input: SaleCreateInput): SaleDetail {
+  assertNotInMaintenance()
   const { items, clientId, date } = parsePayload(input)
   const db = getDb()
 
@@ -1099,6 +1107,7 @@ function readPersistedLineQuantities(
  * Any failure rolls everything back.
  */
 export function updateInvoice(id: number, input: SaleUpdateInput): SaleDetail {
+  assertNotInMaintenance()
   const saleId = Number(id)
 
   if (!Number.isInteger(saleId) || saleId <= 0) {
@@ -1213,6 +1222,7 @@ export function updateInvoice(id: number, input: SaleUpdateInput): SaleDetail {
  * has to be settled by the payments first.
  */
 export function cancelInvoice(id: number): Sale {
+  assertNotInMaintenance()
   const saleId = Number(id)
 
   if (!Number.isInteger(saleId) || saleId <= 0) {
@@ -1292,6 +1302,7 @@ export function cancelInvoice(id: number): Sale {
  * deleted: the stock history outlives the document.
  */
 export function deleteInvoice(id: number): null {
+  assertNotInMaintenance()
   const saleId = Number(id)
 
   if (!Number.isInteger(saleId) || saleId <= 0) {
@@ -1387,6 +1398,7 @@ export function addPayment(
   amount: number,
   paymentDate?: string | null,
 ): Payment {
+  assertNotInMaintenance()
   const id = Number(saleId)
 
   if (!Number.isInteger(id) || id <= 0) {
@@ -1447,6 +1459,7 @@ export function updatePayment(
   amount: number,
   paymentDate?: string | null,
 ): Payment {
+  assertNotInMaintenance()
   const id = Number(paymentId)
 
   if (!Number.isInteger(id) || id <= 0) {
@@ -1512,6 +1525,7 @@ export function updatePayment(
  * the remaining amount are always recomputed afterwards: none of them is stored.
  */
 export function deletePayment(paymentId: number): null {
+  assertNotInMaintenance()
   const id = Number(paymentId)
 
   if (!Number.isInteger(id) || id <= 0) {

@@ -14,6 +14,7 @@ import {
   ensureSystemSupplier,
   getSupplierById,
 } from './supplierService'
+import { maintenanceLock } from './maintenanceLock'
 import type {
   Product,
   Supply,
@@ -478,6 +479,12 @@ function withMappedErrors<T>(operation: () => T): T {
   }
 }
 
+function assertNotInMaintenance(): void {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new SupplyError('unexpected')
+  }
+}
+
 /** Structural validation of the payload: no database access yet. */
 function parsePayload(input: SupplyCreateInput): {
   lines: SupplyItemInput[]
@@ -560,6 +567,7 @@ function parsePayload(input: SupplyCreateInput): {
  * movement at all (a logical stock of 0).
  */
 export function createSupply(input: SupplyCreateInput): SupplyDetail {
+  assertNotInMaintenance()
   const { lines, supplierId, supplierName, date } = parsePayload(input)
   const db = getDb()
 

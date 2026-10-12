@@ -11,6 +11,7 @@ import {
   listProducts,
   normalizeFormName,
 } from './productService'
+import { maintenanceLock } from './maintenanceLock'
 import type {
   Product,
   StockFormLevel,
@@ -520,6 +521,12 @@ function withMappedErrors<T>(operation: () => T): T {
   }
 }
 
+function assertNotInMaintenance(): void {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new TransformationError('unexpected')
+  }
+}
+
 /** Structural validation of the payload: no database access yet. */
 function parsePayload(input: TransformationCreateInput): {
   productId: number
@@ -578,6 +585,7 @@ function parsePayload(input: TransformationCreateInput): {
 export function createTransformation(
   input: TransformationCreateInput,
 ): TransformationDetail {
+  assertNotInMaintenance()
   const { productId, sourceForm, sourceQuantity, date } = parsePayload(input)
   const db = getDb()
 

@@ -2,6 +2,7 @@ import { and, asc, eq, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { clients } from '../database/schema'
 import { getDb } from '../database/client'
+import { maintenanceLock } from './maintenanceLock'
 import type {
   Client,
   ClientFilters,
@@ -224,6 +225,12 @@ function isUniqueViolation(error: unknown): boolean {
   return error instanceof Error && error.message.includes('UNIQUE')
 }
 
+function assertNotInMaintenance(): void {
+  if (maintenanceLock.isMaintenanceMode()) {
+    throw new ClientError('unexpected')
+  }
+}
+
 export function listClients(filters: ClientFilters = {}): Client[] {
   const conditions = []
 
@@ -258,6 +265,7 @@ export function getClientById(id: number): Client | null {
 }
 
 export function createClient(input: ClientInput): Client {
+  assertNotInMaintenance()
   const name = parseClientName(input)
   const phone = parseClientPhone(input)
   const address = parseClientAddress(input)
@@ -301,6 +309,7 @@ export function createClient(input: ClientInput): Client {
 }
 
 export function updateClient(id: number, input: ClientUpdateInput): Client {
+  assertNotInMaintenance()
   const clientId = parseClientId(id)
   const db = getDb()
 
@@ -356,6 +365,7 @@ export function updateClient(id: number, input: ClientUpdateInput): Client {
 }
 
 export function setClientActive(id: number, isActive: boolean): Client {
+  assertNotInMaintenance()
   const clientId = parseClientId(id)
   const db = getDb()
 
@@ -419,6 +429,7 @@ export function isPhoneAvailable(phone: string, excludeClientId?: number): boole
  * Returns the system client.
  */
 export function ensureSystemClient(): Client {
+  assertNotInMaintenance()
   const existing = getDb()
     .select()
     .from(clients)
