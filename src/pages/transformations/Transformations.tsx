@@ -7,6 +7,8 @@ import type {
   TransformationCreateInput,
 } from '@/types'
 import { stockService, transformationService } from '@/services'
+import { Pagination } from '@/components'
+import { paginate, type Page } from '@/lib/pagination'
 import ConfirmDialog from '../categories/ConfirmDialog'
 import TransformationForm from './TransformationForm'
 import {
@@ -49,7 +51,6 @@ function buildConfirmationMessage(pending: PendingTransformation): string {
 }
 
 function Transformations() {
-  const [transformations, setTransformations] = useState<Transformation[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [levels, setLevels] = useState<StockFormLevel[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -58,6 +59,13 @@ function Transformations() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [productSearch, setProductSearch] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [page, setPage] = useState<Page<Transformation>>({
+    rows: [],
+    page: 1,
+    totalPages: 1,
+    total: 0,
+  })
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -69,24 +77,28 @@ function Transformations() {
     setLoadError(null)
 
     try {
-      setTransformations(
-        await transformationService.list({
-          search: search.trim() || undefined,
-          productSearch: productSearch.trim() || undefined,
-        }),
-      )
+      const allTransformations = await transformationService.list({
+        search: search.trim() || undefined,
+        productSearch: productSearch.trim() || undefined,
+      })
+      setPage(paginate(allTransformations, currentPage))
     } catch {
       setLoadError(TRANSFORMATION_MESSAGES.unexpected)
     } finally {
       setIsLoading(false)
     }
-  }, [search, productSearch])
+  }, [search, productSearch, currentPage])
 
   useEffect(() => {
     const timer = setTimeout(loadTransformations, 200)
 
     return () => clearTimeout(timer)
   }, [loadTransformations])
+
+  // Reset to page 1 when search or filter changes
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [search, productSearch])
 
   /**
    * Only active transformable products can be transformed: the main process is
@@ -206,7 +218,7 @@ function Transformations() {
 
   const rows = useMemo(
     () =>
-      transformations.map((transformation) => ({
+      page.rows.map((transformation) => ({
         transformation,
         sentence: formatTransformationSentence(
           transformation.sourceForm,
@@ -215,7 +227,7 @@ function Transformations() {
           transformation.destinationQuantity,
         ),
       })),
-    [transformations],
+    [page.rows],
   )
 
   return (
@@ -371,6 +383,14 @@ function Transformations() {
           </tbody>
         </table>
       </div>
+
+      <Pagination
+        page={page.page}
+        totalPages={page.totalPages}
+        total={page.total}
+        itemLabel="transformation"
+        onPageChange={setCurrentPage}
+      />
 
       {pending && (
         <ConfirmDialog

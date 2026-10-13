@@ -298,6 +298,9 @@ function InvoiceForm({
 
   const editorProduct = productsById.get(Number(editor.productId)) ?? null
   const editorForms = getProductForms(editorProduct)
+  const editorAvailableStock = editorProduct && editor.form
+    ? availableStock.get(getLineKey(editorProduct.id, editor.form)) ?? 0
+    : 0
   const isEditing = editingKey !== null
   const isListFull = !isEditing && lines.length >= INVOICE_ITEMS_MAX
   const configuredPrice = getConfiguredSalePrice(editorProduct, editor.form)
@@ -612,11 +615,11 @@ function InvoiceForm({
             {draftErrors.form && (
               <p className="mt-1 text-sm text-red-600">{draftErrors.form}</p>
             )}
-            {/* {editorProduct && (
+             {editorProduct && (
               <p className="mt-1 text-xs text-gray-500">
                 Stock disponible : {editorAvailableStock}
               </p>
-            )} */}
+            )} 
           </div>
 
           <div>

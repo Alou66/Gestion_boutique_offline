@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { Product, Supply, SupplyCreateInput, Supplier } from '@/types'
 import { productService, supplyService, supplierService } from '@/services'
+import { Pagination } from '@/components'
+import { paginate, type Page } from '@/lib/pagination'
 import ConfirmDialog from '../categories/ConfirmDialog'
 import {
   clearSupplyDraft,
@@ -19,7 +21,6 @@ import {
 } from './schemas/supply.schema'
 
 function Supplies() {
-  const [supplies, setSupplies] = useState<Supply[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -27,6 +28,13 @@ function Supplies() {
   const [actionError, setActionError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [supplierSearch, setSupplierSearch] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [page, setPage] = useState<Page<Supply>>({
+    rows: [],
+    page: 1,
+    totalPages: 1,
+    total: 0,
+  })
   /** Réception en cours retrouvée à l'ouverture : le formulaire se rouvre. */
   const [restoredDraft, setRestoredDraft] = useState<SupplyDraft | null>(() =>
     readSupplyDraft(),
@@ -44,24 +52,28 @@ function Supplies() {
     setLoadError(null)
 
     try {
-      setSupplies(
-        await supplyService.list({
-          search: search.trim() || undefined,
-          supplierSearch: supplierSearch.trim() || undefined,
-        }),
-      )
+      const allSupplies = await supplyService.list({
+        search: search.trim() || undefined,
+        supplierSearch: supplierSearch.trim() || undefined,
+      })
+      setPage(paginate(allSupplies, currentPage))
     } catch {
       setLoadError(SUPPLY_MESSAGES.unexpected)
     } finally {
       setIsLoading(false)
     }
-  }, [search, supplierSearch])
+  }, [search, supplierSearch, currentPage])
 
   useEffect(() => {
     const timer = setTimeout(loadSupplies, 200)
 
     return () => clearTimeout(timer)
   }, [loadSupplies])
+
+  // Reset to page 1 when search or filter changes
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [search, supplierSearch])
 
   /**
    * Only active products can be received, the same rule as the stock module.
@@ -286,7 +298,7 @@ function Supplies() {
               </tr>
             )}
 
-            {!isLoading && !loadError && supplies.length === 0 && (
+            {!isLoading && !loadError && page.rows.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-6 py-6 text-center text-sm text-gray-500">
                   Aucun approvisionnement pour le moment.
@@ -296,7 +308,7 @@ function Supplies() {
 
             {!isLoading &&
               !loadError &&
-              supplies.map((supply) => (
+              page.rows.map((supply) => (
                 <tr key={supply.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 text-sm font-medium text-gray-900">
                     {supply.reference}
@@ -326,6 +338,14 @@ function Supplies() {
           </tbody>
         </table>
       </div>
+
+      <Pagination
+        page={page.page}
+        totalPages={page.totalPages}
+        total={page.total}
+        itemLabel="approvisionnement"
+        onPageChange={setCurrentPage}
+      />
 
       {pendingValidation && (
         <ConfirmDialog

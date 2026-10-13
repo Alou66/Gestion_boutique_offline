@@ -6021,7 +6021,7 @@ function initializeDatabase() {
   if (db) {
     return db;
   }
-  const dbPath = path2.join(app.getPath("userData"), "database.sqlite");
+  const dbPath = process.env.GESTION_BOUTIQUE_DB_PATH ? path2.resolve(process.env.GESTION_BOUTIQUE_DB_PATH) : path2.join(app.getPath("userData"), "database.sqlite");
   const sqlite = new Database(dbPath);
   sqlite.pragma("foreign_keys = ON");
   sqlite.function("unaccent", { deterministic: true }, removeDiacritics);
@@ -26304,7 +26304,7 @@ function validateBackupFile(filePath) {
 async function createBackup(onProgress) {
   let handle = null;
   let backupPath = null;
-  let fileCreated = false;
+  let existedBefore = false;
   try {
     handle = maintenanceLock.acquireForBackup();
     const db2 = getDb();
@@ -26318,6 +26318,7 @@ async function createBackup(onProgress) {
       return { success: false, error: BACKUP_ERRORS.cancelled };
     }
     backupPath = filePath;
+    existedBefore = fs4.existsSync(backupPath);
     await sqlite.backup(filePath, {
       progress: (info) => {
         const percent = (info.totalPages - info.remainingPages) / info.totalPages * 100;
@@ -26325,10 +26326,9 @@ async function createBackup(onProgress) {
         return 100;
       }
     });
-    fileCreated = true;
     return toResult(filePath);
   } catch (error62) {
-    if (backupPath && fileCreated) {
+    if (backupPath && !existedBefore && fs4.existsSync(backupPath)) {
       try {
         fs4.rmSync(backupPath, { force: true });
       } catch (cleanupError) {
@@ -26412,10 +26412,30 @@ async function restoreBackup(filePath) {
       throw error62;
     }
     emergencyPath = `${dbPath}.emergency-${crypto4.randomUUID().replace(/-/g, "")}`;
+    const checkpointResult = sqlite.pragma("wal_checkpoint(TRUNCATE)");
+    if (checkpointResult && checkpointResult.busy > 0) {
+      console.error(
+        "[backup] WAL checkpoint was blocked (%d frames not flushed), safe restore not possible",
+        checkpointResult.busy
+      );
+      throw new BackupError("restoreFailed");
+    }
     fs4.copyFileSync(dbPath, emergencyPath);
     closeDatabase();
+    const walPath = `${dbPath}-wal`;
+    const shmPath = `${dbPath}-shm`;
+    if (fs4.existsSync(walPath)) {
+      fs4.rmSync(walPath, { force: true });
+    }
+    if (fs4.existsSync(shmPath)) {
+      fs4.rmSync(shmPath, { force: true });
+    }
     fs4.copyFileSync(selectedPath, dbPath);
     initializeDatabase();
+    const newMode = getDb().$client.pragma("journal_mode = DELETE");
+    if (newMode !== "delete") {
+      console.warn('[backup] Journal mode is "%s" after restore \u2014 expected "delete"', newMode);
+    }
     initDatabase(resolveMigrationsFolder());
     const verifyDb = new Database2(dbPath, { readonly: true });
     try {
@@ -26444,6 +26464,13 @@ async function restoreBackup(filePath) {
           closeDatabase();
           fs4.copyFileSync(emergencyPath, getDatabasePath());
           initializeDatabase();
+          const recoveryMode = getDb().$client.pragma("journal_mode = DELETE");
+          if (recoveryMode !== "delete") {
+            console.warn(
+              '[backup] Journal mode is "%s" after emergency recovery \u2014 expected "delete"',
+              recoveryMode
+            );
+          }
           initDatabase(resolveMigrationsFolder());
         } catch (recoveryError) {
           console.error("[backup] Emergency recovery failed:", recoveryError);
@@ -26471,9 +26498,6 @@ async function restoreBackup(filePath) {
 }
 
 // electron/ipc/backup.ts
-function toSuccess(data) {
-  return { success: true, data };
-}
 function toFailure2(error62, fallback) {
   if (error62 instanceof BackupError) {
     return { success: false, error: error62.message };
@@ -26499,12 +26523,8 @@ function registerBackupIpcHandlers() {
       }
     }
   );
-  ipcMain.handle("database:backup-info", async () => {
-    try {
-      return toSuccess(getDatabaseInfo());
-    } catch (error62) {
-      return toFailure2(error62, "unexpected");
-    }
+  ipcMain.handle("database:backup-info", () => {
+    return getDatabaseInfo();
   });
   ipcMain.handle(
     "database:validate",
@@ -27024,7 +27044,7 @@ function isNameAvailable2(name, excludeId) {
 }
 
 // electron/ipc/categories.ts
-function toSuccess2(data) {
+function toSuccess(data) {
   return { success: true, data };
 }
 function toFailure3(error62, fallback) {
@@ -27037,7 +27057,7 @@ function toFailure3(error62, fallback) {
 function registerCategoryIpcHandlers() {
   ipcMain.handle("categories:list", () => {
     try {
-      return toSuccess2(listCategories());
+      return toSuccess(listCategories());
     } catch (error62) {
       return toFailure3(error62, CATEGORY_ERRORS.unexpected);
     }
@@ -27046,7 +27066,7 @@ function registerCategoryIpcHandlers() {
     "categories:get",
     (_event, id) => {
       try {
-        return toSuccess2(getCategoryById(id));
+        return toSuccess(getCategoryById(id));
       } catch (error62) {
         return toFailure3(error62, CATEGORY_ERRORS.unexpected);
       }
@@ -27056,7 +27076,7 @@ function registerCategoryIpcHandlers() {
     "categories:create",
     (_event, input2) => {
       try {
-        return toSuccess2(createCategory(input2));
+        return toSuccess(createCategory(input2));
       } catch (error62) {
         return toFailure3(error62, CATEGORY_ERRORS.unexpected);
       }
@@ -27066,7 +27086,7 @@ function registerCategoryIpcHandlers() {
     "categories:update",
     (_event, id, input2) => {
       try {
-        return toSuccess2(updateCategory(id, input2));
+        return toSuccess(updateCategory(id, input2));
       } catch (error62) {
         return toFailure3(error62, CATEGORY_ERRORS.unexpected);
       }
@@ -27076,7 +27096,7 @@ function registerCategoryIpcHandlers() {
     "categories:delete",
     (_event, id) => {
       try {
-        return toSuccess2(deleteCategory(id));
+        return toSuccess(deleteCategory(id));
       } catch (error62) {
         return toFailure3(error62, CATEGORY_ERRORS.unexpected);
       }
@@ -27086,7 +27106,7 @@ function registerCategoryIpcHandlers() {
     "categories:is-name-available",
     (_event, name, excludeId) => {
       try {
-        return toSuccess2(isNameAvailable2(name, excludeId));
+        return toSuccess(isNameAvailable2(name, excludeId));
       } catch (error62) {
         return toFailure3(error62, CATEGORY_ERRORS.unexpected);
       }
@@ -27382,7 +27402,7 @@ function ensureSystemClient() {
 }
 
 // electron/ipc/clients.ts
-function toSuccess3(data) {
+function toSuccess2(data) {
   return { success: true, data };
 }
 function toFailure4(error62, fallback) {
@@ -27395,14 +27415,14 @@ function toFailure4(error62, fallback) {
 function registerClientIpcHandlers() {
   ipcMain.handle("clients:list", (_event, filters) => {
     try {
-      return toSuccess3(listClients(filters ?? {}));
+      return toSuccess2(listClients(filters ?? {}));
     } catch (error62) {
       return toFailure4(error62, CLIENT_ERRORS.unexpected);
     }
   });
   ipcMain.handle("clients:get", (_event, id) => {
     try {
-      return toSuccess3(getClientById(id));
+      return toSuccess2(getClientById(id));
     } catch (error62) {
       return toFailure4(error62, CLIENT_ERRORS.unexpected);
     }
@@ -27411,7 +27431,7 @@ function registerClientIpcHandlers() {
     "clients:create",
     (_event, input2) => {
       try {
-        return toSuccess3(createClient(input2));
+        return toSuccess2(createClient(input2));
       } catch (error62) {
         return toFailure4(error62, CLIENT_ERRORS.unexpected);
       }
@@ -27421,7 +27441,7 @@ function registerClientIpcHandlers() {
     "clients:update",
     (_event, id, input2) => {
       try {
-        return toSuccess3(updateClient(id, input2));
+        return toSuccess2(updateClient(id, input2));
       } catch (error62) {
         return toFailure4(error62, CLIENT_ERRORS.unexpected);
       }
@@ -27431,7 +27451,7 @@ function registerClientIpcHandlers() {
     "clients:set-active",
     (_event, id, isActive) => {
       try {
-        return toSuccess3(setClientActive(id, isActive));
+        return toSuccess2(setClientActive(id, isActive));
       } catch (error62) {
         return toFailure4(error62, CLIENT_ERRORS.unexpected);
       }
@@ -27441,7 +27461,7 @@ function registerClientIpcHandlers() {
     "clients:is-name-available",
     (_event, name, excludeClientId) => {
       try {
-        return toSuccess3(isNameAvailable3(name, excludeClientId));
+        return toSuccess2(isNameAvailable3(name, excludeClientId));
       } catch (error62) {
         return toFailure4(error62, CLIENT_ERRORS.unexpected);
       }
@@ -27451,7 +27471,7 @@ function registerClientIpcHandlers() {
     "clients:is-phone-available",
     (_event, phone, excludeClientId) => {
       try {
-        return toSuccess3(isPhoneAvailable(phone, excludeClientId));
+        return toSuccess2(isPhoneAvailable(phone, excludeClientId));
       } catch (error62) {
         return toFailure4(error62, CLIENT_ERRORS.unexpected);
       }
@@ -27459,7 +27479,7 @@ function registerClientIpcHandlers() {
   );
   ipcMain.handle("clients:ensure-system", () => {
     try {
-      return toSuccess3(ensureSystemClient());
+      return toSuccess2(ensureSystemClient());
     } catch (error62) {
       return toFailure4(error62, CLIENT_ERRORS.unexpected);
     }
@@ -27807,6 +27827,16 @@ function listInvoices(filters = {}) {
     conditions.push(
       sql`${sales.saleDate} <= ${Math.floor(parseInvoiceDate(filters.dateTo).getTime() / 1e3)}`
     );
+  }
+  if (typeof filters?.paymentStatus === "string") {
+    const paymentStatus = filters.paymentStatus;
+    if (paymentStatus === "NON_PAYEE") {
+      conditions.push(sql`coalesce((select sum(amount) from payments where payments.sale_id = sales.id), 0) = 0`);
+    } else if (paymentStatus === "PAYEE") {
+      conditions.push(sql`${sales.totalAmount} <= coalesce((select sum(amount) from payments where payments.sale_id = sales.id), 0)`);
+    } else if (paymentStatus === "PARTIELLEMENT_PAYEE") {
+      conditions.push(sql`${sales.totalAmount} > coalesce((select sum(amount) from payments where payments.sale_id = sales.id), 0) AND coalesce((select sum(amount) from payments where payments.sale_id = sales.id), 0) > 0`);
+    }
   }
   const db2 = getDb();
   const rows = db2.select(saleColumns).from(sales).innerJoin(clients, eq(sales.clientId, clients.id)).where(conditions.length > 0 ? and(...conditions) : void 0).orderBy(desc(sales.id)).all();
@@ -28311,7 +28341,7 @@ function deletePayment(paymentId) {
 }
 
 // electron/ipc/invoices.ts
-function toSuccess4(data) {
+function toSuccess3(data) {
   return { success: true, data };
 }
 function toFailure5(error62, fallback) {
@@ -28324,7 +28354,7 @@ function toFailure5(error62, fallback) {
 function registerInvoiceIpcHandlers() {
   ipcMain.handle("invoices:create", (_event, input2) => {
     try {
-      return toSuccess4(createInvoice(input2));
+      return toSuccess3(createInvoice(input2));
     } catch (error62) {
       return toFailure5(error62, INVOICE_ERRORS.unexpected);
     }
@@ -28333,7 +28363,7 @@ function registerInvoiceIpcHandlers() {
     "invoices:get-by-id",
     (_event, id) => {
       try {
-        return toSuccess4(getInvoiceById(id));
+        return toSuccess3(getInvoiceById(id));
       } catch (error62) {
         return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
@@ -28343,7 +28373,7 @@ function registerInvoiceIpcHandlers() {
     "invoices:get-by-reference",
     (_event, reference) => {
       try {
-        return toSuccess4(getInvoiceByReference(reference));
+        return toSuccess3(getInvoiceByReference(reference));
       } catch (error62) {
         return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
@@ -28353,7 +28383,7 @@ function registerInvoiceIpcHandlers() {
     "invoices:list",
     (_event, filters) => {
       try {
-        return toSuccess4(listInvoices(filters ?? {}));
+        return toSuccess3(listInvoices(filters ?? {}));
       } catch (error62) {
         return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
@@ -28363,7 +28393,7 @@ function registerInvoiceIpcHandlers() {
     "invoices:update",
     (_event, id, input2) => {
       try {
-        return toSuccess4(updateInvoice(id, input2));
+        return toSuccess3(updateInvoice(id, input2));
       } catch (error62) {
         return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
@@ -28371,14 +28401,14 @@ function registerInvoiceIpcHandlers() {
   );
   ipcMain.handle("invoices:cancel", (_event, id) => {
     try {
-      return toSuccess4(cancelInvoice(id));
+      return toSuccess3(cancelInvoice(id));
     } catch (error62) {
       return toFailure5(error62, INVOICE_ERRORS.unexpected);
     }
   });
   ipcMain.handle("invoices:delete", (_event, id) => {
     try {
-      return toSuccess4(deleteInvoice(id));
+      return toSuccess3(deleteInvoice(id));
     } catch (error62) {
       return toFailure5(error62, INVOICE_ERRORS.unexpected);
     }
@@ -28387,7 +28417,7 @@ function registerInvoiceIpcHandlers() {
     "invoices:add-payment",
     (_event, saleId, input2) => {
       try {
-        return toSuccess4(addPayment(saleId, input2.amount, input2.date));
+        return toSuccess3(addPayment(saleId, input2.amount, input2.date));
       } catch (error62) {
         return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
@@ -28397,7 +28427,7 @@ function registerInvoiceIpcHandlers() {
     "invoices:update-payment",
     (_event, paymentId, input2) => {
       try {
-        return toSuccess4(updatePayment(paymentId, input2.amount, input2.date));
+        return toSuccess3(updatePayment(paymentId, input2.amount, input2.date));
       } catch (error62) {
         return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
@@ -28407,7 +28437,7 @@ function registerInvoiceIpcHandlers() {
     "invoices:delete-payment",
     (_event, paymentId) => {
       try {
-        return toSuccess4(deletePayment(paymentId));
+        return toSuccess3(deletePayment(paymentId));
       } catch (error62) {
         return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
@@ -28417,7 +28447,7 @@ function registerInvoiceIpcHandlers() {
     "invoices:get-payment-summary",
     (_event, saleId) => {
       try {
-        return toSuccess4(getInvoicePaymentSummary(saleId));
+        return toSuccess3(getInvoicePaymentSummary(saleId));
       } catch (error62) {
         return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
@@ -28427,7 +28457,7 @@ function registerInvoiceIpcHandlers() {
     "invoices:list-payments",
     (_event, saleId) => {
       try {
-        return toSuccess4(listInvoicePayments(saleId));
+        return toSuccess3(listInvoicePayments(saleId));
       } catch (error62) {
         return toFailure5(error62, INVOICE_ERRORS.unexpected);
       }
@@ -28594,7 +28624,7 @@ async function exportHtmlDocumentToPdf(html, title = "Document") {
 }
 
 // electron/ipc/print.ts
-function toSuccess5(data) {
+function toSuccess4(data) {
   return { success: true, data };
 }
 function toFailure6(error62, fallback) {
@@ -28610,7 +28640,7 @@ function registerPrintIpcHandlers() {
     async (_event, request) => {
       try {
         await printHtmlDocument(request?.html, request?.title);
-        return toSuccess5(null);
+        return toSuccess4(null);
       } catch (error62) {
         return toFailure6(error62, PRINT_ERRORS.unexpected);
       }
@@ -28620,7 +28650,7 @@ function registerPrintIpcHandlers() {
     "print:pdf",
     async (_event, request) => {
       try {
-        return toSuccess5({ path: await exportHtmlDocumentToPdf(request?.html, request?.title) });
+        return toSuccess4({ path: await exportHtmlDocumentToPdf(request?.html, request?.title) });
       } catch (error62) {
         return toFailure6(error62, PRINT_ERRORS.unexpected);
       }
@@ -28631,7 +28661,7 @@ function registerPrintIpcHandlers() {
     async (_event, request) => {
       try {
         await previewHtmlDocument(request?.html, request?.title);
-        return toSuccess5(null);
+        return toSuccess4(null);
       } catch (error62) {
         return toFailure6(error62, PRINT_ERRORS.unexpected);
       }
@@ -28640,7 +28670,7 @@ function registerPrintIpcHandlers() {
 }
 
 // electron/ipc/products.ts
-function toSuccess6(data) {
+function toSuccess5(data) {
   return { success: true, data };
 }
 function toFailure7(error62, fallback) {
@@ -28653,14 +28683,14 @@ function toFailure7(error62, fallback) {
 function registerProductIpcHandlers() {
   ipcMain.handle("products:list", (_event, filters) => {
     try {
-      return toSuccess6(listProducts(filters ?? {}));
+      return toSuccess5(listProducts(filters ?? {}));
     } catch (error62) {
       return toFailure7(error62, PRODUCT_ERRORS.unexpected);
     }
   });
   ipcMain.handle("products:get", (_event, id) => {
     try {
-      return toSuccess6(getProductById(id));
+      return toSuccess5(getProductById(id));
     } catch (error62) {
       return toFailure7(error62, PRODUCT_ERRORS.unexpected);
     }
@@ -28669,7 +28699,7 @@ function registerProductIpcHandlers() {
     "products:create",
     (_event, input2) => {
       try {
-        return toSuccess6(createProduct(input2));
+        return toSuccess5(createProduct(input2));
       } catch (error62) {
         return toFailure7(error62, PRODUCT_ERRORS.unexpected);
       }
@@ -28679,7 +28709,7 @@ function registerProductIpcHandlers() {
     "products:update",
     (_event, id, input2) => {
       try {
-        return toSuccess6(updateProduct(id, input2));
+        return toSuccess5(updateProduct(id, input2));
       } catch (error62) {
         return toFailure7(error62, PRODUCT_ERRORS.unexpected);
       }
@@ -28689,7 +28719,7 @@ function registerProductIpcHandlers() {
     "products:set-active",
     (_event, id, isActive) => {
       try {
-        return toSuccess6(setProductActive(id, isActive));
+        return toSuccess5(setProductActive(id, isActive));
       } catch (error62) {
         return toFailure7(error62, PRODUCT_ERRORS.unexpected);
       }
@@ -28699,7 +28729,7 @@ function registerProductIpcHandlers() {
     "products:is-name-available",
     (_event, name, excludeId) => {
       try {
-        return toSuccess6(isNameAvailable(name, excludeId));
+        return toSuccess5(isNameAvailable(name, excludeId));
       } catch (error62) {
         return toFailure7(error62, PRODUCT_ERRORS.unexpected);
       }
@@ -29067,7 +29097,7 @@ function listProductMovements(productId) {
 }
 
 // electron/ipc/stock.ts
-function toSuccess7(data) {
+function toSuccess6(data) {
   return { success: true, data };
 }
 function toFailure8(error62, fallback) {
@@ -29082,7 +29112,7 @@ function registerStockIpcHandlers() {
     "stock:list",
     (_event, filters) => {
       try {
-        return toSuccess7(listStocks(filters ?? {}));
+        return toSuccess6(listStocks(filters ?? {}));
       } catch (error62) {
         return toFailure8(error62, STOCK_ERRORS.unexpected);
       }
@@ -29092,7 +29122,7 @@ function registerStockIpcHandlers() {
     "stock:get",
     (_event, productId) => {
       try {
-        return toSuccess7(getProductStock(productId));
+        return toSuccess6(getProductStock(productId));
       } catch (error62) {
         return toFailure8(error62, STOCK_ERRORS.unexpected);
       }
@@ -29102,7 +29132,7 @@ function registerStockIpcHandlers() {
     "stock:get-form",
     (_event, productId, form) => {
       try {
-        return toSuccess7(getProductFormStock(productId, form));
+        return toSuccess6(getProductFormStock(productId, form));
       } catch (error62) {
         return toFailure8(error62, STOCK_ERRORS.unexpected);
       }
@@ -29112,7 +29142,7 @@ function registerStockIpcHandlers() {
     "stock:initialize",
     (_event, productId, input2) => {
       try {
-        return toSuccess7(initializeStock(productId, input2));
+        return toSuccess6(initializeStock(productId, input2));
       } catch (error62) {
         return toFailure8(error62, STOCK_ERRORS.unexpected);
       }
@@ -29122,7 +29152,7 @@ function registerStockIpcHandlers() {
     "stock:adjust",
     (_event, productId, input2) => {
       try {
-        return toSuccess7(adjustStock(productId, input2));
+        return toSuccess6(adjustStock(productId, input2));
       } catch (error62) {
         return toFailure8(error62, STOCK_ERRORS.unexpected);
       }
@@ -29132,7 +29162,7 @@ function registerStockIpcHandlers() {
     "stock:movements",
     (_event, productId) => {
       try {
-        return toSuccess7(listProductMovements(productId));
+        return toSuccess6(listProductMovements(productId));
       } catch (error62) {
         return toFailure8(error62, STOCK_ERRORS.unexpected);
       }
@@ -29428,7 +29458,7 @@ function ensureSystemSupplier() {
 }
 
 // electron/ipc/suppliers.ts
-function toSuccess8(data) {
+function toSuccess7(data) {
   return { success: true, data };
 }
 function toFailure9(error62, fallback) {
@@ -29441,14 +29471,14 @@ function toFailure9(error62, fallback) {
 function registerSupplierIpcHandlers() {
   ipcMain.handle("suppliers:list", (_event, filters) => {
     try {
-      return toSuccess8(listSuppliers(filters ?? {}));
+      return toSuccess7(listSuppliers(filters ?? {}));
     } catch (error62) {
       return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
     }
   });
   ipcMain.handle("suppliers:get", (_event, id) => {
     try {
-      return toSuccess8(getSupplierById(id));
+      return toSuccess7(getSupplierById(id));
     } catch (error62) {
       return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
     }
@@ -29457,7 +29487,7 @@ function registerSupplierIpcHandlers() {
     "suppliers:create",
     (_event, input2) => {
       try {
-        return toSuccess8(createSupplier(input2));
+        return toSuccess7(createSupplier(input2));
       } catch (error62) {
         return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
       }
@@ -29467,7 +29497,7 @@ function registerSupplierIpcHandlers() {
     "suppliers:update",
     (_event, id, input2) => {
       try {
-        return toSuccess8(updateSupplier(id, input2));
+        return toSuccess7(updateSupplier(id, input2));
       } catch (error62) {
         return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
       }
@@ -29477,7 +29507,7 @@ function registerSupplierIpcHandlers() {
     "suppliers:set-active",
     (_event, id, isActive) => {
       try {
-        return toSuccess8(setSupplierActive(id, isActive));
+        return toSuccess7(setSupplierActive(id, isActive));
       } catch (error62) {
         return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
       }
@@ -29487,7 +29517,7 @@ function registerSupplierIpcHandlers() {
     "suppliers:is-name-available",
     (_event, name, excludeSupplierId) => {
       try {
-        return toSuccess8(isNameAvailable4(name, excludeSupplierId));
+        return toSuccess7(isNameAvailable4(name, excludeSupplierId));
       } catch (error62) {
         return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
       }
@@ -29497,7 +29527,7 @@ function registerSupplierIpcHandlers() {
     "suppliers:is-phone-available",
     (_event, phone, excludeSupplierId) => {
       try {
-        return toSuccess8(isPhoneAvailable2(phone, excludeSupplierId));
+        return toSuccess7(isPhoneAvailable2(phone, excludeSupplierId));
       } catch (error62) {
         return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
       }
@@ -29505,7 +29535,7 @@ function registerSupplierIpcHandlers() {
   );
   ipcMain.handle("suppliers:ensure-system", () => {
     try {
-      return toSuccess8(ensureSystemSupplier());
+      return toSuccess7(ensureSystemSupplier());
     } catch (error62) {
       return toFailure9(error62, SUPPLIER_ERRORS.unexpected);
     }
@@ -29896,7 +29926,7 @@ function createSupply(input2) {
 }
 
 // electron/ipc/supplies.ts
-function toSuccess9(data) {
+function toSuccess8(data) {
   return { success: true, data };
 }
 function toFailure10(error62, fallback) {
@@ -29911,7 +29941,7 @@ function registerSupplyIpcHandlers() {
     "supplies:list",
     (_event, filters) => {
       try {
-        return toSuccess9(listSupplies(filters ?? {}));
+        return toSuccess8(listSupplies(filters ?? {}));
       } catch (error62) {
         return toFailure10(error62, SUPPLY_ERRORS.unexpected);
       }
@@ -29921,7 +29951,7 @@ function registerSupplyIpcHandlers() {
     "supplies:get",
     (_event, id) => {
       try {
-        return toSuccess9(getSupplyById(id));
+        return toSuccess8(getSupplyById(id));
       } catch (error62) {
         return toFailure10(error62, SUPPLY_ERRORS.unexpected);
       }
@@ -29931,7 +29961,7 @@ function registerSupplyIpcHandlers() {
     "supplies:get-by-reference",
     (_event, reference) => {
       try {
-        return toSuccess9(getSupplyByReference(reference));
+        return toSuccess8(getSupplyByReference(reference));
       } catch (error62) {
         return toFailure10(error62, SUPPLY_ERRORS.unexpected);
       }
@@ -29941,7 +29971,7 @@ function registerSupplyIpcHandlers() {
     "supplies:create",
     (_event, input2) => {
       try {
-        return toSuccess9(createSupply(input2));
+        return toSuccess8(createSupply(input2));
       } catch (error62) {
         return toFailure10(error62, SUPPLY_ERRORS.unexpected);
       }
@@ -30309,7 +30339,7 @@ function createTransformation(input2) {
 }
 
 // electron/ipc/transformations.ts
-function toSuccess10(data) {
+function toSuccess9(data) {
   return { success: true, data };
 }
 function toFailure11(error62, fallback) {
@@ -30324,7 +30354,7 @@ function registerTransformationIpcHandlers() {
     "transformations:list-products",
     () => {
       try {
-        return toSuccess10(listTransformableProducts());
+        return toSuccess9(listTransformableProducts());
       } catch (error62) {
         return toFailure11(error62, TRANSFORMATION_ERRORS.unexpected);
       }
@@ -30334,7 +30364,7 @@ function registerTransformationIpcHandlers() {
     "transformations:list",
     (_event, filters) => {
       try {
-        return toSuccess10(listTransformations(filters ?? {}));
+        return toSuccess9(listTransformations(filters ?? {}));
       } catch (error62) {
         return toFailure11(error62, TRANSFORMATION_ERRORS.unexpected);
       }
@@ -30344,7 +30374,7 @@ function registerTransformationIpcHandlers() {
     "transformations:get",
     (_event, id) => {
       try {
-        return toSuccess10(getTransformationById(id));
+        return toSuccess9(getTransformationById(id));
       } catch (error62) {
         return toFailure11(error62, TRANSFORMATION_ERRORS.unexpected);
       }
@@ -30354,7 +30384,7 @@ function registerTransformationIpcHandlers() {
     "transformations:get-by-reference",
     (_event, reference) => {
       try {
-        return toSuccess10(getTransformationByReference(reference));
+        return toSuccess9(getTransformationByReference(reference));
       } catch (error62) {
         return toFailure11(error62, TRANSFORMATION_ERRORS.unexpected);
       }
@@ -30364,7 +30394,7 @@ function registerTransformationIpcHandlers() {
     "transformations:create",
     (_event, input2) => {
       try {
-        return toSuccess10(createTransformation(input2));
+        return toSuccess9(createTransformation(input2));
       } catch (error62) {
         return toFailure11(error62, TRANSFORMATION_ERRORS.unexpected);
       }

@@ -5519,6 +5519,22 @@ var app = {
   relaunch: () => {
   }
 };
+var handlers = /* @__PURE__ */ new Map();
+var ipcMain = {
+  handle(channel, listener) {
+    handlers.set(channel, listener);
+  },
+  removeHandler(channel) {
+    handlers.delete(channel);
+  }
+};
+function invokeHandler(channel, ...args) {
+  const handler = handlers.get(channel);
+  if (!handler) {
+    throw new Error(`No handler registered for ${channel}`);
+  }
+  return handler({}, ...args);
+}
 var printStubs = {
   /** Every URL loaded in a document window, `data:` URLs included. */
   loadedUrls: [],
@@ -5922,7 +5938,7 @@ function initializeDatabase() {
   if (db) {
     return db;
   }
-  const dbPath = path2.join(app.getPath("userData"), "database.sqlite");
+  const dbPath = process.env.GESTION_BOUTIQUE_DB_PATH ? path2.resolve(process.env.GESTION_BOUTIQUE_DB_PATH) : path2.join(app.getPath("userData"), "database.sqlite");
   const sqlite = new Database(dbPath);
   sqlite.pragma("foreign_keys = ON");
   sqlite.function("unaccent", { deterministic: true }, removeDiacritics);
@@ -6333,7 +6349,7 @@ function validateBackupFile(filePath) {
 async function createBackup(onProgress) {
   let handle = null;
   let backupPath = null;
-  let fileCreated = false;
+  let existedBefore = false;
   try {
     handle = maintenanceLock.acquireForBackup();
     const db2 = getDb();
@@ -6347,6 +6363,7 @@ async function createBackup(onProgress) {
       return { success: false, error: BACKUP_ERRORS.cancelled };
     }
     backupPath = filePath;
+    existedBefore = fs4.existsSync(backupPath);
     await sqlite.backup(filePath, {
       progress: (info) => {
         const percent = (info.totalPages - info.remainingPages) / info.totalPages * 100;
@@ -6354,10 +6371,9 @@ async function createBackup(onProgress) {
         return 100;
       }
     });
-    fileCreated = true;
     return toResult(filePath);
   } catch (error62) {
-    if (backupPath && fileCreated) {
+    if (backupPath && !existedBefore && fs4.existsSync(backupPath)) {
       try {
         fs4.rmSync(backupPath, { force: true });
       } catch (cleanupError) {
@@ -6441,10 +6457,30 @@ async function restoreBackup(filePath) {
       throw error62;
     }
     emergencyPath = `${dbPath}.emergency-${crypto4.randomUUID().replace(/-/g, "")}`;
+    const checkpointResult = sqlite.pragma("wal_checkpoint(TRUNCATE)");
+    if (checkpointResult && checkpointResult.busy > 0) {
+      console.error(
+        "[backup] WAL checkpoint was blocked (%d frames not flushed), safe restore not possible",
+        checkpointResult.busy
+      );
+      throw new BackupError("restoreFailed");
+    }
     fs4.copyFileSync(dbPath, emergencyPath);
     closeDatabase();
+    const walPath = `${dbPath}-wal`;
+    const shmPath = `${dbPath}-shm`;
+    if (fs4.existsSync(walPath)) {
+      fs4.rmSync(walPath, { force: true });
+    }
+    if (fs4.existsSync(shmPath)) {
+      fs4.rmSync(shmPath, { force: true });
+    }
     fs4.copyFileSync(selectedPath, dbPath);
     initializeDatabase();
+    const newMode = getDb().$client.pragma("journal_mode = DELETE");
+    if (newMode !== "delete") {
+      console.warn('[backup] Journal mode is "%s" after restore \u2014 expected "delete"', newMode);
+    }
     initDatabase(resolveMigrationsFolder());
     const verifyDb = new Database2(dbPath, { readonly: true });
     try {
@@ -6473,6 +6509,13 @@ async function restoreBackup(filePath) {
           closeDatabase();
           fs4.copyFileSync(emergencyPath, getDatabasePath());
           initializeDatabase();
+          const recoveryMode = getDb().$client.pragma("journal_mode = DELETE");
+          if (recoveryMode !== "delete") {
+            console.warn(
+              '[backup] Journal mode is "%s" after emergency recovery \u2014 expected "delete"',
+              recoveryMode
+            );
+          }
           initDatabase(resolveMigrationsFolder());
         } catch (recoveryError) {
           console.error("[backup] Emergency recovery failed:", recoveryError);
@@ -6497,6 +6540,47 @@ async function restoreBackup(filePath) {
     }
     handle?.release();
   }
+}
+
+// electron/ipc/backup.ts
+function toFailure(error62, fallback) {
+  if (error62 instanceof BackupError) {
+    return { success: false, error: error62.message };
+  }
+  console.error("[backup] Unexpected error:", error62);
+  return { success: false, error: BACKUP_ERRORS[fallback] };
+}
+function registerBackupIpcHandlers() {
+  ipcMain.handle("database:backup", async () => {
+    try {
+      return await createBackup();
+    } catch (error62) {
+      return toFailure(error62, "unexpected");
+    }
+  });
+  ipcMain.handle(
+    "database:restore",
+    async (_event, filePath) => {
+      try {
+        return await restoreBackup(filePath);
+      } catch (error62) {
+        return toFailure(error62, "unexpected");
+      }
+    }
+  );
+  ipcMain.handle("database:backup-info", () => {
+    return getDatabaseInfo();
+  });
+  ipcMain.handle(
+    "database:validate",
+    async (_event, filePath) => {
+      try {
+        return validateBackupFile(filePath);
+      } catch (error62) {
+        return toFailure(error62, "unexpected");
+      }
+    }
+  );
 }
 
 // tests/helpers/database.ts
@@ -26684,6 +26768,58 @@ describe3("module Backup", () => {
         assert2.ok(fs5.existsSync(result.data));
       }
     });
+    it("cleans up partial backup file when sqlite.backup fails mid-operation", async () => {
+      const backupPath = tmpFile("partial-cleanup.sqlite");
+      printStubs.savePath = backupPath;
+      const proto = Database3.prototype;
+      const originalBackup = proto.backup;
+      proto.backup = function(destination) {
+        fs5.writeFileSync(destination, "partial backup data");
+        throw new Error("Simulated backup failure mid-operation");
+      };
+      try {
+        const result = await createBackup();
+        assert2.equal(result.success, false);
+        assert2.equal(result.error, BACKUP_ERRORS.backupFailed);
+        assert2.equal(
+          fs5.existsSync(backupPath),
+          false,
+          "partial backup file must be cleaned up on failure"
+        );
+      } finally {
+        proto.backup = originalBackup;
+      }
+    });
+    it("does not delete pre-existing file when backup fails", async () => {
+      const backupPath = tmpFile("preexisting.sqlite");
+      fs5.writeFileSync(backupPath, "pre-existing content");
+      printStubs.savePath = backupPath;
+      const proto = Database3.prototype;
+      const originalBackup = proto.backup;
+      proto.backup = function() {
+        throw new Error("Simulated backup failure");
+      };
+      try {
+        const result = await createBackup();
+        assert2.equal(result.success, false);
+        assert2.equal(
+          fs5.existsSync(backupPath),
+          true,
+          "pre-existing file must not be deleted"
+        );
+        assert2.equal(fs5.readFileSync(backupPath, "utf8"), "pre-existing content");
+      } finally {
+        proto.backup = originalBackup;
+      }
+    });
+    it("releases backup lock on failure", async () => {
+      printStubs.savePath = null;
+      const result = await createBackup();
+      assert2.equal(result.success, false);
+      const lock = maintenanceLock.acquireForBackup();
+      assert2.ok(lock, "backup lock must be available after failure");
+      lock.release();
+    });
   });
   describe3("validateBackupFile", () => {
     it("accepts a valid backup", async () => {
@@ -26828,5 +26964,187 @@ describe3("module Backup", () => {
       if (!result.success) return;
       assert2.match(result.data.sqliteVersion, /^\d+\.\d+\.\d+/);
     });
+  });
+  describe3("contrat IPC backup-info", () => {
+    before(() => {
+      registerBackupIpcHandlers();
+    });
+    it("renvoie une information non imbriqu\xE9e via le canal IPC", () => {
+      const result = invokeHandler("database:backup-info");
+      assert2.equal(result.success, true, "must return a success envelope");
+      if (!result.success) return;
+      assert2.equal(result.data.exists, true, "data.exists must be the actual BackupInfo field");
+      assert2.ok(typeof result.data.sizeBytes === "number");
+      assert2.ok(typeof result.data.sqliteVersion === "string");
+      assert2.equal(
+        result.data.success,
+        void 0,
+        "must not be double-wrapped in a nested DatabaseResult"
+      );
+      assert2.equal(
+        result.data.data,
+        void 0,
+        "must not contain a nested data field"
+      );
+    });
+  });
+  describe3("mode WAL \u2014 sauvegarde et restauration", () => {
+    function enableWalMode() {
+      const dbPath = getDatabasePath();
+      closeDatabase();
+      const sqlite = new Database3(dbPath);
+      sqlite.pragma("foreign_keys = ON");
+      sqlite.pragma("journal_mode = WAL");
+      sqlite.pragma("wal_checkpoint(TRUNCATE)");
+      sqlite.close();
+      return initializeDatabase().$client;
+    }
+    it("pr\xE9serve les donn\xE9es via backup et restore en mode WAL", async () => {
+      const sqlite = enableWalMode();
+      const category = seedCategory("WAL TEST");
+      seedSimpleProduct(category, "WAL PRODUIT 1");
+      seedSimpleProduct(category, "WAL PRODUIT 2");
+      seedSimpleProduct(category, "WAL PRODUIT 3");
+      sqlite.pragma("wal_checkpoint(PASSIVE)");
+      const countAfterWal = productCount();
+      const backupPath = tmpFile("wal-backup.sqlite");
+      printStubs.savePath = backupPath;
+      const backupResult = await createBackup();
+      assert2.ok(backupResult.success);
+      if (!backupResult.success) return;
+      const verify = new Database3(backupPath, { readonly: true });
+      try {
+        const count = verify.prepare("SELECT COUNT(*) as c FROM products").get();
+        assert2.equal(count.c, countAfterWal, "backup must contain all WAL data");
+      } finally {
+        verify.close();
+      }
+      const restoreResult = await restoreBackup(backupPath);
+      assert2.ok(restoreResult.success);
+      if (!restoreResult.success) return;
+      const dbPath = getDatabasePath();
+      assert2.equal(fs5.existsSync(`${dbPath}-wal`), false, "WAL file must be removed after restore");
+      assert2.equal(
+        fs5.existsSync(`${dbPath}-shm`),
+        false,
+        "SHM file must be removed after restore"
+      );
+      assert2.equal(
+        productCount(),
+        countAfterWal,
+        "all data must be preserved after restore"
+      );
+    });
+    it("\xE9choue si le checkpoint WAL est bloqu\xE9 par un lecteur externe", async () => {
+      enableWalMode();
+      const category = seedCategory("WAL BLOCKED");
+      seedSimpleProduct(category, "BLOCKED PRODUCT");
+      const countBefore = productCount();
+      const backupPath = tmpFile("wal-blocked.sqlite");
+      printStubs.savePath = backupPath;
+      const backupResult = await createBackup();
+      assert2.ok(backupResult.success);
+      if (!backupResult.success) return;
+      const sqlite = getDb().$client;
+      const originalPragma = sqlite.pragma.bind(sqlite);
+      sqlite.pragma = (query) => {
+        if (typeof query === "string" && query.includes("wal_checkpoint")) {
+          return { busy: 1, log: 1, ckpt: 0 };
+        }
+        return originalPragma(query);
+      };
+      try {
+        const result = await restoreBackup(backupPath);
+        assert2.equal(result.success, false, "restore must fail when checkpoint is blocked");
+        assert2.equal(result.error, BACKUP_ERRORS.restoreFailed);
+        assert2.equal(productCount(), countBefore, "original data must be preserved");
+      } finally {
+        sqlite.pragma = originalPragma;
+      }
+    });
+  });
+  describe3("r\xE9cup\xE9ration d\u2019urgence", () => {
+    it("restaure depuis la sauvegarde d\u2019urgence quand la copie \xE9choue", async () => {
+      const backupPath = tmpFile("emergency-recovery.sqlite");
+      printStubs.savePath = backupPath;
+      const backupResult = await createBackup();
+      assert2.ok(backupResult.success);
+      if (!backupResult.success) return;
+      const category = seedCategory("AFTER BACKUP");
+      seedSimpleProduct(category, "PRODUIT AFTER BACKUP");
+      const countAtRestoreStart = productCount();
+      const originalCopy = fs5.copyFileSync;
+      const dbPath = getDatabasePath();
+      fs5.copyFileSync = (src, dest, ...rest) => {
+        if (String(src) === backupPath && String(dest) === dbPath) {
+          throw new Error("Simulated write failure");
+        }
+        return originalCopy(
+          src,
+          dest,
+          ...rest
+        );
+      };
+      try {
+        const result = await restoreBackup(backupPath);
+        assert2.equal(result.success, false, "restore must fail");
+        assert2.equal(result.success ? "" : result.error, BACKUP_ERRORS.restoreFailed);
+        assert2.equal(
+          productCount(),
+          countAtRestoreStart,
+          "data must be restored from emergency backup"
+        );
+        const emergencyFiles = fs5.readdirSync(path6.dirname(dbPath)).filter((f) => f.startsWith("database.sqlite.emergency-"));
+        assert2.ok(emergencyFiles.length > 0, "emergency backup must be retained for inspection");
+      } finally {
+        fs5.copyFileSync = originalCopy;
+      }
+    });
+    it("preserve les donn\xE9es WAL dans la sauvegarde d\u2019urgence", async () => {
+      enableWalMode();
+      const category = seedCategory("WAL EMERGENCY");
+      seedSimpleProduct(category, "WAL EMERGENCY PRODUCT");
+      const backupPath = tmpFile("wal-emergency.sqlite");
+      printStubs.savePath = backupPath;
+      const backupResult = await createBackup();
+      assert2.ok(backupResult.success);
+      if (!backupResult.success) return;
+      seedSimpleProduct(category, "WAL EMERGENCY PRODUCT 2");
+      const countAtRestoreStart = productCount();
+      const originalCopy = fs5.copyFileSync;
+      const dbPath = getDatabasePath();
+      fs5.copyFileSync = (src, dest, ...rest) => {
+        if (String(src) === backupPath && String(dest) === dbPath) {
+          throw new Error("Simulated write failure");
+        }
+        return originalCopy(
+          src,
+          dest,
+          ...rest
+        );
+      };
+      try {
+        const result = await restoreBackup(backupPath);
+        assert2.equal(result.success, false);
+        assert2.equal(result.success ? "" : result.error, BACKUP_ERRORS.restoreFailed);
+        assert2.equal(
+          productCount(),
+          countAtRestoreStart,
+          "WAL data must be preserved in emergency backup"
+        );
+      } finally {
+        fs5.copyFileSync = originalCopy;
+      }
+    });
+    function enableWalMode() {
+      const dbPath = getDatabasePath();
+      closeDatabase();
+      const sqlite = new Database3(dbPath);
+      sqlite.pragma("foreign_keys = ON");
+      sqlite.pragma("journal_mode = WAL");
+      sqlite.pragma("wal_checkpoint(TRUNCATE)");
+      sqlite.close();
+      return initializeDatabase().$client;
+    }
   });
 });

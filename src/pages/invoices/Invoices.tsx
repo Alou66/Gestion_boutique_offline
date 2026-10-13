@@ -2,17 +2,18 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { Sale } from '@/types'
 import { invoiceService } from '@/services'
+import { Pagination } from '@/components'
+import { paginate, type Page } from '@/lib/pagination'
 import {
   buildInvoiceFilters,
   formatAmount,
   formatInvoiceDate,
   formatStatusLabel,
   INVOICE_MESSAGES,
-  paginateInvoices,
   paymentStatusTone,
   saleStatusTone,
 } from './schemas/invoice.schema'
-import type { InvoiceStatusFilter } from './schemas/invoice.schema'
+import type { PaymentStatusFilter } from './schemas/invoice.schema'
 
 /**
  * Page « Liste des factures ».
@@ -28,7 +29,8 @@ function Invoices() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [clientSearch, setClientSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<InvoiceStatusFilter>('all')
+  // const [statusFilter, setStatusFilter] = useState<InvoiceStatusFilter>('all')
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<PaymentStatusFilter>('all')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
@@ -38,13 +40,16 @@ function Invoices() {
     setLoadError(null)
 
     try {
-      setInvoices(await invoiceService.list(buildInvoiceFilters(search, clientSearch, statusFilter, dateFrom, dateTo)))
+      const allInvoices = await invoiceService.list(
+        buildInvoiceFilters(search, clientSearch, dateFrom, dateTo, paymentStatusFilter),
+      )
+      setInvoices(allInvoices)
     } catch {
       setLoadError(INVOICE_MESSAGES.unexpected)
     } finally {
       setIsLoading(false)
     }
-  }, [search, clientSearch, statusFilter, dateFrom, dateTo])
+  }, [search, clientSearch, dateFrom, dateTo, paymentStatusFilter])
 
   useEffect(() => {
     const timer = setTimeout(loadInvoices, 200)
@@ -52,12 +57,12 @@ function Invoices() {
     return () => clearTimeout(timer)
   }, [loadInvoices])
 
-  // Un changement de filtre ou de recherche ramène à la première page.
+  // Reset to page 1 when search or filter changes
   useEffect(() => {
     setCurrentPage(1)
-  }, [search, clientSearch, statusFilter, dateFrom, dateTo])
+  }, [search, clientSearch, paymentStatusFilter, dateFrom, dateTo])
 
-  const page = useMemo(() => paginateInvoices(invoices, currentPage), [invoices, currentPage])
+  const page = useMemo<Page<Sale>>(() => paginate(invoices, currentPage), [invoices, currentPage])
 
   return (
     <div className="space-y-6">
@@ -96,23 +101,23 @@ function Invoices() {
             className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500"
           />
         </div>
-
         <div>
           <label
-            htmlFor="invoice-status-filter"
+            htmlFor="invoice-payment-status-filter"
             className="block text-sm font-medium text-gray-700"
           >
-            Statut de la facture
+            Statut de paiement
           </label>
           <select
-            id="invoice-status-filter"
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value as InvoiceStatusFilter)}
+            id="invoice-payment-status-filter"
+            value={paymentStatusFilter}
+            onChange={(event) => setPaymentStatusFilter(event.target.value as PaymentStatusFilter)}
             className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500"
           >
             <option value="all">Toutes</option>
-            <option value="VALIDEE">Validées</option>
-            <option value="ANNULEE">Annulées</option>
+            <option value="PAYEE">Payées</option>
+            <option value="PARTIELLEMENT_PAYEE">Partiellement payées</option>
+            <option value="NON_PAYEE">Non payées</option>
           </select>
         </div>
 
@@ -258,32 +263,13 @@ function Invoices() {
         </table>
       </div>
 
-      {page.totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-gray-600">
-            Page {page.page} / {page.totalPages} — {page.total} facture
-            {page.total > 1 ? 's' : ''}
-          </p>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setCurrentPage((value) => Math.max(1, value - 1))}
-              disabled={page.page === 1}
-              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Précédente
-            </button>
-            <button
-              type="button"
-              onClick={() => setCurrentPage((value) => Math.min(page.totalPages, value + 1))}
-              disabled={page.page === page.totalPages}
-              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Suivante
-            </button>
-          </div>
-        </div>
-      )}
+      <Pagination
+        page={page.page}
+        totalPages={page.totalPages}
+        total={page.total}
+        itemLabel="facture"
+        onPageChange={setCurrentPage}
+      />
     </div>
   )
 }

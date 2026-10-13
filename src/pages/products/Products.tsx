@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { Category, Product, ProductInput } from '@/types'
 import { categoryService, productService } from '@/services'
+import { Pagination } from '@/components'
+import { paginate, type Page } from '@/lib/pagination'
 import ConfirmDialog from '../categories/ConfirmDialog'
 import ProductForm from './ProductForm'
 import { PRODUCT_MESSAGES } from './schemas/product.schema'
@@ -23,7 +25,6 @@ function formatConversion(product: Product): string | null {
 }
 
 function Products() {
-  const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -32,6 +33,13 @@ function Products() {
   const [search, setSearch] = useState('')
   const [categorySearch, setCategorySearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [page, setPage] = useState<Page<Product>>({
+    rows: [],
+    page: 1,
+    totalPages: 1,
+    total: 0,
+  })
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [editing, setEditing] = useState<Product | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
@@ -63,25 +71,30 @@ function Products() {
     setLoadError(null)
 
     try {
-      setProducts(
-        await productService.list({
-          search: search.trim() || undefined,
-          categorySearch: categorySearch.trim() || undefined,
-          isActive: statusFilter === 'all' ? undefined : statusFilter === 'active',
-        }),
-      )
+      const allProducts = await productService.list({
+        search: search.trim() || undefined,
+        categorySearch: categorySearch.trim() || undefined,
+        isActive: statusFilter === 'all' ? undefined : statusFilter === 'active',
+      })
+
+      setPage(paginate(allProducts, currentPage))
     } catch {
       setLoadError(PRODUCT_MESSAGES.unexpected)
     } finally {
       setIsLoading(false)
     }
-  }, [search, categorySearch, statusFilter])
+  }, [search, categorySearch, statusFilter, currentPage])
 
   useEffect(() => {
     const timer = setTimeout(loadProducts, 200)
 
     return () => clearTimeout(timer)
   }, [loadProducts])
+
+  // Reset to page 1 when search or filter changes
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [search, categorySearch, statusFilter])
 
   const hasCategories = categories.length > 0
 
@@ -377,7 +390,7 @@ function Products() {
               </tr>
             )}
 
-            {!isLoading && !loadError && products.length === 0 && (
+            {!isLoading && !loadError && page.rows.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-6 py-6 text-center text-sm text-gray-500">
                   Aucun produit pour le moment.
@@ -387,7 +400,7 @@ function Products() {
 
             {!isLoading &&
               !loadError &&
-              products.map((product) => {
+              page.rows.map((product) => {
                 const conversion = formatConversion(product)
 
                 return (
@@ -468,6 +481,14 @@ function Products() {
           </tbody>
         </table>
       </div>
+
+      <Pagination
+        page={page.page}
+        totalPages={page.totalPages}
+        total={page.total}
+        itemLabel="produit"
+        onPageChange={setCurrentPage}
+      />
 
       {pendingStatusChange && (
         <ConfirmDialog

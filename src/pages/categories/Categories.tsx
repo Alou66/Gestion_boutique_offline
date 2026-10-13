@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { categoryService } from '@/services'
+import { Pagination } from '@/components'
+import { paginate, type Page } from '@/lib/pagination'
 import type { Category } from '@/types'
 import CategoryForm from './CategoryForm'
 import ConfirmDialog from './ConfirmDialog'
@@ -7,10 +9,17 @@ import { CATEGORY_MESSAGES } from './schemas/category.schema'
 import type { CategoryFormData } from './schemas/category.schema'
 
 function Categories() {
-  const [categories, setCategories] = useState<Category[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [page, setPage] = useState<Page<Category>>({
+    rows: [],
+    page: 1,
+    totalPages: 1,
+    total: 0,
+  })
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [editing, setEditing] = useState<Category | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
@@ -23,17 +32,23 @@ function Categories() {
     setLoadError(null)
 
     try {
-      setCategories(await categoryService.list())
+      const allCategories = await categoryService.list()
+      setPage(paginate(allCategories, currentPage))
     } catch {
       setLoadError(CATEGORY_MESSAGES.unexpected)
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [currentPage])
 
   useEffect(() => {
     loadCategories()
   }, [loadCategories])
+
+  // Reset to page 1 when search changes
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [search])
 
   const closeForm = () => {
     setIsFormOpen(false)
@@ -87,8 +102,8 @@ function Categories() {
 
     try {
       await categoryService.delete(pendingDelete.id)
-      setCategories((current) => current.filter((item) => item.id !== pendingDelete.id))
       setPendingDelete(null)
+      await loadCategories()
     } catch (error) {
       setActionError(error instanceof Error ? error.message : CATEGORY_MESSAGES.unexpected)
     } finally {
@@ -112,6 +127,22 @@ function Categories() {
       {actionError && (
         <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{actionError}</p>
       )}
+
+      <div className="grid gap-3 sm:grid-cols-1">
+        <div>
+          <label htmlFor="category-search" className="block text-sm font-medium text-gray-700">
+            Rechercher
+          </label>
+          <input
+            id="category-search"
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Nom de la catégorie"
+            className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+          />
+        </div>
+      </div>
 
       {isFormOpen && (
         <CategoryForm
@@ -155,7 +186,7 @@ function Categories() {
               </tr>
             )}
 
-            {!isLoading && !loadError && categories.length === 0 && (
+            {!isLoading && !loadError && page.rows.length === 0 && (
               <tr>
                 <td colSpan={2} className="px-6 py-6 text-center text-sm text-gray-500">
                   Aucune catégorie pour le moment.
@@ -165,7 +196,7 @@ function Categories() {
 
             {!isLoading &&
               !loadError &&
-              categories.map((category) => (
+              page.rows.map((category) => (
                 <tr key={category.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 text-sm font-medium text-gray-900">
                     {category.name}
@@ -196,6 +227,14 @@ function Categories() {
           </tbody>
         </table>
       </div>
+
+      <Pagination
+        page={page.page}
+        totalPages={page.totalPages}
+        total={page.total}
+        itemLabel="catégorie"
+        onPageChange={setCurrentPage}
+      />
 
       {pendingDelete && (
         <ConfirmDialog

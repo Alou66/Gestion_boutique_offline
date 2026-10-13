@@ -5883,7 +5883,7 @@ function initializeDatabase() {
   if (db) {
     return db;
   }
-  const dbPath = path2.join(app.getPath("userData"), "database.sqlite");
+  const dbPath = process.env.GESTION_BOUTIQUE_DB_PATH ? path2.resolve(process.env.GESTION_BOUTIQUE_DB_PATH) : path2.join(app.getPath("userData"), "database.sqlite");
   const sqlite = new Database(dbPath);
   sqlite.pragma("foreign_keys = ON");
   sqlite.function("unaccent", { deterministic: true }, removeDiacritics);
@@ -26747,6 +26747,16 @@ function listInvoices(filters = {}) {
       sql`${sales.saleDate} <= ${Math.floor(parseInvoiceDate(filters.dateTo).getTime() / 1e3)}`
     );
   }
+  if (typeof filters?.paymentStatus === "string") {
+    const paymentStatus = filters.paymentStatus;
+    if (paymentStatus === "NON_PAYEE") {
+      conditions.push(sql`coalesce((select sum(amount) from payments where payments.sale_id = sales.id), 0) = 0`);
+    } else if (paymentStatus === "PAYEE") {
+      conditions.push(sql`${sales.totalAmount} <= coalesce((select sum(amount) from payments where payments.sale_id = sales.id), 0)`);
+    } else if (paymentStatus === "PARTIELLEMENT_PAYEE") {
+      conditions.push(sql`${sales.totalAmount} > coalesce((select sum(amount) from payments where payments.sale_id = sales.id), 0) AND coalesce((select sum(amount) from payments where payments.sale_id = sales.id), 0) > 0`);
+    }
+  }
   const db2 = getDb();
   const rows = db2.select(saleColumns).from(sales).innerJoin(clients, eq(sales.clientId, clients.id)).where(conditions.length > 0 ? and(...conditions) : void 0).orderBy(desc(sales.id)).all();
   const paidBySale = computePaidBySale(db2);
@@ -28818,6 +28828,38 @@ describe3("module Facturation", () => {
       assert2.deepEqual(
         listInvoices({ dateFrom: "2026-10-01" }).map((invoice) => invoice.reference),
         [second.reference, first.reference]
+      );
+    });
+    it("filtre la liste par statut de paiement", () => {
+      const unpaid = createInvoice({ items: [line(simpleProduct, "SAC", 1, 1e3)] });
+      const partial2 = createInvoice({ items: [line(simpleProduct, "SAC", 1, 1e3)] });
+      const paid = createInvoice({ items: [line(simpleProduct, "SAC", 1, 1e3)] });
+      addPayment(partial2.id, 500);
+      addPayment(paid.id, 1e3);
+      assert2.deepEqual(
+        listInvoices({ paymentStatus: "NON_PAYEE" }).map((invoice) => invoice.reference).sort(),
+        [unpaid.reference]
+      );
+      assert2.deepEqual(
+        listInvoices({ paymentStatus: "PARTIELLEMENT_PAYEE" }).map((invoice) => invoice.reference).sort(),
+        [partial2.reference]
+      );
+      assert2.deepEqual(
+        listInvoices({ paymentStatus: "PAYEE" }).map((invoice) => invoice.reference).sort(),
+        [paid.reference]
+      );
+      assert2.deepEqual(
+        listInvoices({ paymentStatus: "NON_PAYEE", status: "VALIDEE" }).map((invoice) => invoice.reference).sort(),
+        [unpaid.reference]
+      );
+      cancelInvoice(unpaid.id);
+      assert2.deepEqual(
+        listInvoices({ paymentStatus: "NON_PAYEE", status: "VALIDEE" }),
+        []
+      );
+      assert2.deepEqual(
+        listInvoices({ paymentStatus: "NON_PAYEE", status: "ANNULEE" }).map((invoice) => invoice.reference).sort(),
+        [unpaid.reference]
       );
     });
     it("relit une facture par identifiant et par r\xE9f\xE9rence", () => {

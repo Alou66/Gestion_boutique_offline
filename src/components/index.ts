@@ -1,4 +1,5 @@
 export type { ReactNode } from 'react'
+export { default as Pagination } from './Pagination'
 export { default as PasswordInput } from './PasswordInput'
 export { default as SearchableSelect } from './SearchableSelect'
 export {

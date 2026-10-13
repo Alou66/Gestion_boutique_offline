@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { StockAdjustInput, StockFormInput, StockFormLevel, StockMovement } from '@/types'
 import { stockService } from '@/services'
+import { Pagination } from '@/components'
+import { paginate, type Page } from '@/lib/pagination'
 import ConfirmDialog from '../categories/ConfirmDialog'
 import StockAdjustForm from './StockAdjustForm'
 import StockHistory from './StockHistory'
@@ -40,6 +42,7 @@ function Stock() {
   const [actionError, setActionError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [categorySearch, setCategorySearch] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [initializing, setInitializing] = useState<ProductTarget | null>(null)
@@ -79,6 +82,11 @@ function Stock() {
     return () => clearTimeout(timer)
   }, [loadStocks])
 
+  // Reset to page 1 when search or filter changes
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [search, categorySearch])
+
   /** Groups the rows by product: the page works product by product. */
   const targets = useMemo<ProductTarget[]>(() => {
     const byProduct = new Map<number, ProductTarget>()
@@ -102,6 +110,11 @@ function Stock() {
 
     return [...byProduct.values()]
   }, [levels])
+
+  const page = useMemo<Page<ProductTarget>>(() => paginate(targets, currentPage), [
+    targets,
+    currentPage,
+  ])
 
   const closeForms = () => {
     setInitializing(null)
@@ -326,7 +339,7 @@ function Stock() {
               </tr>
             )}
 
-            {!isLoading && !loadError && targets.length === 0 && (
+            {!isLoading && !loadError && page.rows.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-6 py-6 text-center text-sm text-gray-500">
                   Aucun produit pour le moment.
@@ -336,7 +349,7 @@ function Stock() {
 
             {!isLoading &&
               !loadError &&
-              targets.map((target) => {
+              page.rows.map((target) => {
                 const state = getStockLevelState(target)
                 // A product without any movement has a stock of 0: its initial
                 // stock can still be declared, exactly once.
@@ -425,6 +438,14 @@ function Stock() {
           </tbody>
         </table>
       </div>
+
+      <Pagination
+        page={page.page}
+        totalPages={page.totalPages}
+        total={page.total}
+        itemLabel="produit"
+        onPageChange={setCurrentPage}
+      />
 
       {pendingInitialize && (
         <ConfirmDialog

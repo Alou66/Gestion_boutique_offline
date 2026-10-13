@@ -247,7 +247,7 @@ export async function createBackup(
 ): Promise<DatabaseResult<string>> {
   let handle: MaintenanceLockHandle | null = null
   let backupPath: string | null = null
-  let fileCreated = false
+  let existedBefore = false
 
   try {
     handle = maintenanceLock.acquireForBackup()
@@ -267,6 +267,8 @@ export async function createBackup(
 
     backupPath = filePath
 
+    existedBefore = fs.existsSync(backupPath)
+
     await sqlite.backup(filePath, {
       progress: (info: { totalPages: number; remainingPages: number }) => {
         const percent = ((info.totalPages - info.remainingPages) / info.totalPages) * 100
@@ -275,10 +277,9 @@ export async function createBackup(
       },
     })
 
-    fileCreated = true
     return toResult(filePath)
   } catch (error) {
-    if (backupPath && fileCreated) {
+    if (backupPath && !existedBefore && fs.existsSync(backupPath)) {
       try {
         fs.rmSync(backupPath, { force: true })
       } catch (cleanupError) {
@@ -385,11 +386,51 @@ let restoreSucceeded = false
       }
 
       emergencyPath = `${dbPath}.emergency-${crypto.randomUUID().replace(/-/g, '')}`
+
+      // Flush any WAL data to the main database file before copying, so the
+      // emergency backup contains the full, consistent state. TRUNCATE also
+      // empties the WAL file, making the subsequent removal of -wal / -shm
+      // safe. This is a no-op when the database is not in WAL mode.
+      const checkpointResult = sqlite.pragma('wal_checkpoint(TRUNCATE)') as
+        | { busy: number; log: number; ckpt: number }
+        | undefined
+
+      if (checkpointResult && checkpointResult.busy > 0) {
+        console.error(
+          '[backup] WAL checkpoint was blocked (%d frames not flushed), safe restore not possible',
+          checkpointResult.busy,
+        )
+        throw new BackupError('restoreFailed')
+      }
+
       fs.copyFileSync(dbPath, emergencyPath)
 
       closeDatabase()
+
+      // Remove WAL and SHM files that may persist after closing the connection.
+      // They are safe to delete because wal_checkpoint(TRUNCATE) above already
+      // flushed all committed data to the main file.
+      const walPath = `${dbPath}-wal`
+      const shmPath = `${dbPath}-shm`
+      if (fs.existsSync(walPath)) {
+        fs.rmSync(walPath, { force: true })
+      }
+      if (fs.existsSync(shmPath)) {
+        fs.rmSync(shmPath, { force: true })
+      }
+
       fs.copyFileSync(selectedPath!, dbPath)
       initializeDatabase()
+      // The backup file may carry WAL mode in its header; ensure the
+      // application always operates in the default rollback-journal mode.
+      const newMode = (
+        getDb().$client as unknown as Database.Database
+      ).pragma('journal_mode = DELETE') as string
+
+      if (newMode !== 'delete') {
+        console.warn('[backup] Journal mode is "%s" after restore — expected "delete"', newMode)
+      }
+
       initDatabase(resolveMigrationsFolder())
 
       const verifyDb = new Database(dbPath, { readonly: true })
@@ -426,6 +467,17 @@ let restoreSucceeded = false
             closeDatabase()
             fs.copyFileSync(emergencyPath, getDatabasePath())
             initializeDatabase()
+            const recoveryMode = (
+              getDb().$client as unknown as Database.Database
+            ).pragma('journal_mode = DELETE') as string
+
+            if (recoveryMode !== 'delete') {
+              console.warn(
+                '[backup] Journal mode is "%s" after emergency recovery — expected "delete"',
+                recoveryMode,
+              )
+            }
+
             initDatabase(resolveMigrationsFolder())
           } catch (recoveryError) {
             console.error('[backup] Emergency recovery failed:', recoveryError)

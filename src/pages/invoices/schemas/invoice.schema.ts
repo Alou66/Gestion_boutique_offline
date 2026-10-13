@@ -38,9 +38,6 @@ export const INVOICE_ITEMS_MAX = 100
  */
 export const CASH_CLIENT_VALUE = 'comptant'
 
-/** The list API has no pagination: the pages are sliced in the renderer. */
-export const INVOICES_PER_PAGE = 20
-
 /** Messages d'affichage, identiques à `INVOICE_ERRORS` côté service métier. */
 export const INVOICE_MESSAGES = {
   dateRequired: 'La date de la facture est obligatoire.',
@@ -570,7 +567,9 @@ export function getMaxPaymentAmount(invoice: Sale, payment?: Payment | null): nu
 /* Liste des factures                                                 */
 /* ------------------------------------------------------------------ */
 
-export type InvoiceStatusFilter = 'all' | SaleStatus
+// export type InvoiceStatusFilter = 'all' | SaleStatus
+
+export type PaymentStatusFilter = 'all' | PaymentStatus
 
 /**
  * Les filtres de la liste ne font que transmettre ce que `listInvoices()`
@@ -579,38 +578,18 @@ export type InvoiceStatusFilter = 'all' | SaleStatus
 export function buildInvoiceFilters(
   search: string,
   clientSearch: string,
-  status: InvoiceStatusFilter,
+  // status: InvoiceStatusFilter,
   dateFrom?: string,
   dateTo?: string,
+  paymentStatus?: PaymentStatusFilter,
 ): SaleFilters {
   return {
     search: search.trim() || undefined,
     clientSearch: clientSearch.trim() || undefined,
-    status: status === 'all' ? null : status,
+    // status: status === 'all' ? null : status,
     dateFrom: dateFrom?.trim() || undefined,
     dateTo: dateTo?.trim() || undefined,
-  }
-}
-
-export interface InvoicePage {
-  rows: Sale[]
-  page: number
-  totalPages: number
-  total: number
-}
-
-/** Pagination de l'affichage : l'API renvoie la liste entière, sans limite. */
-export function paginateInvoices(sales: Sale[], page: number): InvoicePage {
-  const total = sales.length
-  const totalPages = Math.max(1, Math.ceil(total / INVOICES_PER_PAGE))
-  const currentPage = Math.min(Math.max(1, page), totalPages)
-  const start = (currentPage - 1) * INVOICES_PER_PAGE
-
-  return {
-    rows: sales.slice(start, start + INVOICES_PER_PAGE),
-    page: currentPage,
-    totalPages,
-    total,
+    paymentStatus: paymentStatus === 'all' || paymentStatus === undefined ? null : paymentStatus,
   }
 }
 

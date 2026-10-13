@@ -6,11 +6,10 @@ import {
   formatAmount,
   formatInvoiceDate,
   formatStatusLabel,
-  INVOICES_PER_PAGE,
-  paginateInvoices,
   paymentStatusTone,
   saleStatusTone,
 } from '../src/pages/invoices/schemas/invoice.schema'
+import { PAGINATION_PER_PAGE, paginate } from '../src/lib/pagination'
 
 /**
  * La liste des factures ne filtre rien elle-même : elle transmet la recherche
@@ -43,6 +42,7 @@ describe('filtres de la liste des factures', () => {
       status: null,
       dateFrom: undefined,
       dateTo: undefined,
+      paymentStatus: null,
     })
 
     // Les bornes de date sont transmises telles quelles au service.
@@ -54,6 +54,7 @@ describe('filtres de la liste des factures', () => {
         status: null,
         dateFrom: '2026-10-01',
         dateTo: '2026-10-31',
+        paymentStatus: null,
       },
     )
   })
@@ -65,6 +66,7 @@ describe('filtres de la liste des factures', () => {
       status: null,
       dateFrom: undefined,
       dateTo: undefined,
+      paymentStatus: null,
     })
 
     assert.deepEqual(buildInvoiceFilters('', '', 'VALIDEE'), {
@@ -73,6 +75,7 @@ describe('filtres de la liste des factures', () => {
       status: 'VALIDEE',
       dateFrom: undefined,
       dateTo: undefined,
+      paymentStatus: null,
     })
 
     // Une date vide ou composée d'espaces ne filtre rien.
@@ -82,17 +85,25 @@ describe('filtres de la liste des factures', () => {
       status: 'VALIDEE',
       dateFrom: undefined,
       dateTo: undefined,
+      paymentStatus: null,
     })
   })
 
   it('permet de filtrer les factures annulées', () => {
     assert.deepEqual(buildInvoiceFilters('', '', 'ANNULEE').status, 'ANNULEE')
   })
+
+  it('permet de filtrer par statut de paiement', () => {
+    assert.deepEqual(buildInvoiceFilters('', '', 'all', undefined, undefined, 'PAYEE').paymentStatus, 'PAYEE')
+    assert.deepEqual(buildInvoiceFilters('', '', 'all', undefined, undefined, 'PARTIELLEMENT_PAYEE').paymentStatus, 'PARTIELLEMENT_PAYEE')
+    assert.deepEqual(buildInvoiceFilters('', '', 'all', undefined, undefined, 'NON_PAYEE').paymentStatus, 'NON_PAYEE')
+    assert.deepEqual(buildInvoiceFilters('', '', 'all', undefined, undefined, 'all').paymentStatus, null)
+  })
 })
 
 describe('pagination de la liste', () => {
   it('renvoie une page vide quand il n\'y a aucune facture', () => {
-    const page = paginateInvoices([], 1)
+    const page = paginate([], 1)
 
     assert.deepEqual(page.rows, [])
     assert.equal(page.page, 1)
@@ -100,30 +111,30 @@ describe('pagination de la liste', () => {
     assert.equal(page.total, 0)
   })
 
-  it('découpe la liste par pages de vingt factures', () => {
+  it('découpe la liste par pages de dix factures', () => {
     const sales = Array.from({ length: 45 }, (_value, index) =>
       buildSale({ id: index + 1, reference: `VTE-${String(index + 1).padStart(6, '0')}` }),
     )
 
-    const first = paginateInvoices(sales, 1)
+    const first = paginate(sales, 1)
 
-    assert.equal(INVOICES_PER_PAGE, 20)
-    assert.equal(first.rows.length, 20)
+    assert.equal(PAGINATION_PER_PAGE, 10)
+    assert.equal(first.rows.length, 10)
     assert.equal(first.rows[0].id, 1)
-    assert.equal(first.totalPages, 3)
+    assert.equal(first.totalPages, 5)
     assert.equal(first.total, 45)
 
-    assert.equal(paginateInvoices(sales, 3).rows.length, 5)
-    assert.equal(paginateInvoices(sales, 3).rows[4].id, 45)
+    assert.equal(paginate(sales, 5).rows.length, 5)
+    assert.equal(paginate(sales, 5).rows[4].id, 45)
   })
 
   it('ramène une page hors bornes dans la liste', () => {
     const sales = Array.from({ length: 25 }, (_value, index) => buildSale({ id: index + 1 }))
 
-    assert.equal(paginateInvoices(sales, 0).page, 1)
-    assert.equal(paginateInvoices(sales, -5).page, 1)
-    assert.equal(paginateInvoices(sales, 99).page, 2)
-    assert.equal(paginateInvoices(sales, 99).rows.length, 5)
+    assert.equal(paginate(sales, 0).page, 1)
+    assert.equal(paginate(sales, -5).page, 1)
+    assert.equal(paginate(sales, 99).page, 3)
+    assert.equal(paginate(sales, 99).rows.length, 5)
   })
 })
 

@@ -14,7 +14,8 @@
     "preview": "vite preview",
     "migration:generate": "drizzle-kit generate",
     "migration:up": "drizzle-kit migrate",
-    "migration:push": "drizzle-kit push"
+    "migration:push": "drizzle-kit push",
+    "seed": "tsx scripts/bulk-seed.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -28,6 +29,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.5",
     "@types/react": "^18.2.64",
     "@types/react-dom": "^18.2.21",
     "@typescript-eslint/eslint-plugin": "^7.1.1",
@@ -39,6 +41,7 @@
     "eslint": "^8.57.0",
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.5",
+    "ts-node": "^10.9.2",
     "typescript": "^5.2.2",
     "vite": "^5.1.6",
     "vite-plugin-electron": "^0.28.6"

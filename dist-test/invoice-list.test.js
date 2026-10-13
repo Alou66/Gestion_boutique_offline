@@ -19847,13 +19847,14 @@ function paymentStatusTone(status) {
 function saleStatusTone(status) {
   return status === "VALIDEE" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700";
 }
-function buildInvoiceFilters(search, clientSearch, status, dateFrom, dateTo) {
+function buildInvoiceFilters(search, clientSearch, dateFrom, dateTo, paymentStatus) {
   return {
     search: search.trim() || void 0,
     clientSearch: clientSearch.trim() || void 0,
-    status: status === "all" ? null : status,
+    // status: status === 'all' ? null : status,
     dateFrom: dateFrom?.trim() || void 0,
-    dateTo: dateTo?.trim() || void 0
+    dateTo: dateTo?.trim() || void 0,
+    paymentStatus: paymentStatus === "all" || paymentStatus === void 0 ? null : paymentStatus
   };
 }
 function paginateInvoices(sales, page) {
@@ -19894,7 +19895,8 @@ describe3("filtres de la liste des factures", () => {
       clientSearch: "Awa Diop",
       status: null,
       dateFrom: void 0,
-      dateTo: void 0
+      dateTo: void 0,
+      paymentStatus: null
     });
     assert2.deepEqual(
       buildInvoiceFilters("vte-000001", "Awa Diop", "all", "2026-10-01", "2026-10-31"),
@@ -19903,7 +19905,8 @@ describe3("filtres de la liste des factures", () => {
         clientSearch: "Awa Diop",
         status: null,
         dateFrom: "2026-10-01",
-        dateTo: "2026-10-31"
+        dateTo: "2026-10-31",
+        paymentStatus: null
       }
     );
   });
@@ -19913,25 +19916,34 @@ describe3("filtres de la liste des factures", () => {
       clientSearch: void 0,
       status: null,
       dateFrom: void 0,
-      dateTo: void 0
+      dateTo: void 0,
+      paymentStatus: null
     });
     assert2.deepEqual(buildInvoiceFilters("", "", "VALIDEE"), {
       search: void 0,
       clientSearch: void 0,
       status: "VALIDEE",
       dateFrom: void 0,
-      dateTo: void 0
+      dateTo: void 0,
+      paymentStatus: null
     });
     assert2.deepEqual(buildInvoiceFilters("", "", "VALIDEE", "  ", ""), {
       search: void 0,
       clientSearch: void 0,
       status: "VALIDEE",
       dateFrom: void 0,
-      dateTo: void 0
+      dateTo: void 0,
+      paymentStatus: null
     });
   });
   it("permet de filtrer les factures annul\xE9es", () => {
     assert2.deepEqual(buildInvoiceFilters("", "", "ANNULEE").status, "ANNULEE");
+  });
+  it("permet de filtrer par statut de paiement", () => {
+    assert2.deepEqual(buildInvoiceFilters("", "", "all", void 0, void 0, "PAYEE").paymentStatus, "PAYEE");
+    assert2.deepEqual(buildInvoiceFilters("", "", "all", void 0, void 0, "PARTIELLEMENT_PAYEE").paymentStatus, "PARTIELLEMENT_PAYEE");
+    assert2.deepEqual(buildInvoiceFilters("", "", "all", void 0, void 0, "NON_PAYEE").paymentStatus, "NON_PAYEE");
+    assert2.deepEqual(buildInvoiceFilters("", "", "all", void 0, void 0, "all").paymentStatus, null);
   });
 });
 describe3("pagination de la liste", () => {

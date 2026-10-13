@@ -22,7 +22,9 @@ export function initializeDatabase(): AppDatabase {
     return db
   }
 
-  const dbPath = path.join(app.getPath('userData'), 'database.sqlite')
+  const dbPath = process.env.GESTION_BOUTIQUE_DB_PATH
+    ? path.resolve(process.env.GESTION_BOUTIQUE_DB_PATH)
+    : path.join(app.getPath('userData'), 'database.sqlite')
   const sqlite = new Database(dbPath)
   // better-sqlite3 leaves foreign keys off by default: products.category_id is a
   // real FK (ON DELETE restrict) and must be enforced by the connection itself.

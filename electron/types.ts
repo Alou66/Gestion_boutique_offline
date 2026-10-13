@@ -646,6 +646,8 @@ export interface SaleFilters {
   dateFrom?: string | null
   /** Filter by sale date (YYYY-MM-DD). */
   dateTo?: string | null
+  /** Filter on the payment status. */
+  paymentStatus?: PaymentStatus | null
 }
 
 /**

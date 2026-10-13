@@ -13,10 +13,6 @@ import type {
   ValidationInfo,
 } from '../types'
 
-function toSuccess<T>(data: T): DatabaseResult<T> {
-  return { success: true, data }
-}
-
 function toFailure<T>(error: unknown, fallback: BackupErrorCode): DatabaseResult<T> {
   if (error instanceof BackupError) {
     return { success: false, error: error.message }
@@ -53,12 +49,8 @@ export function registerBackupIpcHandlers(): void {
     },
   )
 
-  ipcMain.handle('database:backup-info', async () => {
-    try {
-      return toSuccess(getDatabaseInfo())
-    } catch (error) {
-      return toFailure(error, 'unexpected')
-    }
+  ipcMain.handle('database:backup-info', () => {
+    return getDatabaseInfo()
   })
 
   ipcMain.handle(

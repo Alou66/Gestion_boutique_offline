@@ -637,6 +637,17 @@ export function listInvoices(filters: SaleFilters = {}): Sale[] {
     )
   }
 
+  if (typeof filters?.paymentStatus === 'string') {
+    const paymentStatus = filters.paymentStatus
+    if (paymentStatus === 'NON_PAYEE') {
+      conditions.push(sql`coalesce((select sum(amount) from payments where payments.sale_id = sales.id), 0) = 0`)
+    } else if (paymentStatus === 'PAYEE') {
+      conditions.push(sql`${sales.totalAmount} <= coalesce((select sum(amount) from payments where payments.sale_id = sales.id), 0)`)
+    } else if (paymentStatus === 'PARTIELLEMENT_PAYEE') {
+      conditions.push(sql`${sales.totalAmount} > coalesce((select sum(amount) from payments where payments.sale_id = sales.id), 0) AND coalesce((select sum(amount) from payments where payments.sale_id = sales.id), 0) > 0`)
+    }
+  }
+
   const db = getDb()
   const rows = db
     .select(saleColumns)

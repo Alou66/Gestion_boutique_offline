@@ -5883,7 +5883,7 @@ function initializeDatabase() {
   if (db) {
     return db;
   }
-  const dbPath = path2.join(app.getPath("userData"), "database.sqlite");
+  const dbPath = process.env.GESTION_BOUTIQUE_DB_PATH ? path2.resolve(process.env.GESTION_BOUTIQUE_DB_PATH) : path2.join(app.getPath("userData"), "database.sqlite");
   const sqlite = new Database(dbPath);
   sqlite.pragma("foreign_keys = ON");
   sqlite.function("unaccent", { deterministic: true }, removeDiacritics);

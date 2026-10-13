@@ -496,13 +496,13 @@ function InvoiceDetail() {
                       scope="col"
                       className="px-4 py-2 text-left text-xs font-semibold text-gray-700"
                     >
-                      Produit
+                      Forme
                     </th>
                     <th
                       scope="col"
                       className="px-4 py-2 text-left text-xs font-semibold text-gray-700"
                     >
-                      Forme
+                      Produit
                     </th>
                     <th
                       scope="col"
@@ -527,10 +527,10 @@ function InvoiceDetail() {
                 <tbody className="divide-y divide-gray-100">
                   {invoice.items.map((item) => (
                     <tr key={item.id}>
+                      <td className="px-4 py-2 text-sm text-gray-600">{item.form}</td>
                       <td className="px-4 py-2 text-sm font-medium text-gray-900">
                         {item.productName}
                       </td>
-                      <td className="px-4 py-2 text-sm text-gray-600">{item.form}</td>
                       <td className="px-4 py-2 text-right text-sm text-gray-600">
                         {item.quantity}
                       </td>

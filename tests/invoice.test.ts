@@ -1765,6 +1765,50 @@ describe('module Facturation', () => {
       )
     })
 
+    it('filtre la liste par statut de paiement', () => {
+      const unpaid = createInvoice({ items: [line(simpleProduct, 'SAC', 1, 1_000)] })
+      const partial = createInvoice({ items: [line(simpleProduct, 'SAC', 1, 1_000)] })
+      const paid = createInvoice({ items: [line(simpleProduct, 'SAC', 1, 1_000)] })
+
+      addPayment(partial.id, 500)
+      addPayment(paid.id, 1_000)
+
+      // NON_PAYEE
+      assert.deepEqual(
+        listInvoices({ paymentStatus: 'NON_PAYEE' }).map((invoice) => invoice.reference).sort(),
+        [unpaid.reference],
+      )
+
+      // PARTIELLEMENT_PAYEE
+      assert.deepEqual(
+        listInvoices({ paymentStatus: 'PARTIELLEMENT_PAYEE' }).map((invoice) => invoice.reference).sort(),
+        [partial.reference],
+      )
+
+      // PAYEE
+      assert.deepEqual(
+        listInvoices({ paymentStatus: 'PAYEE' }).map((invoice) => invoice.reference).sort(),
+        [paid.reference],
+      )
+
+      // Vérifier que le filtre fonctionne en combinaison avec d'autres filtres
+      assert.deepEqual(
+        listInvoices({ paymentStatus: 'NON_PAYEE', status: 'VALIDEE' }).map((invoice) => invoice.reference).sort(),
+        [unpaid.reference],
+      )
+
+      // Annuler la facture non payée et vérifier qu'elle n'apparaît plus avec le filtre VALIDEE
+      cancelInvoice(unpaid.id)
+      assert.deepEqual(
+        listInvoices({ paymentStatus: 'NON_PAYEE', status: 'VALIDEE' }),
+        [],
+      )
+      assert.deepEqual(
+        listInvoices({ paymentStatus: 'NON_PAYEE', status: 'ANNULEE' }).map((invoice) => invoice.reference).sort(),
+        [unpaid.reference],
+      )
+    })
+
     it('relit une facture par identifiant et par référence', () => {
       const created = createInvoice({ items: [line(simpleProduct, 'SAC', 2, 1_000)] })
 
