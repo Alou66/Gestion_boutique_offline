@@ -90,10 +90,10 @@ function LinesTable({
         <thead className="bg-gray-50">
           <tr>
             <th scope="col" className="px-4 py-2 text-left text-xs font-semibold text-gray-700">
-              Produit
+              Forme
             </th>
             <th scope="col" className="px-4 py-2 text-left text-xs font-semibold text-gray-700">
-              Forme
+              Produit
             </th>
             <th
               scope="col"
@@ -131,10 +131,10 @@ function LinesTable({
                 editingKey === line.key ? 'bg-blue-50' : ''
               }`}
             >
+              <td className="px-4 py-2 text-sm text-gray-600">{line.form}</td>
               <td className="px-4 py-2 text-sm font-medium text-gray-900">
                 {productNames.get(line.productId) ?? `#${line.productId}`}
               </td>
-              <td className="px-4 py-2 text-sm text-gray-600">{line.form}</td>
               <td className="px-4 py-2 text-right text-sm text-gray-600">{line.quantity}</td>
               <td className="px-4 py-2 text-right text-sm text-gray-600">
                 {formatAmount(line.unitPrice)}
@@ -452,11 +452,10 @@ function InvoiceForm({
     setFormError(null)
     setFieldErrors({})
 
-    // Une ligne encore saisie dans l'éditeur serait perdue silencieusement.
+    // Si une ligne est en cours de saisie mais pas ajoutée, on l'ignore
+    // pour permettre la création de la facture avec les lignes déjà ajoutées.
     if (hasUncommittedLine) {
-      setFormError(INVOICE_MESSAGES.lineNotCommitted)
-
-      return
+      resetEditor()
     }
 
     const selection = resolveClientSelection(clientId, clients)
@@ -631,9 +630,9 @@ function InvoiceForm({
               name="quantity"
               type="number"
               inputMode="numeric"
-              min={1}
+              min={0.01}
               max={INVOICE_QUANTITY_MAX}
-              step={1}
+              step={0.01}
               placeholder="0"
               value={editor.quantity}
               onChange={(event) => updateEditor({ quantity: event.target.value })}

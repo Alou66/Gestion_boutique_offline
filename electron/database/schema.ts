@@ -3,6 +3,7 @@ import {
   check,
   index,
   integer,
+  real,
   sqliteTable,
   text,
   uniqueIndex,
@@ -116,7 +117,7 @@ export const stockMovements = sqliteTable(
     form: text('form').notNull(),
     movementType: text('movement_type').$type<StockMovementType>().notNull(),
     direction: text('direction').$type<StockDirection>().notNull(),
-    quantity: integer('quantity').notNull(),
+    quantity: real('quantity').notNull(),
     reason: text('reason'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull().defaultNow(),
   },
@@ -225,7 +226,7 @@ export const supplyItems = sqliteTable(
       .notNull()
       .references(() => products.id, { onDelete: 'restrict', onUpdate: 'cascade' }),
     form: text('form').notNull(),
-    quantity: integer('quantity').notNull(),
+    quantity: real('quantity').notNull(),
     purchaseUnitPrice: integer('purchase_unit_price').notNull(),
     /** Always quantity * purchase_unit_price, recomputed by the service. */
     lineTotal: integer('line_total').notNull(),
@@ -272,12 +273,12 @@ export const transformations = sqliteTable(
       .references(() => products.id, { onDelete: 'restrict', onUpdate: 'cascade' }),
     /** Form taken out of the stock (CARTON or SEAU). */
     sourceForm: text('source_form').notNull(),
-    /** Strictly positive whole number of units removed from `source_form`. */
-    sourceQuantity: integer('source_quantity').notNull(),
+    /** Strictly positive number of units removed from `source_form`. */
+    sourceQuantity: real('source_quantity').notNull(),
     /** Form put into the stock, always the other form of the product. */
     destinationForm: text('destination_form').notNull(),
-    /** Strictly positive whole number of units added to `destination_form`. */
-    destinationQuantity: integer('destination_quantity').notNull(),
+    /** Strictly positive number of units added to `destination_form`. */
+    destinationQuantity: real('destination_quantity').notNull(),
     /** Transformation day (local midnight), as typed by the shopkeeper. */
     date: integer('date', { mode: 'timestamp' }).notNull(),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull().defaultNow(),
@@ -412,7 +413,7 @@ export const saleItems = sqliteTable(
       .notNull()
       .references(() => products.id, { onDelete: 'restrict', onUpdate: 'cascade' }),
     form: text('form').notNull(),
-    quantity: integer('quantity').notNull(),
+    quantity: real('quantity').notNull(),
     unitPrice: integer('unit_price').notNull(),
     /** Always quantity * unit_price, recomputed by the service. */
     lineTotal: integer('line_total').notNull(),

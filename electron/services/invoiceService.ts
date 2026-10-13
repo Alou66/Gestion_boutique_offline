@@ -44,7 +44,7 @@ export const INVOICE_ERRORS = {
   formTooLong: `La forme ne peut pas dépasser ${PRODUCT_FORM_MAX_LENGTH} caractères.`,
   formInvalid: 'Forme invalide pour ce produit.',
   quantityRequired: 'La quantité est obligatoire.',
-  quantityInvalid: 'La quantité doit être un entier supérieur à 0.',
+  quantityInvalid: 'La quantité doit être un nombre supérieur à 0.',
   quantityTooHigh: 'La quantité ne peut pas dépasser 1 000 000.',
   unitPriceRequired: "Le prix de vente unitaire est obligatoire.",
   unitPriceInvalid: "Le prix de vente unitaire doit être un entier supérieur ou égal à 0.",
@@ -182,7 +182,6 @@ const formSchema = z
 
 const quantitySchema = z
   .number({ error: INVOICE_ERRORS.quantityRequired })
-  .int(INVOICE_ERRORS.quantityInvalid)
   .positive(INVOICE_ERRORS.quantityInvalid)
   .max(INVOICE_QUANTITY_MAX, INVOICE_ERRORS.quantityTooHigh)
 

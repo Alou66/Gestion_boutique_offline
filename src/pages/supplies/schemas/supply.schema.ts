@@ -33,7 +33,7 @@ export const SUPPLY_MESSAGES = {
   formRequired: 'La forme est obligatoire.',
   formInvalid: 'Forme invalide pour ce produit.',
   quantityRequired: 'La quantité est obligatoire.',
-  quantityInvalid: 'La quantité doit être un entier supérieur à 0.',
+  quantityInvalid: 'La quantité doit être un nombre supérieur à 0.',
   quantityTooHigh: `La quantité ne peut pas dépasser ${SUPPLY_QUANTITY_MAX}.`,
   unitPriceRequired: "Le prix d'achat unitaire est obligatoire.",
   unitPriceInvalid: "Le prix d'achat unitaire doit être un entier supérieur ou égal à 0.",
@@ -96,7 +96,6 @@ const supplierIdSchema = z
 
 const quantitySchema = z
   .number({ error: SUPPLY_MESSAGES.quantityRequired })
-  .int(SUPPLY_MESSAGES.quantityInvalid)
   .positive(SUPPLY_MESSAGES.quantityInvalid)
   .max(SUPPLY_QUANTITY_MAX, SUPPLY_MESSAGES.quantityTooHigh)
 
@@ -191,11 +190,13 @@ export function createEmptyDraft(): SupplyItemDraft {
   }
 }
 
-/** quantity * purchaseUnitPrice, 0 when the inputs do not hold whole numbers. */
+/** quantity * purchaseUnitPrice, 0 when inputs are not valid numbers. */
 export function computeLineTotal(quantity: number, purchaseUnitPrice: number): number {
   if (
-    !Number.isInteger(quantity) ||
-    !Number.isInteger(purchaseUnitPrice) ||
+    typeof quantity !== 'number' ||
+    typeof purchaseUnitPrice !== 'number' ||
+    Number.isNaN(quantity) ||
+    Number.isNaN(purchaseUnitPrice) ||
     quantity < 0 ||
     purchaseUnitPrice < 0
   ) {

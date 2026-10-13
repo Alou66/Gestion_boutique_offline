@@ -584,6 +584,38 @@ export function buildInvoicePdfFileName(reference: string): string {
 }
 
 /**
+ * Bouton de fermeture pour l'aperçu : visible seulement dans la fenêtre d'aperçu,
+ * masqué à l'impression et dans le PDF grâce à @media print.
+ */
+const PREVIEW_CLOSE_BUTTON = `
+  <style>
+    @media screen {
+      .preview-close {
+        position: fixed;
+        top: 12px;
+        right: 12px;
+        z-index: 1000;
+        padding: 8px 16px;
+        font-size: 13px;
+        font-weight: 600;
+        color: #fff;
+        background: #16a34a;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        box-shadow: 0 2px 8px rgba(0,0,0,.15);
+      }
+      .preview-close:hover { background: #15803d; }
+      .preview-close:focus-visible { outline: 2px solid #15803d; outline-offset: 2px; }
+    }
+    @media print {
+      .preview-close { display: none !important; }
+    }
+  </style>
+  <button class="preview-close" onclick="window.close()">Fermer l'aperçu</button>
+`
+
+/**
  * La feuille complète : A4 paysage, exemplaire client à gauche et
  * exemplaire boutique à droite, séparés par le pointillé de découpe.
  */
@@ -598,6 +630,7 @@ export function buildInvoicePrintHtml(context: InvoicePrintContext): string {
     <style>${PRINT_STYLES}</style>
   </head>
   <body>
+    ${PREVIEW_CLOSE_BUTTON}
     <div class="sheet">
       <div class="copies">
         ${renderInvoiceCopy(context, 'client')}

@@ -352,7 +352,7 @@ function InvoiceDetail() {
             {actions.canEdit && (
               <Link
                 to={`/factures/${invoice.id}/modifier`}
-                className="rounded-md border border-blue-600 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50"
+                className="rounded-md bg-blue-600 border border-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
               >
                 Modifier la facture
               </Link>
@@ -363,7 +363,7 @@ function InvoiceDetail() {
                 type="button"
                 onClick={() => openPaymentEditor(paymentEditor === 'add' ? 'closed' : 'add')}
                 aria-expanded={paymentEditor === 'add'}
-                className={`rounded-md border border-blue-600 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 ${
+                className={`rounded-md bg-blue-600 border border-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 ${
                   paymentEditor === 'add' ? 'bg-blue-50 ring-2 ring-blue-200' : ''
                 }`}
               >
@@ -375,7 +375,7 @@ function InvoiceDetail() {
               <button
                 type="button"
                 onClick={scrollToPayments}
-                className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="rounded-md bg-gray-600 border border-gray-300 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Voir les paiements
               </button>
@@ -389,7 +389,7 @@ function InvoiceDetail() {
                   setSuccessMessage(null)
                   setIsCancelPending(true)
                 }}
-                className="rounded-md border border-red-600 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
+                className="rounded-md bg-red-600 border border-gray-300 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Annuler la facture
               </button>
@@ -403,7 +403,7 @@ function InvoiceDetail() {
                   setSuccessMessage(null)
                   setIsDeletePending(true)
                 }}
-                className="rounded-md border border-red-600 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
+                className="rounded-md bg-red-600 border border-gray-300 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Supprimer la facture
               </button>
@@ -413,7 +413,7 @@ function InvoiceDetail() {
               type="button"
               onClick={handlePreview}
               disabled={isPrinting}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-md bg-green-600 border border-gray-300 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isPrinting ? INVOICE_MESSAGES.printing : 'Aperçu'}
             </button>
@@ -422,7 +422,7 @@ function InvoiceDetail() {
               type="button"
               onClick={handlePrint}
               disabled={isPrinting}
-              className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-md bg-blue-600 border border-gray-300 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isPrinting ? INVOICE_MESSAGES.printing : 'Imprimer la facture'}
             </button>

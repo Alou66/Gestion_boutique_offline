@@ -148,9 +148,9 @@ function StockAdjustForm({
             name="quantity"
             type="number"
             inputMode="numeric"
-            min={1}
+            min={0.01}
             max={STOCK_QUANTITY_MAX}
-            step={1}
+            step={0.01}
             value={quantity}
             onChange={(event) => setQuantity(event.target.value)}
             disabled={isSubmitting}

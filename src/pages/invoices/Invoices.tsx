@@ -164,9 +164,9 @@ function Invoices() {
               <th scope="col" className="px-4 py-3 text-right text-sm font-semibold text-gray-700">
                 Total
               </th>
-              <th scope="col" className="px-4 py-3 text-right text-sm font-semibold text-gray-700">
+              {/* <th scope="col" className="px-4 py-3 text-right text-sm font-semibold text-gray-700">
                 Payé
-              </th>
+              </th> */}
               <th scope="col" className="px-4 py-3 text-right text-sm font-semibold text-gray-700">
                 Restant
               </th>
@@ -229,9 +229,9 @@ function Invoices() {
                   <td className="px-4 py-4 text-right text-sm font-medium text-gray-900">
                     {formatAmount(invoice.totalAmount)}
                   </td>
-                  <td className="px-4 py-4 text-right text-sm text-gray-600">
+                  {/* <td className="px-4 py-4 text-right text-sm text-gray-600">
                     {formatAmount(invoice.paidAmount)}
-                  </td>
+                  </td> */}
                   <td className="px-4 py-4 text-right text-sm text-gray-600">
                     {formatAmount(invoice.remainingAmount)}
                   </td>

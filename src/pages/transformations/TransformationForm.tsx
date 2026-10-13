@@ -263,9 +263,9 @@ function TransformationForm({
             name="sourceQuantity"
             type="number"
             inputMode="numeric"
-            min={1}
+            min={0.01}
             max={TRANSFORMATION_QUANTITY_MAX}
-            step={1}
+            step={0.01}
             placeholder="0"
             value={sourceQuantity}
             onChange={(event) => {

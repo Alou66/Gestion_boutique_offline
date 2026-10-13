@@ -577,9 +577,9 @@ function SupplyForm({
               name="quantity"
               type="number"
               inputMode="numeric"
-              min={1}
+              min={0.01}
               max={SUPPLY_QUANTITY_MAX}
-              step={1}
+              step={0.01}
               placeholder="0"
               value={editor.quantity}
               onChange={(event) => updateEditor({ quantity: event.target.value })}

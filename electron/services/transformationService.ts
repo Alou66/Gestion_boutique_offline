@@ -34,7 +34,7 @@ export const TRANSFORMATION_ERRORS = {
   formInvalid: 'Forme invalide pour ce produit.',
   sameForm: "La forme de départ et la forme d'arrivée doivent être différentes.",
   quantityRequired: 'La quantité est obligatoire.',
-  quantityInvalid: 'La quantité doit être un entier supérieur à 0.',
+  quantityInvalid: 'La quantité doit être un nombre supérieur à 0.',
   quantityTooHigh: 'La quantité ne peut pas dépasser 1 000 000.',
   conversionInvalid:
     "Cette quantité ne peut pas être convertie exactement : aucune quantité fractionnaire n'est acceptée.",
@@ -139,10 +139,9 @@ const formSchema = z
       .max(PRODUCT_FORM_MAX_LENGTH, TRANSFORMATION_ERRORS.formTooLong),
   )
 
-/** The quantity is always a strictly positive whole number, never fractional. */
+/** The quantity is always a strictly positive number, never negative. */
 const quantitySchema = z
   .number({ error: TRANSFORMATION_ERRORS.quantityRequired })
-  .int(TRANSFORMATION_ERRORS.quantityInvalid)
   .positive(TRANSFORMATION_ERRORS.quantityInvalid)
   .max(TRANSFORMATION_QUANTITY_MAX, TRANSFORMATION_ERRORS.quantityTooHigh)
 

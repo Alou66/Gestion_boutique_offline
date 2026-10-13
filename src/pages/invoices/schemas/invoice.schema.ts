@@ -54,7 +54,7 @@ export const INVOICE_MESSAGES = {
   formRequired: 'La forme est obligatoire.',
   formInvalid: 'Forme invalide pour ce produit.',
   quantityRequired: 'La quantité est obligatoire.',
-  quantityInvalid: 'La quantité doit être un entier supérieur à 0.',
+  quantityInvalid: 'La quantité doit être un nombre supérieur à 0.',
   quantityTooHigh: `La quantité ne peut pas dépasser ${INVOICE_QUANTITY_MAX}.`,
   unitPriceRequired: "Le prix de vente unitaire est obligatoire.",
   unitPriceInvalid: "Le prix de vente unitaire doit être un entier supérieur ou égal à 0.",
@@ -131,7 +131,6 @@ const formSchema = z
 
 const quantitySchema = z
   .number({ error: INVOICE_MESSAGES.quantityRequired })
-  .int(INVOICE_MESSAGES.quantityInvalid)
   .positive(INVOICE_MESSAGES.quantityInvalid)
   .max(INVOICE_QUANTITY_MAX, INVOICE_MESSAGES.quantityTooHigh)
 
@@ -266,11 +265,13 @@ export function getConfiguredSalePrice(product: Product | null, form: string): n
   return typeof price === 'number' && Number.isInteger(price) && price >= 0 ? price : null
 }
 
-/** quantity * unitPrice, 0 tant que les champs ne tiennent pas des entiers. */
+/** quantity * unitPrice, 0 when inputs are not valid numbers. */
 export function computeLineTotal(quantity: number, unitPrice: number): number {
   if (
-    !Number.isInteger(quantity) ||
-    !Number.isInteger(unitPrice) ||
+    typeof quantity !== 'number' ||
+    typeof unitPrice !== 'number' ||
+    Number.isNaN(quantity) ||
+    Number.isNaN(unitPrice) ||
     quantity < 0 ||
     unitPrice < 0
   ) {

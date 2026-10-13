@@ -39,7 +39,7 @@ export const SUPPLY_ERRORS = {
   formTooLong: `La forme ne peut pas dépasser ${PRODUCT_FORM_MAX_LENGTH} caractères.`,
   formInvalid: 'Forme invalide pour ce produit.',
   quantityRequired: 'La quantité est obligatoire.',
-  quantityInvalid: 'La quantité doit être un entier supérieur à 0.',
+  quantityInvalid: 'La quantité doit être un nombre supérieur à 0.',
   quantityTooHigh: 'La quantité ne peut pas dépasser 1 000 000.',
   unitPriceRequired: "Le prix d'achat unitaire est obligatoire.",
   unitPriceInvalid: "Le prix d'achat unitaire doit être un entier supérieur ou égal à 0.",
@@ -47,7 +47,7 @@ export const SUPPLY_ERRORS = {
   duplicateLine:
     'Un même produit ne peut pas apparaître deux fois avec la même forme. Regroupez les quantités sur une seule ligne.',
   notFound: 'Approvisionnement introuvable.',
-  supplierNotFound: 'Ce fournisseur n’existe pas.',
+  supplierNotFound: 'Ce fournisseur n\'existe pas.',
   supplierInactive: 'Fournisseur inactif : choisissez un fournisseur actif.',
   referenceConflict: "La référence de l'approvisionnement est déjà utilisée.",
   totalInvalid: "Le total de l'approvisionnement est invalide.",
@@ -151,7 +151,6 @@ const formSchema = z
 
 const quantitySchema = z
   .number({ error: SUPPLY_ERRORS.quantityRequired })
-  .int(SUPPLY_ERRORS.quantityInvalid)
   .positive(SUPPLY_ERRORS.quantityInvalid)
   .max(SUPPLY_QUANTITY_MAX, SUPPLY_ERRORS.quantityTooHigh)
 

@@ -21,7 +21,7 @@ export const TRANSFORMATION_MESSAGES = {
   formInvalid: 'Forme invalide pour ce produit.',
   sameForm: "La forme de départ et la forme d'arrivée doivent être différentes.",
   quantityRequired: 'La quantité est obligatoire.',
-  quantityInvalid: 'La quantité doit être un entier supérieur à 0.',
+  quantityInvalid: 'La quantité doit être un nombre supérieur à 0.',
   quantityTooHigh: `La quantité ne peut pas dépasser ${TRANSFORMATION_QUANTITY_MAX}.`,
   conversionInvalid:
     "Cette quantité ne peut pas être convertie exactement : aucune quantité fractionnaire n'est acceptée.",
@@ -45,7 +45,6 @@ const formSchema = z
 
 const quantitySchema = z
   .number({ error: TRANSFORMATION_MESSAGES.quantityRequired })
-  .int(TRANSFORMATION_MESSAGES.quantityInvalid)
   .positive(TRANSFORMATION_MESSAGES.quantityInvalid)
   .max(TRANSFORMATION_QUANTITY_MAX, TRANSFORMATION_MESSAGES.quantityTooHigh)
 

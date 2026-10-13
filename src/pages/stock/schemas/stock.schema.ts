@@ -15,7 +15,7 @@ export const STOCK_MESSAGES = {
   formsRequired: 'La quantité de la forme principale est obligatoire.',
   formsMismatch: "Les formes saisies ne correspondent pas aux formes du produit.",
   quantityRequired: 'La quantité est obligatoire.',
-  quantityInvalid: 'La quantité doit être un entier supérieur ou égal à 0.',
+  quantityInvalid: 'La quantité doit être un nombre supérieur à 0.',
   quantityTooHigh: 'La quantité ne peut pas dépasser 1 000 000.',
   positiveQuantityRequired:
     'Au moins une forme doit être initialisée avec une quantité supérieure à 0.',
@@ -64,7 +64,6 @@ export const stockQuantityEntrySchema = z.object({
   form: formFieldSchema,
   quantity: z
     .number({ error: STOCK_MESSAGES.quantityRequired })
-    .int(STOCK_MESSAGES.quantityInvalid)
     .min(0, STOCK_MESSAGES.quantityInvalid)
     .max(STOCK_QUANTITY_MAX, STOCK_MESSAGES.quantityTooHigh),
 })
@@ -83,7 +82,6 @@ export const stockAdjustFormSchema = z.object({
   direction: z.enum(['IN', 'OUT'], { error: STOCK_MESSAGES.directionRequired }),
   quantity: z
     .number({ error: STOCK_MESSAGES.quantityRequired })
-    .int(STOCK_MESSAGES.quantityInvalid)
     .positive(STOCK_MESSAGES.quantityInvalid)
     .max(STOCK_QUANTITY_MAX, STOCK_MESSAGES.quantityTooHigh),
   reason: z

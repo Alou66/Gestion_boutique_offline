@@ -33,7 +33,7 @@ export const STOCK_ERRORS = {
   formsRequired: 'La quantité de la forme principale est obligatoire.',
   formsMismatch: "Les formes saisies ne correspondent pas aux formes du produit.",
   quantityRequired: 'La quantité est obligatoire.',
-  quantityInvalid: 'La quantité doit être un entier supérieur ou égal à 0.',
+  quantityInvalid: 'La quantité doit être un nombre supérieur à 0.',
   quantityTooHigh: 'La quantité ne peut pas dépasser 1 000 000.',
   positiveQuantityRequired:
     'Au moins une forme doit être initialisée avec une quantité supérieure à 0.',
@@ -106,14 +106,12 @@ const formSchema = z
 /** An initialization accepts 0 on a form, but never on every form. */
 const initialQuantitySchema = z
   .number({ error: STOCK_ERRORS.quantityRequired })
-  .int(STOCK_ERRORS.quantityInvalid)
   .min(0, STOCK_ERRORS.quantityInvalid)
   .max(STOCK_QUANTITY_MAX, STOCK_ERRORS.quantityTooHigh)
 
 /** A movement quantity is always strictly positive, the direction carries OUT. */
 const movementQuantitySchema = z
   .number({ error: STOCK_ERRORS.quantityRequired })
-  .int(STOCK_ERRORS.quantityInvalid)
   .positive(STOCK_ERRORS.quantityInvalid)
   .max(STOCK_QUANTITY_MAX, STOCK_ERRORS.quantityTooHigh)
 
