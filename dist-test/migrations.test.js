@@ -2,9 +2,9 @@
 import assert from "node:assert/strict";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
-import path from "node:path";
+import path2 from "node:path";
 import { after, before, describe, it } from "node:test";
-import Database from "better-sqlite3";
+import Database2 from "better-sqlite3";
 
 // node_modules/drizzle-orm/better-sqlite3/driver.js
 import Client from "better-sqlite3";
@@ -1176,7 +1176,7 @@ Subquery.prototype.getSQL = function() {
 function mapResultRow(columns, row, joinsNotNullableMap) {
   const nullifyMap = {};
   const result = columns.reduce(
-    (result2, { path: path2, field }, columnIndex) => {
+    (result2, { path: path3, field }, columnIndex) => {
       let decoder;
       if (is(field, Column)) {
         decoder = field;
@@ -1188,8 +1188,8 @@ function mapResultRow(columns, row, joinsNotNullableMap) {
         decoder = field.sql.decoder;
       }
       let node = result2;
-      for (const [pathChunkIndex, pathChunk] of path2.entries()) {
-        if (pathChunkIndex < path2.length - 1) {
+      for (const [pathChunkIndex, pathChunk] of path3.entries()) {
+        if (pathChunkIndex < path3.length - 1) {
           if (!(pathChunk in node)) {
             node[pathChunk] = {};
           }
@@ -1197,8 +1197,8 @@ function mapResultRow(columns, row, joinsNotNullableMap) {
         } else {
           const rawValue = row[columnIndex];
           const value = node[pathChunk] = rawValue === null ? null : decoder.mapFromDriverValue(rawValue);
-          if (joinsNotNullableMap && is(field, Column) && path2.length === 2) {
-            const objectName = path2[0];
+          if (joinsNotNullableMap && is(field, Column) && path3.length === 2) {
+            const objectName = path3[0];
             if (!(objectName in nullifyMap)) {
               nullifyMap[objectName] = value === null ? getTableName(field.table) : false;
             } else if (typeof nullifyMap[objectName] === "string" && nullifyMap[objectName] !== getTableName(field.table)) {
@@ -1242,8 +1242,8 @@ function haveSameKeys(left, right) {
   if (leftKeys.length !== rightKeys.length) {
     return false;
   }
-  for (const [index, key] of leftKeys.entries()) {
-    if (key !== rightKeys[index]) {
+  for (const [index2, key] of leftKeys.entries()) {
+    if (key !== rightKeys[index2]) {
       return false;
     }
   }
@@ -1279,6 +1279,12 @@ function getTableColumns(table) {
 }
 function getTableLikeName(table) {
   return is(table, Subquery) ? table._.alias : is(table, View) ? table[ViewBaseConfig].name : is(table, SQL) ? void 0 : table[Table.Symbol.IsAlias] ? table[Table.Symbol.Name] : table[Table.Symbol.BaseName];
+}
+function getColumnNameAndConfig(a, b) {
+  return {
+    name: typeof a === "string" && a.length > 0 ? a : "",
+    config: typeof a === "object" ? a : b
+  };
 }
 function isConfig(data) {
   if (typeof data !== "object" || data === null) return false;
@@ -2089,6 +2095,420 @@ var SQLiteColumn = class extends Column {
   static [entityKind] = "SQLiteColumn";
 };
 
+// node_modules/drizzle-orm/sqlite-core/columns/blob.js
+var SQLiteBigIntBuilder = class extends SQLiteColumnBuilder {
+  static [entityKind] = "SQLiteBigIntBuilder";
+  constructor(name) {
+    super(name, "bigint", "SQLiteBigInt");
+  }
+  /** @internal */
+  build(table) {
+    return new SQLiteBigInt(table, this.config);
+  }
+};
+var SQLiteBigInt = class extends SQLiteColumn {
+  static [entityKind] = "SQLiteBigInt";
+  getSQLType() {
+    return "blob";
+  }
+  mapFromDriverValue(value) {
+    if (typeof Buffer !== "undefined" && Buffer.from) {
+      const buf = Buffer.isBuffer(value) ? value : value instanceof ArrayBuffer ? Buffer.from(value) : value.buffer ? Buffer.from(value.buffer, value.byteOffset, value.byteLength) : Buffer.from(value);
+      return BigInt(buf.toString("utf8"));
+    }
+    return BigInt(textDecoder.decode(value));
+  }
+  mapToDriverValue(value) {
+    return Buffer.from(value.toString());
+  }
+};
+var SQLiteBlobJsonBuilder = class extends SQLiteColumnBuilder {
+  static [entityKind] = "SQLiteBlobJsonBuilder";
+  constructor(name) {
+    super(name, "json", "SQLiteBlobJson");
+  }
+  /** @internal */
+  build(table) {
+    return new SQLiteBlobJson(
+      table,
+      this.config
+    );
+  }
+};
+var SQLiteBlobJson = class extends SQLiteColumn {
+  static [entityKind] = "SQLiteBlobJson";
+  getSQLType() {
+    return "blob";
+  }
+  mapFromDriverValue(value) {
+    if (typeof Buffer !== "undefined" && Buffer.from) {
+      const buf = Buffer.isBuffer(value) ? value : value instanceof ArrayBuffer ? Buffer.from(value) : value.buffer ? Buffer.from(value.buffer, value.byteOffset, value.byteLength) : Buffer.from(value);
+      return JSON.parse(buf.toString("utf8"));
+    }
+    return JSON.parse(textDecoder.decode(value));
+  }
+  mapToDriverValue(value) {
+    return Buffer.from(JSON.stringify(value));
+  }
+};
+var SQLiteBlobBufferBuilder = class extends SQLiteColumnBuilder {
+  static [entityKind] = "SQLiteBlobBufferBuilder";
+  constructor(name) {
+    super(name, "buffer", "SQLiteBlobBuffer");
+  }
+  /** @internal */
+  build(table) {
+    return new SQLiteBlobBuffer(table, this.config);
+  }
+};
+var SQLiteBlobBuffer = class extends SQLiteColumn {
+  static [entityKind] = "SQLiteBlobBuffer";
+  mapFromDriverValue(value) {
+    if (Buffer.isBuffer(value)) {
+      return value;
+    }
+    return Buffer.from(value);
+  }
+  getSQLType() {
+    return "blob";
+  }
+};
+function blob(a, b) {
+  const { name, config } = getColumnNameAndConfig(a, b);
+  if (config?.mode === "json") {
+    return new SQLiteBlobJsonBuilder(name);
+  }
+  if (config?.mode === "bigint") {
+    return new SQLiteBigIntBuilder(name);
+  }
+  return new SQLiteBlobBufferBuilder(name);
+}
+
+// node_modules/drizzle-orm/sqlite-core/columns/custom.js
+var SQLiteCustomColumnBuilder = class extends SQLiteColumnBuilder {
+  static [entityKind] = "SQLiteCustomColumnBuilder";
+  constructor(name, fieldConfig, customTypeParams) {
+    super(name, "custom", "SQLiteCustomColumn");
+    this.config.fieldConfig = fieldConfig;
+    this.config.customTypeParams = customTypeParams;
+  }
+  /** @internal */
+  build(table) {
+    return new SQLiteCustomColumn(
+      table,
+      this.config
+    );
+  }
+};
+var SQLiteCustomColumn = class extends SQLiteColumn {
+  static [entityKind] = "SQLiteCustomColumn";
+  sqlName;
+  mapTo;
+  mapFrom;
+  constructor(table, config) {
+    super(table, config);
+    this.sqlName = config.customTypeParams.dataType(config.fieldConfig);
+    this.mapTo = config.customTypeParams.toDriver;
+    this.mapFrom = config.customTypeParams.fromDriver;
+  }
+  getSQLType() {
+    return this.sqlName;
+  }
+  mapFromDriverValue(value) {
+    return typeof this.mapFrom === "function" ? this.mapFrom(value) : value;
+  }
+  mapToDriverValue(value) {
+    return typeof this.mapTo === "function" ? this.mapTo(value) : value;
+  }
+};
+function customType(customTypeParams) {
+  return (a, b) => {
+    const { name, config } = getColumnNameAndConfig(a, b);
+    return new SQLiteCustomColumnBuilder(
+      name,
+      config,
+      customTypeParams
+    );
+  };
+}
+
+// node_modules/drizzle-orm/sqlite-core/columns/integer.js
+var SQLiteBaseIntegerBuilder = class extends SQLiteColumnBuilder {
+  static [entityKind] = "SQLiteBaseIntegerBuilder";
+  constructor(name, dataType, columnType) {
+    super(name, dataType, columnType);
+    this.config.autoIncrement = false;
+  }
+  primaryKey(config) {
+    if (config?.autoIncrement) {
+      this.config.autoIncrement = true;
+    }
+    this.config.hasDefault = true;
+    return super.primaryKey();
+  }
+};
+var SQLiteBaseInteger = class extends SQLiteColumn {
+  static [entityKind] = "SQLiteBaseInteger";
+  autoIncrement = this.config.autoIncrement;
+  getSQLType() {
+    return "integer";
+  }
+};
+var SQLiteIntegerBuilder = class extends SQLiteBaseIntegerBuilder {
+  static [entityKind] = "SQLiteIntegerBuilder";
+  constructor(name) {
+    super(name, "number", "SQLiteInteger");
+  }
+  build(table) {
+    return new SQLiteInteger(
+      table,
+      this.config
+    );
+  }
+};
+var SQLiteInteger = class extends SQLiteBaseInteger {
+  static [entityKind] = "SQLiteInteger";
+};
+var SQLiteTimestampBuilder = class extends SQLiteBaseIntegerBuilder {
+  static [entityKind] = "SQLiteTimestampBuilder";
+  constructor(name, mode) {
+    super(name, "date", "SQLiteTimestamp");
+    this.config.mode = mode;
+  }
+  /**
+   * @deprecated Use `default()` with your own expression instead.
+   *
+   * Adds `DEFAULT (cast((julianday('now') - 2440587.5)*86400000 as integer))` to the column, which is the current epoch timestamp in milliseconds.
+   */
+  defaultNow() {
+    return this.default(sql`(cast((julianday('now') - 2440587.5)*86400000 as integer))`);
+  }
+  build(table) {
+    return new SQLiteTimestamp(
+      table,
+      this.config
+    );
+  }
+};
+var SQLiteTimestamp = class extends SQLiteBaseInteger {
+  static [entityKind] = "SQLiteTimestamp";
+  mode = this.config.mode;
+  mapFromDriverValue(value) {
+    if (this.config.mode === "timestamp") {
+      return new Date(value * 1e3);
+    }
+    return new Date(value);
+  }
+  mapToDriverValue(value) {
+    const unix = value.getTime();
+    if (this.config.mode === "timestamp") {
+      return Math.floor(unix / 1e3);
+    }
+    return unix;
+  }
+};
+var SQLiteBooleanBuilder = class extends SQLiteBaseIntegerBuilder {
+  static [entityKind] = "SQLiteBooleanBuilder";
+  constructor(name, mode) {
+    super(name, "boolean", "SQLiteBoolean");
+    this.config.mode = mode;
+  }
+  build(table) {
+    return new SQLiteBoolean(
+      table,
+      this.config
+    );
+  }
+};
+var SQLiteBoolean = class extends SQLiteBaseInteger {
+  static [entityKind] = "SQLiteBoolean";
+  mode = this.config.mode;
+  mapFromDriverValue(value) {
+    return Number(value) === 1;
+  }
+  mapToDriverValue(value) {
+    return value ? 1 : 0;
+  }
+};
+function integer(a, b) {
+  const { name, config } = getColumnNameAndConfig(a, b);
+  if (config?.mode === "timestamp" || config?.mode === "timestamp_ms") {
+    return new SQLiteTimestampBuilder(name, config.mode);
+  }
+  if (config?.mode === "boolean") {
+    return new SQLiteBooleanBuilder(name, config.mode);
+  }
+  return new SQLiteIntegerBuilder(name);
+}
+
+// node_modules/drizzle-orm/sqlite-core/columns/numeric.js
+var SQLiteNumericBuilder = class extends SQLiteColumnBuilder {
+  static [entityKind] = "SQLiteNumericBuilder";
+  constructor(name) {
+    super(name, "string", "SQLiteNumeric");
+  }
+  /** @internal */
+  build(table) {
+    return new SQLiteNumeric(
+      table,
+      this.config
+    );
+  }
+};
+var SQLiteNumeric = class extends SQLiteColumn {
+  static [entityKind] = "SQLiteNumeric";
+  mapFromDriverValue(value) {
+    if (typeof value === "string") return value;
+    return String(value);
+  }
+  getSQLType() {
+    return "numeric";
+  }
+};
+var SQLiteNumericNumberBuilder = class extends SQLiteColumnBuilder {
+  static [entityKind] = "SQLiteNumericNumberBuilder";
+  constructor(name) {
+    super(name, "number", "SQLiteNumericNumber");
+  }
+  /** @internal */
+  build(table) {
+    return new SQLiteNumericNumber(
+      table,
+      this.config
+    );
+  }
+};
+var SQLiteNumericNumber = class extends SQLiteColumn {
+  static [entityKind] = "SQLiteNumericNumber";
+  mapFromDriverValue(value) {
+    if (typeof value === "number") return value;
+    return Number(value);
+  }
+  mapToDriverValue = String;
+  getSQLType() {
+    return "numeric";
+  }
+};
+var SQLiteNumericBigIntBuilder = class extends SQLiteColumnBuilder {
+  static [entityKind] = "SQLiteNumericBigIntBuilder";
+  constructor(name) {
+    super(name, "bigint", "SQLiteNumericBigInt");
+  }
+  /** @internal */
+  build(table) {
+    return new SQLiteNumericBigInt(
+      table,
+      this.config
+    );
+  }
+};
+var SQLiteNumericBigInt = class extends SQLiteColumn {
+  static [entityKind] = "SQLiteNumericBigInt";
+  mapFromDriverValue = BigInt;
+  mapToDriverValue = String;
+  getSQLType() {
+    return "numeric";
+  }
+};
+function numeric(a, b) {
+  const { name, config } = getColumnNameAndConfig(a, b);
+  const mode = config?.mode;
+  return mode === "number" ? new SQLiteNumericNumberBuilder(name) : mode === "bigint" ? new SQLiteNumericBigIntBuilder(name) : new SQLiteNumericBuilder(name);
+}
+
+// node_modules/drizzle-orm/sqlite-core/columns/real.js
+var SQLiteRealBuilder = class extends SQLiteColumnBuilder {
+  static [entityKind] = "SQLiteRealBuilder";
+  constructor(name) {
+    super(name, "number", "SQLiteReal");
+  }
+  /** @internal */
+  build(table) {
+    return new SQLiteReal(table, this.config);
+  }
+};
+var SQLiteReal = class extends SQLiteColumn {
+  static [entityKind] = "SQLiteReal";
+  getSQLType() {
+    return "real";
+  }
+};
+function real(name) {
+  return new SQLiteRealBuilder(name ?? "");
+}
+
+// node_modules/drizzle-orm/sqlite-core/columns/text.js
+var SQLiteTextBuilder = class extends SQLiteColumnBuilder {
+  static [entityKind] = "SQLiteTextBuilder";
+  constructor(name, config) {
+    super(name, "string", "SQLiteText");
+    this.config.enumValues = config.enum;
+    this.config.length = config.length;
+  }
+  /** @internal */
+  build(table) {
+    return new SQLiteText(
+      table,
+      this.config
+    );
+  }
+};
+var SQLiteText = class extends SQLiteColumn {
+  static [entityKind] = "SQLiteText";
+  enumValues = this.config.enumValues;
+  length = this.config.length;
+  constructor(table, config) {
+    super(table, config);
+  }
+  getSQLType() {
+    return `text${this.config.length ? `(${this.config.length})` : ""}`;
+  }
+};
+var SQLiteTextJsonBuilder = class extends SQLiteColumnBuilder {
+  static [entityKind] = "SQLiteTextJsonBuilder";
+  constructor(name) {
+    super(name, "json", "SQLiteTextJson");
+  }
+  /** @internal */
+  build(table) {
+    return new SQLiteTextJson(
+      table,
+      this.config
+    );
+  }
+};
+var SQLiteTextJson = class extends SQLiteColumn {
+  static [entityKind] = "SQLiteTextJson";
+  getSQLType() {
+    return "text";
+  }
+  mapFromDriverValue(value) {
+    return JSON.parse(value);
+  }
+  mapToDriverValue(value) {
+    return JSON.stringify(value);
+  }
+};
+function text(a, b = {}) {
+  const { name, config } = getColumnNameAndConfig(a, b);
+  if (config.mode === "json") {
+    return new SQLiteTextJsonBuilder(name);
+  }
+  return new SQLiteTextBuilder(name, config);
+}
+
+// node_modules/drizzle-orm/sqlite-core/columns/all.js
+function getSQLiteColumnBuilders() {
+  return {
+    blob,
+    customType,
+    integer,
+    numeric,
+    real,
+    text
+  };
+}
+
 // node_modules/drizzle-orm/sqlite-core/table.js
 var InlineForeignKeys2 = Symbol.for("drizzle:SQLiteInlineForeignKeys");
 var SQLiteTable = class extends Table {
@@ -2104,6 +2524,104 @@ var SQLiteTable = class extends Table {
   /** @internal */
   [Table.Symbol.ExtraConfigBuilder] = void 0;
 };
+function sqliteTableBase(name, columns, extraConfig, schema, baseName = name) {
+  const rawTable = new SQLiteTable(name, schema, baseName);
+  const parsedColumns = typeof columns === "function" ? columns(getSQLiteColumnBuilders()) : columns;
+  const builtColumns = Object.fromEntries(
+    Object.entries(parsedColumns).map(([name2, colBuilderBase]) => {
+      const colBuilder = colBuilderBase;
+      colBuilder.setName(name2);
+      const column = colBuilder.build(rawTable);
+      rawTable[InlineForeignKeys2].push(...colBuilder.buildForeignKeys(column, rawTable));
+      return [name2, column];
+    })
+  );
+  const table = Object.assign(rawTable, builtColumns);
+  table[Table.Symbol.Columns] = builtColumns;
+  table[Table.Symbol.ExtraConfigColumns] = builtColumns;
+  if (extraConfig) {
+    table[SQLiteTable.Symbol.ExtraConfigBuilder] = extraConfig;
+  }
+  return table;
+}
+var sqliteTable = (name, columns, extraConfig) => {
+  return sqliteTableBase(name, columns, extraConfig);
+};
+
+// node_modules/drizzle-orm/sqlite-core/checks.js
+var CheckBuilder = class {
+  constructor(name, value) {
+    this.name = name;
+    this.value = value;
+  }
+  static [entityKind] = "SQLiteCheckBuilder";
+  brand;
+  build(table) {
+    return new Check(table, this);
+  }
+};
+var Check = class {
+  constructor(table, builder) {
+    this.table = table;
+    this.name = builder.name;
+    this.value = builder.value;
+  }
+  static [entityKind] = "SQLiteCheck";
+  name;
+  value;
+};
+function check(name, value) {
+  return new CheckBuilder(name, value);
+}
+
+// node_modules/drizzle-orm/sqlite-core/indexes.js
+var IndexBuilderOn = class {
+  constructor(name, unique) {
+    this.name = name;
+    this.unique = unique;
+  }
+  static [entityKind] = "SQLiteIndexBuilderOn";
+  on(...columns) {
+    return new IndexBuilder(this.name, columns, this.unique);
+  }
+};
+var IndexBuilder = class {
+  static [entityKind] = "SQLiteIndexBuilder";
+  /** @internal */
+  config;
+  constructor(name, columns, unique) {
+    this.config = {
+      name,
+      columns,
+      unique,
+      where: void 0
+    };
+  }
+  /**
+   * Condition for partial index.
+   */
+  where(condition) {
+    this.config.where = condition;
+    return this;
+  }
+  /** @internal */
+  build(table) {
+    return new Index(this.config, table);
+  }
+};
+var Index = class {
+  static [entityKind] = "SQLiteIndex";
+  config;
+  constructor(config, table) {
+    this.config = { ...config, table };
+  }
+};
+function index(name) {
+  return new IndexBuilderOn(name, false);
+}
+function uniqueIndex(name) {
+  return new IndexBuilderOn(name, true);
+}
 
 // node_modules/drizzle-orm/sqlite-core/utils.js
 function extractUsedTable(table) {
@@ -2480,8 +2998,8 @@ var SQLiteDialect = class {
     }
     const joinsArray = [];
     if (joins) {
-      for (const [index, joinMeta] of joins.entries()) {
-        if (index === 0) {
+      for (const [index2, joinMeta] of joins.entries()) {
+        if (index2 === 0) {
           joinsArray.push(sql` `);
         }
         const table = joinMeta.table;
@@ -2501,7 +3019,7 @@ var SQLiteDialect = class {
             sql`${sql.raw(joinMeta.joinType)} join ${table}${onSql}`
           );
         }
-        if (index < joins.length - 1) {
+        if (index2 < joins.length - 1) {
           joinsArray.push(sql` `);
         }
       }
@@ -2514,9 +3032,9 @@ var SQLiteDialect = class {
   buildOrderBy(orderBy) {
     const orderByList = [];
     if (orderBy) {
-      for (const [index, orderByValue] of orderBy.entries()) {
+      for (const [index2, orderByValue] of orderBy.entries()) {
         orderByList.push(orderByValue);
-        if (index < orderBy.length - 1) {
+        if (index2 < orderBy.length - 1) {
           orderByList.push(sql`, `);
         }
       }
@@ -2569,9 +3087,9 @@ var SQLiteDialect = class {
     const havingSql = having ? sql` having ${having}` : void 0;
     const groupByList = [];
     if (groupBy) {
-      for (const [index, groupByValue] of groupBy.entries()) {
+      for (const [index2, groupByValue] of groupBy.entries()) {
         groupByList.push(groupByValue);
-        if (index < groupBy.length - 1) {
+        if (index2 < groupBy.length - 1) {
           groupByList.push(sql`, `);
         }
       }
@@ -5014,11 +5532,412 @@ function migrate(db, config) {
   db.dialect.migrate(migrations, db.session, config);
 }
 
+// electron/services/databaseService.ts
+import fs2 from "node:fs";
+import path from "node:path";
+import crypto3 from "node:crypto";
+
+// electron/database/schema.ts
+var users = sqliteTable("users", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  username: text("username").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().defaultNow(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().defaultNow()
+});
+var settings = sqliteTable("settings", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  shopName: text("shop_name").notNull(),
+  address: text("address"),
+  phone: text("phone"),
+  phone2: text("phone2"),
+  ninea: text("ninea"),
+  ownerName: text("owner_name"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().defaultNow(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().defaultNow()
+});
+var categories = sqliteTable("categories", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull().unique(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().defaultNow(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().defaultNow()
+});
+var products = sqliteTable(
+  "products",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    categoryId: integer("category_id").notNull().references(() => categories.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    purchasePrice: integer("purchase_price").notNull(),
+    salePrice: integer("sale_price").notNull(),
+    isTransformable: integer("is_transformable", { mode: "boolean" }).notNull().default(false),
+    primaryForm: text("primary_form"),
+    secondaryForm: text("secondary_form"),
+    conversionQuantity: integer("conversion_quantity"),
+    secondarySalePrice: integer("secondary_sale_price"),
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().defaultNow(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().defaultNow()
+  },
+  (table) => [
+    // Product names keep their original case ("Chocopain 5 kg"), so the database
+    // enforces the case-insensitive uniqueness itself instead of the renderer.
+    uniqueIndex("products_name_unique").on(sql`lower(${table.name})`),
+    index("products_category_id_idx").on(table.categoryId),
+    check("products_purchase_price_check", sql`${table.purchasePrice} >= 0`),
+    check("products_sale_price_check", sql`${table.salePrice} >= 0`)
+  ]
+);
+var stockMovements = sqliteTable(
+  "stock_movements",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    productId: integer("product_id").notNull().references(() => products.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    form: text("form").notNull(),
+    movementType: text("movement_type").$type().notNull(),
+    direction: text("direction").$type().notNull(),
+    quantity: real("quantity").notNull(),
+    reason: text("reason"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().defaultNow()
+  },
+  (table) => [
+    index("stock_movements_product_id_idx").on(table.productId),
+    index("stock_movements_product_form_idx").on(table.productId, table.form),
+    uniqueIndex("stock_movements_initial_unique").on(table.productId, table.form).where(sql`${table.movementType} = 'STOCK_INITIAL'`),
+    check("stock_movements_quantity_check", sql`${table.quantity} > 0`),
+    check(
+      "stock_movements_direction_check",
+      sql`${table.direction} in ('IN', 'OUT')`
+    ),
+    check(
+      "stock_movements_type_check",
+      sql`${table.movementType} in ('STOCK_INITIAL', 'AJUSTEMENT', 'APPROVISIONNEMENT', 'TRANSFORMATION', 'SALE')`
+    ),
+    check(
+      "stock_movements_initial_direction_check",
+      sql`${table.movementType} <> 'STOCK_INITIAL' or ${table.direction} = 'IN'`
+    ),
+    check(
+      "stock_movements_supply_direction_check",
+      sql`${table.movementType} <> 'APPROVISIONNEMENT' or ${table.direction} = 'IN'`
+    ),
+    check(
+      "stock_movements_reason_check",
+      sql`${table.movementType} <> 'AJUSTEMENT' or (${table.reason} is not null and length(trim(${table.reason})) > 0)`
+    ),
+    // A transformation is a transfer, never a loss: the OUT half and the IN half
+    // are the two sides of one document, so the table itself refuses a null
+    // quantity and the service always writes both rows together.
+    check(
+      "stock_movements_transformation_reason_check",
+      sql`${table.movementType} <> 'TRANSFORMATION' or ${table.reason} is null`
+    ),
+    // A SALE only ever removes stock: it is OUT, and it always names the facture
+    // that created it.
+    check(
+      "stock_movements_sale_direction_check",
+      sql`${table.movementType} <> 'SALE' or ${table.direction} = 'OUT'`
+    ),
+    check(
+      "stock_movements_sale_reason_check",
+      sql`${table.movementType} <> 'SALE' or (${table.reason} is not null and length(trim(${table.reason})) > 0)`
+    )
+  ]
+);
+var supplies = sqliteTable(
+  "supplies",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    /** APP-000001, APP-000002, ... generated by the service, unique. */
+    reference: text("reference").notNull(),
+    /** FK to the `suppliers` table, NULL when the document has no supplier. */
+    supplierId: integer("supplier_id").references(() => suppliers.id, {
+      onDelete: "restrict",
+      onUpdate: "cascade"
+    }),
+    /** Free text snapshot, populated from the supplier row when `supplierId` is set. */
+    supplierName: text("supplier_name"),
+    /** Reception date (local midnight), as typed by the shopkeeper. */
+    date: integer("date", { mode: "timestamp" }).notNull(),
+    /** Sum of the line totals, recomputed by the service before insertion. */
+    totalAmount: integer("total_amount").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("supplies_reference_unique").on(table.reference),
+    index("supplies_date_idx").on(table.date),
+    index("supplies_supplier_id_idx").on(table.supplierId),
+    check("supplies_total_amount_check", sql`${table.totalAmount} >= 0`)
+  ]
+);
+var supplyItems = sqliteTable(
+  "supply_items",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    supplyId: integer("supply_id").notNull().references(() => supplies.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    productId: integer("product_id").notNull().references(() => products.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    form: text("form").notNull(),
+    quantity: real("quantity").notNull(),
+    purchaseUnitPrice: integer("purchase_unit_price").notNull(),
+    /** Always quantity * purchase_unit_price, recomputed by the service. */
+    lineTotal: integer("line_total").notNull()
+  },
+  (table) => [
+    index("supply_items_supply_id_idx").on(table.supplyId),
+    index("supply_items_product_id_idx").on(table.productId),
+    // The same product cannot be received twice in the same form on one
+    // document: the shopkeeper must group the quantities instead.
+    uniqueIndex("supply_items_supply_product_form_unique").on(
+      table.supplyId,
+      table.productId,
+      table.form
+    ),
+    check("supply_items_quantity_check", sql`${table.quantity} > 0`),
+    check("supply_items_purchase_unit_price_check", sql`${table.purchaseUnitPrice} >= 0`),
+    check("supply_items_line_total_check", sql`${table.lineTotal} >= 0`)
+  ]
+);
+var transformations = sqliteTable(
+  "transformations",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    /** TRF-000001, TRF-000002, ... generated by the service, unique. */
+    reference: text("reference").notNull(),
+    productId: integer("product_id").notNull().references(() => products.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    /** Form taken out of the stock (CARTON or SEAU). */
+    sourceForm: text("source_form").notNull(),
+    /** Strictly positive number of units removed from `source_form`. */
+    sourceQuantity: real("source_quantity").notNull(),
+    /** Form put into the stock, always the other form of the product. */
+    destinationForm: text("destination_form").notNull(),
+    /** Strictly positive number of units added to `destination_form`. */
+    destinationQuantity: real("destination_quantity").notNull(),
+    /** Transformation day (local midnight), as typed by the shopkeeper. */
+    date: integer("date", { mode: "timestamp" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("transformations_reference_unique").on(table.reference),
+    index("transformations_product_id_idx").on(table.productId),
+    index("transformations_date_idx").on(table.date),
+    check("transformations_source_quantity_check", sql`${table.sourceQuantity} > 0`),
+    check("transformations_destination_quantity_check", sql`${table.destinationQuantity} > 0`),
+    check(
+      "transformations_forms_check",
+      sql`${table.sourceForm} <> ${table.destinationForm}`
+    )
+  ]
+);
+var clients = sqliteTable(
+  "clients",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    phone: text("phone").notNull(),
+    address: text("address"),
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+    isSystem: integer("is_system", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().defaultNow(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("clients_name_unique").on(sql`lower(${table.name})`),
+    uniqueIndex("clients_phone_unique").on(table.phone),
+    index("clients_is_active_idx").on(table.isActive)
+  ]
+);
+var suppliers = sqliteTable(
+  "suppliers",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    phone: text("phone").notNull(),
+    address: text("address"),
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+    isSystem: integer("is_system", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().defaultNow(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().defaultNow()
+  },
+  (table) => [
+    // Supplier names keep their original case ("SODEXO 5 kg"), so the database
+    // enforces the case-insensitive uniqueness itself instead of the renderer.
+    uniqueIndex("suppliers_name_unique").on(sql`lower(${table.name})`),
+    uniqueIndex("suppliers_phone_unique").on(table.phone),
+    index("suppliers_is_active_idx").on(table.isActive)
+  ]
+);
+var sales = sqliteTable(
+  "sales",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    /** VTE-000001, VTE-000002, ... generated by the service, unique. */
+    reference: text("reference").notNull(),
+    /** A sale always has a client: the system client is used when none is selected. */
+    clientId: integer("client_id").notNull().references(() => clients.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    /** Sale day (local midnight), as typed by the shopkeeper. */
+    saleDate: integer("sale_date", { mode: "timestamp" }).notNull(),
+    /**
+     * VALIDEE at creation, ANNULEE after a cancellation. A cancelled sale can be
+     * physically deleted, a validated one can never be.
+     */
+    status: text("status").$type().notNull(),
+    /** Sum of the line totals, recomputed by the service before insertion. */
+    totalAmount: integer("total_amount").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().defaultNow(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().defaultNow()
+  },
+  (table) => [
+    uniqueIndex("sales_reference_unique").on(table.reference),
+    index("sales_client_id_idx").on(table.clientId),
+    index("sales_sale_date_idx").on(table.saleDate),
+    index("sales_status_idx").on(table.status),
+    check("sales_status_check", sql`${table.status} in ('VALIDEE', 'ANNULEE')`),
+    check("sales_total_amount_check", sql`${table.totalAmount} >= 0`)
+  ]
+);
+var saleItems = sqliteTable(
+  "sale_items",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    saleId: integer("sale_id").notNull().references(() => sales.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    productId: integer("product_id").notNull().references(() => products.id, { onDelete: "restrict", onUpdate: "cascade" }),
+    form: text("form").notNull(),
+    quantity: real("quantity").notNull(),
+    unitPrice: integer("unit_price").notNull(),
+    /** Always quantity * unit_price, recomputed by the service. */
+    lineTotal: integer("line_total").notNull()
+  },
+  (table) => [
+    index("sale_items_sale_id_idx").on(table.saleId),
+    index("sale_items_product_id_idx").on(table.productId),
+    uniqueIndex("sale_items_sale_product_form_unique").on(
+      table.saleId,
+      table.productId,
+      table.form
+    ),
+    check("sale_items_quantity_check", sql`${table.quantity} > 0`),
+    check("sale_items_unit_price_check", sql`${table.unitPrice} >= 0`),
+    check("sale_items_line_total_check", sql`${table.lineTotal} >= 0`)
+  ]
+);
+var payments = sqliteTable(
+  "payments",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    saleId: integer("sale_id").notNull().references(() => sales.id, { onDelete: "cascade", onUpdate: "cascade" }),
+    amount: integer("amount").notNull(),
+    paymentDate: integer("payment_date", { mode: "timestamp" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull().defaultNow(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().defaultNow()
+  },
+  (table) => [
+    index("payments_sale_id_idx").on(table.saleId),
+    index("payments_payment_date_idx").on(table.paymentDate),
+    check("payments_amount_check", sql`${table.amount} > 0`)
+  ]
+);
+
+// electron/database/client.ts
+import Database from "better-sqlite3";
+
+// tests/stubs/electron.ts
+var printStubs = {
+  /** Every URL loaded in a document window, `data:` URLs included. */
+  loadedUrls: [],
+  /** Options of every document window opened by the print service. */
+  windowOptions: [],
+  printOptions: [],
+  pdfOptions: [],
+  saveOptions: [],
+  openOptions: [],
+  errorBoxMessages: [],
+  /** What `webContents.print` answers through its callback. */
+  printSucceeds: true,
+  /** Electron answered through a promise instead of the callback. */
+  printReturnsPromise: false,
+  /** Bytes returned by `printToPDF`, or an error to simulate a failure. */
+  pdfResult: Buffer.from("%PDF-1.4 facture"),
+  /** Where the save dialog points, or null when it is cancelled. */
+  savePath: "/tmp/gestion-boutique-facture.pdf",
+  /** Where the open dialog points, or null when it is cancelled. */
+  openPath: null,
+  failToLoad: false,
+  openWindows: 0
+};
+
+// electron/services/maintenanceLock.ts
+import { EventEmitter } from "node:events";
+var ee = new EventEmitter();
+
+// electron/services/databaseService.ts
+function runMigrationsWithRecovery(db, migrationsFolder) {
+  let done = false;
+  while (!done) {
+    try {
+      migrate(db, { migrationsFolder });
+      done = true;
+    } catch (error) {
+      if (!isAlreadyAppliedError(error)) {
+        throw error;
+      }
+      if (!markMigrationAsApplied(db, migrationsFolder, error)) {
+        throw error;
+      }
+    }
+  }
+}
+function isAlreadyAppliedError(error) {
+  const messages = [error.message, error.cause instanceof Error ? error.cause.message : ""];
+  return messages.some((msg) => {
+    const lower = msg.toLowerCase();
+    return lower.includes("duplicate column name") || lower.includes("duplicate table name") || lower.includes("already exists");
+  });
+}
+function getErrorMessage(error) {
+  const parts = [error.message];
+  const cause = error.cause;
+  if (cause instanceof Error) {
+    parts.push(cause.message);
+  }
+  return parts.join("\n");
+}
+function markMigrationAsApplied(db, migrationsFolder, error) {
+  const journalPath = path.join(migrationsFolder, "meta", "_journal.json");
+  if (!fs2.existsSync(journalPath)) {
+    return false;
+  }
+  const journal = JSON.parse(fs2.readFileSync(journalPath, "utf8"));
+  const fullMessage = getErrorMessage(error);
+  const sqlMatch = fullMessage.match(/Failed to run the query '([^']+)'/s);
+  if (!sqlMatch) {
+    return false;
+  }
+  const failingSqlFirstLine = sqlMatch[1].trim().replace(/--> statement-breakpoint/, "").trim().split("\n")[0].trim();
+  for (const entry of journal.entries) {
+    const sqlFile = path.join(migrationsFolder, `${entry.tag}.sql`);
+    if (!fs2.existsSync(sqlFile)) {
+      continue;
+    }
+    const content = fs2.readFileSync(sqlFile, "utf8");
+    if (content.includes(failingSqlFirstLine)) {
+      const hash = crypto3.createHash("sha256").update(content).digest("hex");
+      db.$client.prepare(
+        "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)"
+      ).run(hash, entry.when);
+      console.warn(
+        `[migrations] Schema drift detected: marked migration "${entry.tag}" as already applied`
+      );
+      return true;
+    }
+  }
+  return false;
+}
+
 // tests/migrations.test.ts
-var sourceMigrations = path.join(process.cwd(), "electron", "database", "migrations");
+var sourceMigrations = path2.join(process.cwd(), "electron", "database", "migrations");
 function snapshotUpTo(workDir, lastIdx) {
-  const folder = path.join(workDir, `migrations-0${lastIdx}`);
-  const journalPath = path.join(folder, "meta", "_journal.json");
+  const folder = path2.join(workDir, `migrations-0${lastIdx}`);
+  const journalPath = path2.join(folder, "meta", "_journal.json");
   cpSync(sourceMigrations, folder, { recursive: true });
   const journal = JSON.parse(readFileSync(journalPath, "utf8"));
   journal.entries = journal.entries.filter((entry) => entry.idx < lastIdx);
@@ -5030,11 +5949,11 @@ describe("migration 0003", () => {
   let databasePath;
   let oldMigrationsFolder;
   before(() => {
-    workDir = mkdtempSync(path.join(os.tmpdir(), "gestion-boutique-migration-"));
-    databasePath = path.join(workDir, "database.sqlite");
-    oldMigrationsFolder = path.join(workDir, "migrations-old");
+    workDir = mkdtempSync(path2.join(os.tmpdir(), "gestion-boutique-migration-"));
+    databasePath = path2.join(workDir, "database.sqlite");
+    oldMigrationsFolder = path2.join(workDir, "migrations-old");
     cpSync(sourceMigrations, oldMigrationsFolder, { recursive: true });
-    const journalPath = path.join(oldMigrationsFolder, "meta", "_journal.json");
+    const journalPath = path2.join(oldMigrationsFolder, "meta", "_journal.json");
     const journal = JSON.parse(readFileSync(journalPath, "utf8"));
     journal.entries = journal.entries.filter((entry) => entry.idx < 3);
     writeFileSync(journalPath, JSON.stringify(journal, null, 2));
@@ -5043,10 +5962,10 @@ describe("migration 0003", () => {
     rmSync(workDir, { recursive: true, force: true });
   });
   it("applique un ajout non destructif sur une base existante", () => {
-    const sqlite = new Database(databasePath);
+    const sqlite = new Database2(databasePath);
     sqlite.pragma("foreign_keys = ON");
     const db = drizzle(sqlite);
-    migrate(db, { migrationsFolder: oldMigrationsFolder });
+    runMigrationsWithRecovery(db, oldMigrationsFolder);
     sqlite.prepare(
       "insert into categories (name, created_at, updated_at) values ('BOISSONS', 0, 0)"
     ).run();
@@ -5058,7 +5977,7 @@ describe("migration 0003", () => {
       `insert into products (name, category_id, purchase_price, sale_price, is_transformable, primary_form, secondary_form, conversion_quantity, secondary_sale_price, is_active, created_at, updated_at)
          values ('CHOCOPAIN 5 KG', 1, 12000, 15000, 1, 'CARTON', 'SEAU', 4, 4000, 1, 0, 0)`
     ).run();
-    migrate(db, { migrationsFolder: sourceMigrations });
+    runMigrationsWithRecovery(db, sourceMigrations);
     const tables = sqlite.prepare("select name from sqlite_master where type='table' order by name").all();
     const tableNames = tables.map((row) => row.name);
     assert.ok(tableNames.includes("categories"));
@@ -5072,12 +5991,12 @@ describe("migration 0003", () => {
       sqlite.prepare("select count(*) as count from products").get().count,
       2
     );
-    const products = sqlite.prepare("select name, primary_form, secondary_form from products order by id").all();
-    assert.deepEqual(products, [
+    const products2 = sqlite.prepare("select name, primary_form, secondary_form from products order by id").all();
+    assert.deepEqual(products2, [
       { name: "SUCRE 1 KG", primary_form: "UNITE", secondary_form: null },
       { name: "CHOCOPAIN 5 KG", primary_form: "CARTON", secondary_form: "SEAU" }
     ]);
-    migrate(db, { migrationsFolder: sourceMigrations });
+    runMigrationsWithRecovery(db, sourceMigrations);
     assert.equal(
       sqlite.prepare("select count(*) as count from stock_movements").get().count,
       0
@@ -5090,18 +6009,18 @@ describe("migration 0004", () => {
   let databasePath;
   let stockMigrationsFolder;
   before(() => {
-    workDir = mkdtempSync(path.join(os.tmpdir(), "gestion-boutique-migration-"));
-    databasePath = path.join(workDir, "database.sqlite");
+    workDir = mkdtempSync(path2.join(os.tmpdir(), "gestion-boutique-migration-"));
+    databasePath = path2.join(workDir, "database.sqlite");
     stockMigrationsFolder = snapshotUpTo(workDir, 4);
   });
   after(() => {
     rmSync(workDir, { recursive: true, force: true });
   });
   it("ajoute les approvisionnements sans perdre l'historique du stock", () => {
-    const sqlite = new Database(databasePath);
+    const sqlite = new Database2(databasePath);
     sqlite.pragma("foreign_keys = ON");
     const db = drizzle(sqlite);
-    migrate(db, { migrationsFolder: stockMigrationsFolder });
+    runMigrationsWithRecovery(db, stockMigrationsFolder);
     sqlite.prepare(
       "insert into categories (name, created_at, updated_at) values ('BOISSONS', 0, 0)"
     ).run();
@@ -5117,7 +6036,7 @@ describe("migration 0004", () => {
       `insert into stock_movements (id, product_id, form, movement_type, direction, quantity, reason, created_at)
          values (2, 1, 'CARTON', 'AJUSTEMENT', 'OUT', 1, 'Produit endommag\xE9', 0)`
     ).run();
-    migrate(db, { migrationsFolder: sourceMigrations });
+    runMigrationsWithRecovery(db, sourceMigrations);
     const tables = sqlite.prepare("select name from sqlite_master where type='table' order by name").all();
     const tableNames = tables.map((row) => row.name);
     assert.ok(tableNames.includes("stock_movements"));
@@ -5200,7 +6119,7 @@ describe("migration 0004", () => {
            values (1, 1, 'SEAU', 5, -1, -5)`
       ).run()
     );
-    migrate(db, { migrationsFolder: sourceMigrations });
+    runMigrationsWithRecovery(db, sourceMigrations);
     assert.equal(
       sqlite.prepare("select count(*) as count from stock_movements").get().count,
       3
@@ -5217,18 +6136,18 @@ describe("migration 0005", () => {
   let databasePath;
   let supplyMigrationsFolder;
   before(() => {
-    workDir = mkdtempSync(path.join(os.tmpdir(), "gestion-boutique-migration-"));
-    databasePath = path.join(workDir, "database.sqlite");
+    workDir = mkdtempSync(path2.join(os.tmpdir(), "gestion-boutique-migration-"));
+    databasePath = path2.join(workDir, "database.sqlite");
     supplyMigrationsFolder = snapshotUpTo(workDir, 5);
   });
   after(() => {
     rmSync(workDir, { recursive: true, force: true });
   });
   it("ajoute les transformations sans perdre l'historique du stock", () => {
-    const sqlite = new Database(databasePath);
+    const sqlite = new Database2(databasePath);
     sqlite.pragma("foreign_keys = ON");
     const db = drizzle(sqlite);
-    migrate(db, { migrationsFolder: supplyMigrationsFolder });
+    runMigrationsWithRecovery(db, supplyMigrationsFolder);
     sqlite.prepare(
       "insert into categories (name, created_at, updated_at) values ('BOISSONS', 0, 0)"
     ).run();
@@ -5248,7 +6167,7 @@ describe("migration 0005", () => {
       `insert into supplies (reference, supplier_name, date, total_amount, created_at)
          values ('APP-000001', 'Grossiste Sokna', 0, 25000, 0)`
     ).run();
-    migrate(db, { migrationsFolder: sourceMigrations });
+    runMigrationsWithRecovery(db, sourceMigrations);
     const tables = sqlite.prepare("select name from sqlite_master where type='table' order by name").all();
     const tableNames = tables.map((row) => row.name);
     assert.ok(tableNames.includes("stock_movements"));
@@ -5349,7 +6268,7 @@ describe("migration 0005", () => {
            values ('TRF-000004', 4242, 'CARTON', 1, 'SEAU', 4, 0, 0)`
       ).run()
     );
-    migrate(db, { migrationsFolder: sourceMigrations });
+    runMigrationsWithRecovery(db, sourceMigrations);
     assert.equal(
       sqlite.prepare("select count(*) as count from stock_movements").get().count,
       4
@@ -5366,18 +6285,18 @@ describe("migration 0007", () => {
   let databasePath;
   let clientMigrationsFolder;
   before(() => {
-    workDir = mkdtempSync(path.join(os.tmpdir(), "gestion-boutique-migration-"));
-    databasePath = path.join(workDir, "database.sqlite");
+    workDir = mkdtempSync(path2.join(os.tmpdir(), "gestion-boutique-migration-"));
+    databasePath = path2.join(workDir, "database.sqlite");
     clientMigrationsFolder = snapshotUpTo(workDir, 7);
   });
   after(() => {
     rmSync(workDir, { recursive: true, force: true });
   });
   it("ajoute les factures sans perdre l'historique du stock", () => {
-    const sqlite = new Database(databasePath);
+    const sqlite = new Database2(databasePath);
     sqlite.pragma("foreign_keys = ON");
     const db = drizzle(sqlite);
-    migrate(db, { migrationsFolder: clientMigrationsFolder });
+    runMigrationsWithRecovery(db, clientMigrationsFolder);
     sqlite.prepare(
       "insert into categories (name, created_at, updated_at) values ('BOISSONS', 0, 0)"
     ).run();
@@ -5397,7 +6316,7 @@ describe("migration 0007", () => {
       `insert into stock_movements (id, product_id, form, movement_type, direction, quantity, reason, created_at)
          values (2, 1, 'SEAU', 'TRANSFORMATION', 'IN', 8, null, 0)`
     ).run();
-    migrate(db, { migrationsFolder: sourceMigrations });
+    runMigrationsWithRecovery(db, sourceMigrations);
     const tables = sqlite.prepare("select name from sqlite_master where type='table' order by name").all();
     const tableNames = tables.map((row) => row.name);
     assert.ok(tableNames.includes("stock_movements"));
@@ -5575,7 +6494,7 @@ describe("migration 0007", () => {
       sqlite.prepare("select count(*) as count from stock_movements").get().count,
       3
     );
-    migrate(db, { migrationsFolder: sourceMigrations });
+    runMigrationsWithRecovery(db, sourceMigrations);
     assert.equal(
       sqlite.prepare("select count(*) as count from sales").get().count,
       1

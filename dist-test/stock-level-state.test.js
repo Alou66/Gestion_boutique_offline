@@ -19749,7 +19749,7 @@ var STOCK_MESSAGES = {
   formsRequired: "La quantit\xE9 de la forme principale est obligatoire.",
   formsMismatch: "Les formes saisies ne correspondent pas aux formes du produit.",
   quantityRequired: "La quantit\xE9 est obligatoire.",
-  quantityInvalid: "La quantit\xE9 doit \xEAtre un entier sup\xE9rieur ou \xE9gal \xE0 0.",
+  quantityInvalid: "La quantit\xE9 doit \xEAtre un nombre sup\xE9rieur \xE0 0.",
   quantityTooHigh: "La quantit\xE9 ne peut pas d\xE9passer 1 000 000.",
   positiveQuantityRequired: "Au moins une forme doit \xEAtre initialis\xE9e avec une quantit\xE9 sup\xE9rieure \xE0 0.",
   alreadyInitialized: "Le stock de ce produit est d\xE9j\xE0 initialis\xE9.",

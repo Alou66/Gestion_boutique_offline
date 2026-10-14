@@ -64,6 +64,7 @@ export const stockQuantityEntrySchema = z.object({
   form: formFieldSchema,
   quantity: z
     .number({ error: STOCK_MESSAGES.quantityRequired })
+    .int(STOCK_MESSAGES.quantityInvalid)
     .min(0, STOCK_MESSAGES.quantityInvalid)
     .max(STOCK_QUANTITY_MAX, STOCK_MESSAGES.quantityTooHigh),
 })
@@ -82,6 +83,7 @@ export const stockAdjustFormSchema = z.object({
   direction: z.enum(['IN', 'OUT'], { error: STOCK_MESSAGES.directionRequired }),
   quantity: z
     .number({ error: STOCK_MESSAGES.quantityRequired })
+    .int(STOCK_MESSAGES.quantityInvalid)
     .positive(STOCK_MESSAGES.quantityInvalid)
     .max(STOCK_QUANTITY_MAX, STOCK_MESSAGES.quantityTooHigh),
   reason: z

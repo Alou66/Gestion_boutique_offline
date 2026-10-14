@@ -5614,7 +5614,7 @@ var stockMovements = sqliteTable(
     form: text("form").notNull(),
     movementType: text("movement_type").$type().notNull(),
     direction: text("direction").$type().notNull(),
-    quantity: integer("quantity").notNull(),
+    quantity: real("quantity").notNull(),
     reason: text("reason"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull().defaultNow()
   },
@@ -5695,7 +5695,7 @@ var supplyItems = sqliteTable(
     supplyId: integer("supply_id").notNull().references(() => supplies.id, { onDelete: "cascade", onUpdate: "cascade" }),
     productId: integer("product_id").notNull().references(() => products.id, { onDelete: "restrict", onUpdate: "cascade" }),
     form: text("form").notNull(),
-    quantity: integer("quantity").notNull(),
+    quantity: real("quantity").notNull(),
     purchaseUnitPrice: integer("purchase_unit_price").notNull(),
     /** Always quantity * purchase_unit_price, recomputed by the service. */
     lineTotal: integer("line_total").notNull()
@@ -5724,12 +5724,12 @@ var transformations = sqliteTable(
     productId: integer("product_id").notNull().references(() => products.id, { onDelete: "restrict", onUpdate: "cascade" }),
     /** Form taken out of the stock (CARTON or SEAU). */
     sourceForm: text("source_form").notNull(),
-    /** Strictly positive whole number of units removed from `source_form`. */
-    sourceQuantity: integer("source_quantity").notNull(),
+    /** Strictly positive number of units removed from `source_form`. */
+    sourceQuantity: real("source_quantity").notNull(),
     /** Form put into the stock, always the other form of the product. */
     destinationForm: text("destination_form").notNull(),
-    /** Strictly positive whole number of units added to `destination_form`. */
-    destinationQuantity: integer("destination_quantity").notNull(),
+    /** Strictly positive number of units added to `destination_form`. */
+    destinationQuantity: real("destination_quantity").notNull(),
     /** Transformation day (local midnight), as typed by the shopkeeper. */
     date: integer("date", { mode: "timestamp" }).notNull(),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull().defaultNow()
@@ -5820,7 +5820,7 @@ var saleItems = sqliteTable(
     saleId: integer("sale_id").notNull().references(() => sales.id, { onDelete: "cascade", onUpdate: "cascade" }),
     productId: integer("product_id").notNull().references(() => products.id, { onDelete: "restrict", onUpdate: "cascade" }),
     form: text("form").notNull(),
-    quantity: integer("quantity").notNull(),
+    quantity: real("quantity").notNull(),
     unitPrice: integer("unit_price").notNull(),
     /** Always quantity * unit_price, recomputed by the service. */
     lineTotal: integer("line_total").notNull()
@@ -6413,7 +6413,7 @@ async function bulkSeed(dbPath, count, dryRun) {
           purchasePrice: product.purchasePrice,
           salePrice: product.salePrice,
           isTransformable: product.isTransformable,
-          primaryForm: product.primaryForm,
+          primaryForm: product.primaryForm ?? null,
           secondaryForm: product.secondaryForm,
           conversionQuantity: product.conversionQuantity,
           secondarySalePrice: product.secondarySalePrice,
@@ -6423,12 +6423,12 @@ async function bulkSeed(dbPath, count, dryRun) {
         }).returning({ id: products.id }).get();
         result.products++;
         productFormMap.set(inserted.id, {
-          primaryForm: product.primaryForm,
+          primaryForm: product.primaryForm ?? "",
           secondaryForm: product.secondaryForm
         });
         if (product.isTransformable && product.primaryForm && product.secondaryForm) {
           transformableProductMap.set(inserted.id, {
-            primaryForm: product.primaryForm,
+            primaryForm: product.primaryForm ?? "",
             secondaryForm: product.secondaryForm
           });
         }
@@ -6746,7 +6746,6 @@ describe("bulk-seed data generators", () => {
     }
   });
   it("generates stock data for valid products", () => {
-    const categories2 = generateCategories(2);
     const mockCategoryIds = [1, 2];
     const products2 = generateProducts(mockCategoryIds, 10);
     const transformableMap = /* @__PURE__ */ new Map();
@@ -6769,17 +6768,15 @@ describe("bulk-seed data generators", () => {
     }
   });
   it("generates supplies for valid entities", () => {
-    const categories2 = generateCategories(3);
     const mockCategoryIds = [1, 2, 3];
     const products2 = generateProducts(mockCategoryIds, 10);
-    const suppliers2 = generateSuppliers(5);
     const supplierIds = [10, 11, 12, 13, 14];
     const productIds = products2.map((_, i) => i + 1);
     const productFormMap = /* @__PURE__ */ new Map();
     let productId = 1;
     for (const product of products2) {
       productFormMap.set(productId, {
-        primaryForm: product.primaryForm,
+        primaryForm: product.primaryForm ?? "",
         secondaryForm: product.secondaryForm
       });
       productId++;
@@ -6797,14 +6794,13 @@ describe("bulk-seed data generators", () => {
     }
   });
   it("generates invoices for valid entities", () => {
-    const categories2 = generateCategories(2);
     const mockCategoryIds = [1, 2];
     const products2 = generateProducts(mockCategoryIds, 10);
     const productFormMap = /* @__PURE__ */ new Map();
     let productId = 1;
     for (const product of products2) {
       productFormMap.set(productId, {
-        primaryForm: product.primaryForm,
+        primaryForm: product.primaryForm ?? "",
         secondaryForm: product.secondaryForm
       });
       productId++;
@@ -6836,7 +6832,6 @@ describe("bulk-seed integration", () => {
   it("seeds categories into a temporary database", async () => {
     const { db } = tmpDb;
     const categories2 = generateCategories(5);
-    let created = 0;
     for (const cat of categories2) {
       try {
         db.insert(categories).values({
@@ -6844,7 +6839,6 @@ describe("bulk-seed integration", () => {
           createdAt: /* @__PURE__ */ new Date(),
           updatedAt: /* @__PURE__ */ new Date()
         }).run();
-        created++;
       } catch {
       }
     }
@@ -6854,7 +6848,6 @@ describe("bulk-seed integration", () => {
   it("seeds suppliers into a temporary database", async () => {
     const { db } = tmpDb;
     const suppliers2 = generateSuppliers(5);
-    let created = 0;
     for (const supplier of suppliers2) {
       try {
         db.insert(suppliers).values({
@@ -6866,7 +6859,6 @@ describe("bulk-seed integration", () => {
           createdAt: /* @__PURE__ */ new Date(),
           updatedAt: /* @__PURE__ */ new Date()
         }).run();
-        created++;
       } catch {
       }
     }
@@ -6876,7 +6868,6 @@ describe("bulk-seed integration", () => {
   it("seeds clients into a temporary database", async () => {
     const { db } = tmpDb;
     const clients2 = generateClients(5);
-    let created = 0;
     for (const client of clients2) {
       try {
         db.insert(clients).values({
@@ -6888,7 +6879,6 @@ describe("bulk-seed integration", () => {
           createdAt: /* @__PURE__ */ new Date(),
           updatedAt: /* @__PURE__ */ new Date()
         }).run();
-        created++;
       } catch {
       }
     }
@@ -6930,7 +6920,6 @@ describe("bulk-seed integration", () => {
     assert.ok(productIds.length > 0, "Products must exist");
     const stockData = generateStockInitialData(productIds, transformableMap, 5);
     const initializedProducts = /* @__PURE__ */ new Set();
-    let movementCount = 0;
     for (const stock of stockData) {
       if (initializedProducts.has(stock.productId)) continue;
       const existing = db.select({ id: stockMovements.id }).from(stockMovements).where(sql`${stockMovements.productId} = ${stock.productId} AND ${stockMovements.movementType} = 'STOCK_INITIAL'`).get();
@@ -6949,7 +6938,6 @@ describe("bulk-seed integration", () => {
           reason: null,
           createdAt: /* @__PURE__ */ new Date()
         }).run();
-        movementCount++;
       }
       initializedProducts.add(stock.productId);
     }

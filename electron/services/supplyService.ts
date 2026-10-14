@@ -151,6 +151,7 @@ const formSchema = z
 
 const quantitySchema = z
   .number({ error: SUPPLY_ERRORS.quantityRequired })
+  .int(SUPPLY_ERRORS.quantityInvalid)
   .positive(SUPPLY_ERRORS.quantityInvalid)
   .max(SUPPLY_QUANTITY_MAX, SUPPLY_ERRORS.quantityTooHigh)
 

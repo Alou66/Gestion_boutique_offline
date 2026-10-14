@@ -40,7 +40,7 @@ export function initDatabase(migrationsFolder: string): void {
  * that Drizzle uses), and retries — letting subsequent pending migrations
  * proceed.
  */
-function runMigrationsWithRecovery(db: AppDatabase, migrationsFolder: string): void {
+export function runMigrationsWithRecovery(db: AppDatabase, migrationsFolder: string): void {
   let done = false
   while (!done) {
     try {

@@ -45,6 +45,7 @@ const formSchema = z
 
 const quantitySchema = z
   .number({ error: TRANSFORMATION_MESSAGES.quantityRequired })
+  .int(TRANSFORMATION_MESSAGES.quantityInvalid)
   .positive(TRANSFORMATION_MESSAGES.quantityInvalid)
   .max(TRANSFORMATION_QUANTITY_MAX, TRANSFORMATION_MESSAGES.quantityTooHigh)
 

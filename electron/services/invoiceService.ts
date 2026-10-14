@@ -182,6 +182,7 @@ const formSchema = z
 
 const quantitySchema = z
   .number({ error: INVOICE_ERRORS.quantityRequired })
+  .int(INVOICE_ERRORS.quantityInvalid)
   .positive(INVOICE_ERRORS.quantityInvalid)
   .max(INVOICE_QUANTITY_MAX, INVOICE_ERRORS.quantityTooHigh)
 

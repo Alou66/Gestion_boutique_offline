@@ -5,7 +5,7 @@ import path from 'node:path'
 import { after, before, describe, it } from 'node:test'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { runMigrationsWithRecovery } from '../electron/services/databaseService'
 
 /**
  * Upgrade path check: the 0003 migration must be applied on a database that
@@ -64,7 +64,7 @@ describe('migration 0003', () => {
     sqlite.pragma('foreign_keys = ON')
     const db = drizzle(sqlite)
 
-    migrate(db, { migrationsFolder: oldMigrationsFolder })
+    runMigrationsWithRecovery(db, oldMigrationsFolder)
 
     sqlite
       .prepare(
@@ -85,7 +85,7 @@ describe('migration 0003', () => {
       .run()
 
     // Upgrading to the stock migration.
-    migrate(db, { migrationsFolder: sourceMigrations })
+    runMigrationsWithRecovery(db, sourceMigrations)
 
     const tables = sqlite
       .prepare("select name from sqlite_master where type='table' order by name")
@@ -120,7 +120,7 @@ describe('migration 0003', () => {
     ])
 
     // The migration is idempotent: running it again changes nothing.
-    migrate(db, { migrationsFolder: sourceMigrations })
+    runMigrationsWithRecovery(db, sourceMigrations)
     assert.equal(
       (sqlite.prepare('select count(*) as count from stock_movements').get() as {
         count: number
@@ -157,7 +157,7 @@ describe('migration 0004', () => {
     sqlite.pragma('foreign_keys = ON')
     const db = drizzle(sqlite)
 
-    migrate(db, { migrationsFolder: stockMigrationsFolder })
+    runMigrationsWithRecovery(db, stockMigrationsFolder)
 
     sqlite
       .prepare(
@@ -184,7 +184,7 @@ describe('migration 0004', () => {
       .run()
 
     // Upgrading to the supply migration.
-    migrate(db, { migrationsFolder: sourceMigrations })
+    runMigrationsWithRecovery(db, sourceMigrations)
 
     const tables = sqlite
       .prepare("select name from sqlite_master where type='table' order by name")
@@ -312,7 +312,7 @@ describe('migration 0004', () => {
     )
 
     // The migration is idempotent: running it again changes nothing.
-    migrate(db, { migrationsFolder: sourceMigrations })
+    runMigrationsWithRecovery(db, sourceMigrations)
 
     assert.equal(
       (sqlite.prepare('select count(*) as count from stock_movements').get() as {
@@ -356,7 +356,7 @@ describe('migration 0005', () => {
     sqlite.pragma('foreign_keys = ON')
     const db = drizzle(sqlite)
 
-    migrate(db, { migrationsFolder: supplyMigrationsFolder })
+    runMigrationsWithRecovery(db, supplyMigrationsFolder)
 
     sqlite
       .prepare(
@@ -389,7 +389,7 @@ describe('migration 0005', () => {
       .run()
 
     // Upgrading to the transformation migration.
-    migrate(db, { migrationsFolder: sourceMigrations })
+    runMigrationsWithRecovery(db, sourceMigrations)
 
     const tables = sqlite
       .prepare("select name from sqlite_master where type='table' order by name")
@@ -542,7 +542,7 @@ describe('migration 0005', () => {
     )
 
     // The migration is idempotent: running it again changes nothing.
-    migrate(db, { migrationsFolder: sourceMigrations })
+    runMigrationsWithRecovery(db, sourceMigrations)
 
     assert.equal(
       (sqlite.prepare('select count(*) as count from stock_movements').get() as {
@@ -587,7 +587,7 @@ describe('migration 0007', () => {
     sqlite.pragma('foreign_keys = ON')
     const db = drizzle(sqlite)
 
-    migrate(db, { migrationsFolder: clientMigrationsFolder })
+    runMigrationsWithRecovery(db, clientMigrationsFolder)
 
     sqlite
       .prepare(
@@ -620,7 +620,7 @@ describe('migration 0007', () => {
       .run()
 
     // Upgrading to the facturation migration.
-    migrate(db, { migrationsFolder: sourceMigrations })
+    runMigrationsWithRecovery(db, sourceMigrations)
 
     const tables = sqlite
       .prepare("select name from sqlite_master where type='table' order by name")
@@ -905,7 +905,7 @@ describe('migration 0007', () => {
     )
 
     // The migration is idempotent: running it again changes nothing.
-    migrate(db, { migrationsFolder: sourceMigrations })
+    runMigrationsWithRecovery(db, sourceMigrations)
 
     assert.equal(
       (sqlite.prepare('select count(*) as count from sales').get() as { count: number })

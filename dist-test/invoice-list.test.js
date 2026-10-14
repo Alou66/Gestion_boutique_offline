@@ -19741,7 +19741,6 @@ var productFormSchema = external_exports.discriminatedUnion("isTransformable", [
 var INVOICE_QUANTITY_MAX = 1e6;
 var INVOICE_UNIT_PRICE_MAX = 1e9;
 var INVOICE_ITEMS_MAX = 100;
-var INVOICES_PER_PAGE = 20;
 var INVOICE_MESSAGES = {
   dateRequired: "La date de la facture est obligatoire.",
   dateInvalid: "La date doit \xEAtre au format AAAA-MM-JJ.",
@@ -19757,7 +19756,7 @@ var INVOICE_MESSAGES = {
   formRequired: "La forme est obligatoire.",
   formInvalid: "Forme invalide pour ce produit.",
   quantityRequired: "La quantit\xE9 est obligatoire.",
-  quantityInvalid: "La quantit\xE9 doit \xEAtre un entier sup\xE9rieur \xE0 0.",
+  quantityInvalid: "La quantit\xE9 doit \xEAtre un nombre sup\xE9rieur \xE0 0.",
   quantityTooHigh: `La quantit\xE9 ne peut pas d\xE9passer ${INVOICE_QUANTITY_MAX}.`,
   unitPriceRequired: "Le prix de vente unitaire est obligatoire.",
   unitPriceInvalid: "Le prix de vente unitaire doit \xEAtre un entier sup\xE9rieur ou \xE9gal \xE0 0.",
@@ -19847,23 +19846,26 @@ function paymentStatusTone(status) {
 function saleStatusTone(status) {
   return status === "VALIDEE" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700";
 }
-function buildInvoiceFilters(search, clientSearch, dateFrom, dateTo, paymentStatus) {
+function buildInvoiceFilters(search, clientSearch, status, dateFrom, dateTo, paymentStatus) {
   return {
     search: search.trim() || void 0,
     clientSearch: clientSearch.trim() || void 0,
-    // status: status === 'all' ? null : status,
+    status: status === "all" || status === void 0 ? null : status,
     dateFrom: dateFrom?.trim() || void 0,
     dateTo: dateTo?.trim() || void 0,
     paymentStatus: paymentStatus === "all" || paymentStatus === void 0 ? null : paymentStatus
   };
 }
-function paginateInvoices(sales, page) {
-  const total = sales.length;
-  const totalPages = Math.max(1, Math.ceil(total / INVOICES_PER_PAGE));
+
+// src/lib/pagination.ts
+var PAGINATION_PER_PAGE = 10;
+function paginate(items, page, perPage = PAGINATION_PER_PAGE) {
+  const total = items.length;
+  const totalPages = Math.max(1, Math.ceil(total / perPage));
   const currentPage = Math.min(Math.max(1, page), totalPages);
-  const start = (currentPage - 1) * INVOICES_PER_PAGE;
+  const start = (currentPage - 1) * perPage;
   return {
-    rows: sales.slice(start, start + INVOICES_PER_PAGE),
+    rows: items.slice(start, start + perPage),
     page: currentPage,
     totalPages,
     total
@@ -19948,32 +19950,32 @@ describe3("filtres de la liste des factures", () => {
 });
 describe3("pagination de la liste", () => {
   it("renvoie une page vide quand il n'y a aucune facture", () => {
-    const page = paginateInvoices([], 1);
+    const page = paginate([], 1);
     assert2.deepEqual(page.rows, []);
     assert2.equal(page.page, 1);
     assert2.equal(page.totalPages, 1);
     assert2.equal(page.total, 0);
   });
-  it("d\xE9coupe la liste par pages de vingt factures", () => {
+  it("d\xE9coupe la liste par pages de dix factures", () => {
     const sales = Array.from(
       { length: 45 },
       (_value, index) => buildSale({ id: index + 1, reference: `VTE-${String(index + 1).padStart(6, "0")}` })
     );
-    const first = paginateInvoices(sales, 1);
-    assert2.equal(INVOICES_PER_PAGE, 20);
-    assert2.equal(first.rows.length, 20);
+    const first = paginate(sales, 1);
+    assert2.equal(PAGINATION_PER_PAGE, 10);
+    assert2.equal(first.rows.length, 10);
     assert2.equal(first.rows[0].id, 1);
-    assert2.equal(first.totalPages, 3);
+    assert2.equal(first.totalPages, 5);
     assert2.equal(first.total, 45);
-    assert2.equal(paginateInvoices(sales, 3).rows.length, 5);
-    assert2.equal(paginateInvoices(sales, 3).rows[4].id, 45);
+    assert2.equal(paginate(sales, 5).rows.length, 5);
+    assert2.equal(paginate(sales, 5).rows[4].id, 45);
   });
   it("ram\xE8ne une page hors bornes dans la liste", () => {
     const sales = Array.from({ length: 25 }, (_value, index) => buildSale({ id: index + 1 }));
-    assert2.equal(paginateInvoices(sales, 0).page, 1);
-    assert2.equal(paginateInvoices(sales, -5).page, 1);
-    assert2.equal(paginateInvoices(sales, 99).page, 2);
-    assert2.equal(paginateInvoices(sales, 99).rows.length, 5);
+    assert2.equal(paginate(sales, 0).page, 1);
+    assert2.equal(paginate(sales, -5).page, 1);
+    assert2.equal(paginate(sales, 99).page, 3);
+    assert2.equal(paginate(sales, 99).rows.length, 5);
   });
 });
 describe3("affichage des colonnes de la liste", () => {

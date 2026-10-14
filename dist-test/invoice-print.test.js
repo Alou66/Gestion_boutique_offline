@@ -19756,7 +19756,7 @@ var INVOICE_MESSAGES = {
   formRequired: "La forme est obligatoire.",
   formInvalid: "Forme invalide pour ce produit.",
   quantityRequired: "La quantit\xE9 est obligatoire.",
-  quantityInvalid: "La quantit\xE9 doit \xEAtre un entier sup\xE9rieur \xE0 0.",
+  quantityInvalid: "La quantit\xE9 doit \xEAtre un nombre sup\xE9rieur \xE0 0.",
   quantityTooHigh: `La quantit\xE9 ne peut pas d\xE9passer ${INVOICE_QUANTITY_MAX}.`,
   unitPriceRequired: "Le prix de vente unitaire est obligatoire.",
   unitPriceInvalid: "Le prix de vente unitaire doit \xEAtre un entier sup\xE9rieur ou \xE9gal \xE0 0.",
@@ -20271,6 +20271,33 @@ function getInvoicePrintTitle(reference) {
 function buildInvoicePdfFileName(reference) {
   return `${getInvoicePrintTitle(reference)}.pdf`;
 }
+var PREVIEW_CLOSE_BUTTON = `
+  <style>
+    @media screen {
+      .preview-close {
+        position: fixed;
+        top: 12px;
+        right: 12px;
+        z-index: 1000;
+        padding: 8px 16px;
+        font-size: 13px;
+        font-weight: 600;
+        color: #fff;
+        background: #16a34a;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        box-shadow: 0 2px 8px rgba(0,0,0,.15);
+      }
+      .preview-close:hover { background: #15803d; }
+      .preview-close:focus-visible { outline: 2px solid #15803d; outline-offset: 2px; }
+    }
+    @media print {
+      .preview-close { display: none !important; }
+    }
+  </style>
+  <button class="preview-close" onclick="window.close()">Fermer l'aper\xE7u</button>
+`;
 function buildInvoicePrintHtml(context) {
   const { invoice } = context;
   return `<!DOCTYPE html>
@@ -20281,6 +20308,7 @@ function buildInvoicePrintHtml(context) {
     <style>${PRINT_STYLES}</style>
   </head>
   <body>
+    ${PREVIEW_CLOSE_BUTTON}
     <div class="sheet">
       <div class="copies">
         ${renderInvoiceCopy(context, "client")}

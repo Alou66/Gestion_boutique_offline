@@ -131,6 +131,7 @@ const formSchema = z
 
 const quantitySchema = z
   .number({ error: INVOICE_MESSAGES.quantityRequired })
+  .int(INVOICE_MESSAGES.quantityInvalid)
   .positive(INVOICE_MESSAGES.quantityInvalid)
   .max(INVOICE_QUANTITY_MAX, INVOICE_MESSAGES.quantityTooHigh)
 
@@ -576,10 +577,12 @@ export type PaymentStatusFilter = 'all' | PaymentStatus
  * Les filtres de la liste ne font que transmettre ce que `listInvoices()`
  * sait déjà filtrer : la recherche reste dans le service, jamais dans React.
  */
+export type InvoiceStatusFilter = 'all' | SaleStatus
+
 export function buildInvoiceFilters(
   search: string,
   clientSearch: string,
-  // status: InvoiceStatusFilter,
+  status?: InvoiceStatusFilter,
   dateFrom?: string,
   dateTo?: string,
   paymentStatus?: PaymentStatusFilter,
@@ -587,7 +590,7 @@ export function buildInvoiceFilters(
   return {
     search: search.trim() || undefined,
     clientSearch: clientSearch.trim() || undefined,
-    // status: status === 'all' ? null : status,
+    status: status === 'all' || status === undefined ? null : status,
     dateFrom: dateFrom?.trim() || undefined,
     dateTo: dateTo?.trim() || undefined,
     paymentStatus: paymentStatus === 'all' || paymentStatus === undefined ? null : paymentStatus,

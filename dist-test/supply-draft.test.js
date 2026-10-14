@@ -19759,7 +19759,7 @@ var SUPPLY_MESSAGES = {
   formRequired: "La forme est obligatoire.",
   formInvalid: "Forme invalide pour ce produit.",
   quantityRequired: "La quantit\xE9 est obligatoire.",
-  quantityInvalid: "La quantit\xE9 doit \xEAtre un entier sup\xE9rieur \xE0 0.",
+  quantityInvalid: "La quantit\xE9 doit \xEAtre un nombre sup\xE9rieur \xE0 0.",
   quantityTooHigh: `La quantit\xE9 ne peut pas d\xE9passer ${SUPPLY_QUANTITY_MAX}.`,
   unitPriceRequired: "Le prix d'achat unitaire est obligatoire.",
   unitPriceInvalid: "Le prix d'achat unitaire doit \xEAtre un entier sup\xE9rieur ou \xE9gal \xE0 0.",
@@ -19823,7 +19823,7 @@ function createEmptyDraft() {
   };
 }
 function computeLineTotal(quantity, purchaseUnitPrice) {
-  if (!Number.isInteger(quantity) || !Number.isInteger(purchaseUnitPrice) || quantity < 0 || purchaseUnitPrice < 0) {
+  if (typeof quantity !== "number" || typeof purchaseUnitPrice !== "number" || Number.isNaN(quantity) || Number.isNaN(purchaseUnitPrice) || quantity < 0 || purchaseUnitPrice < 0) {
     return 0;
   }
   return quantity * purchaseUnitPrice;

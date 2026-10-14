@@ -96,6 +96,7 @@ const supplierIdSchema = z
 
 const quantitySchema = z
   .number({ error: SUPPLY_MESSAGES.quantityRequired })
+  .int(SUPPLY_MESSAGES.quantityInvalid)
   .positive(SUPPLY_MESSAGES.quantityInvalid)
   .max(SUPPLY_QUANTITY_MAX, SUPPLY_MESSAGES.quantityTooHigh)
 

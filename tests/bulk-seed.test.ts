@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
-import { eq, sql } from 'drizzle-orm'
+import { sql } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import * as schema from '../electron/database/schema'
 import {
@@ -20,7 +20,6 @@ import {
   generateStockInitialData,
   parseArgs,
 } from '../scripts/bulk-seed'
-import { closeDatabase, initializeDatabase } from '../electron/database/client'
 
 const migrationsFolder = path.join(process.cwd(), 'electron', 'database', 'migrations')
 
@@ -119,7 +118,6 @@ describe('bulk-seed data generators', () => {
   })
 
   it('generates stock data for valid products', () => {
-    const categories = generateCategories(2)
     const mockCategoryIds = [1, 2]
     const products = generateProducts(mockCategoryIds, 10)
     const transformableMap = new Map<number, { primaryForm: string; secondaryForm: string }>()
@@ -147,10 +145,8 @@ describe('bulk-seed data generators', () => {
   })
 
   it('generates supplies for valid entities', () => {
-    const categories = generateCategories(3)
     const mockCategoryIds = [1, 2, 3]
     const products = generateProducts(mockCategoryIds, 10)
-    const suppliers = generateSuppliers(5)
     const supplierIds = [10, 11, 12, 13, 14]
     const productIds = products.map((_, i) => i + 1)
     const productFormMap = new Map<number, { primaryForm: string; secondaryForm: string | null }>()
@@ -158,7 +154,7 @@ describe('bulk-seed data generators', () => {
     let productId = 1
     for (const product of products) {
       productFormMap.set(productId, {
-        primaryForm: product.primaryForm,
+        primaryForm: product.primaryForm ?? '',
         secondaryForm: product.secondaryForm,
       })
       productId++
@@ -181,7 +177,6 @@ describe('bulk-seed data generators', () => {
   })
 
   it('generates invoices for valid entities', () => {
-    const categories = generateCategories(2)
     const mockCategoryIds = [1, 2]
     const products = generateProducts(mockCategoryIds, 10)
     const productFormMap = new Map<number, { primaryForm: string; secondaryForm: string | null }>()
@@ -189,7 +184,7 @@ describe('bulk-seed data generators', () => {
     let productId = 1
     for (const product of products) {
       productFormMap.set(productId, {
-        primaryForm: product.primaryForm,
+        primaryForm: product.primaryForm ?? '',
         secondaryForm: product.secondaryForm,
       })
       productId++
@@ -230,7 +225,6 @@ describe('bulk-seed integration', () => {
     const { db } = tmpDb
 
     const categories = generateCategories(5)
-    let created = 0
 
     for (const cat of categories) {
       try {
@@ -239,7 +233,6 @@ describe('bulk-seed integration', () => {
           createdAt: new Date(),
           updatedAt: new Date(),
         }).run()
-        created++
       } catch {
         // ignore duplicates from previous runs
       }
@@ -253,7 +246,6 @@ describe('bulk-seed integration', () => {
     const { db } = tmpDb
 
     const suppliers = generateSuppliers(5)
-    let created = 0
 
     for (const supplier of suppliers) {
       try {
@@ -266,7 +258,6 @@ describe('bulk-seed integration', () => {
           createdAt: new Date(),
           updatedAt: new Date(),
         }).run()
-        created++
       } catch {
         // ignore duplicates
       }
@@ -280,7 +271,6 @@ describe('bulk-seed integration', () => {
     const { db } = tmpDb
 
     const clients = generateClients(5)
-    let created = 0
 
     for (const client of clients) {
       try {
@@ -293,7 +283,6 @@ describe('bulk-seed integration', () => {
           createdAt: new Date(),
           updatedAt: new Date(),
         }).run()
-        created++
       } catch {
         // ignore duplicates
       }
@@ -345,7 +334,6 @@ describe('bulk-seed integration', () => {
 
     const stockData = generateStockInitialData(productIds, transformableMap, 5)
     const initializedProducts = new Set<number>()
-    let movementCount = 0
 
     for (const stock of stockData) {
       if (initializedProducts.has(stock.productId)) continue
@@ -374,7 +362,6 @@ describe('bulk-seed integration', () => {
           reason: null,
           createdAt: new Date(),
         }).run()
-        movementCount++
       }
 
       initializedProducts.add(stock.productId)

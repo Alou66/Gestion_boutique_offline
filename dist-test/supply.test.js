@@ -5618,7 +5618,7 @@ var stockMovements = sqliteTable(
     form: text("form").notNull(),
     movementType: text("movement_type").$type().notNull(),
     direction: text("direction").$type().notNull(),
-    quantity: integer("quantity").notNull(),
+    quantity: real("quantity").notNull(),
     reason: text("reason"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull().defaultNow()
   },
@@ -5699,7 +5699,7 @@ var supplyItems = sqliteTable(
     supplyId: integer("supply_id").notNull().references(() => supplies.id, { onDelete: "cascade", onUpdate: "cascade" }),
     productId: integer("product_id").notNull().references(() => products.id, { onDelete: "restrict", onUpdate: "cascade" }),
     form: text("form").notNull(),
-    quantity: integer("quantity").notNull(),
+    quantity: real("quantity").notNull(),
     purchaseUnitPrice: integer("purchase_unit_price").notNull(),
     /** Always quantity * purchase_unit_price, recomputed by the service. */
     lineTotal: integer("line_total").notNull()
@@ -5728,12 +5728,12 @@ var transformations = sqliteTable(
     productId: integer("product_id").notNull().references(() => products.id, { onDelete: "restrict", onUpdate: "cascade" }),
     /** Form taken out of the stock (CARTON or SEAU). */
     sourceForm: text("source_form").notNull(),
-    /** Strictly positive whole number of units removed from `source_form`. */
-    sourceQuantity: integer("source_quantity").notNull(),
+    /** Strictly positive number of units removed from `source_form`. */
+    sourceQuantity: real("source_quantity").notNull(),
     /** Form put into the stock, always the other form of the product. */
     destinationForm: text("destination_form").notNull(),
-    /** Strictly positive whole number of units added to `destination_form`. */
-    destinationQuantity: integer("destination_quantity").notNull(),
+    /** Strictly positive number of units added to `destination_form`. */
+    destinationQuantity: real("destination_quantity").notNull(),
     /** Transformation day (local midnight), as typed by the shopkeeper. */
     date: integer("date", { mode: "timestamp" }).notNull(),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull().defaultNow()
@@ -5824,7 +5824,7 @@ var saleItems = sqliteTable(
     saleId: integer("sale_id").notNull().references(() => sales.id, { onDelete: "cascade", onUpdate: "cascade" }),
     productId: integer("product_id").notNull().references(() => products.id, { onDelete: "restrict", onUpdate: "cascade" }),
     form: text("form").notNull(),
-    quantity: integer("quantity").notNull(),
+    quantity: real("quantity").notNull(),
     unitPrice: integer("unit_price").notNull(),
     /** Always quantity * unit_price, recomputed by the service. */
     lineTotal: integer("line_total").notNull()
@@ -25942,7 +25942,7 @@ var STOCK_ERRORS = {
   formsRequired: "La quantit\xE9 de la forme principale est obligatoire.",
   formsMismatch: "Les formes saisies ne correspondent pas aux formes du produit.",
   quantityRequired: "La quantit\xE9 est obligatoire.",
-  quantityInvalid: "La quantit\xE9 doit \xEAtre un entier sup\xE9rieur ou \xE9gal \xE0 0.",
+  quantityInvalid: "La quantit\xE9 doit \xEAtre un nombre sup\xE9rieur \xE0 0.",
   quantityTooHigh: "La quantit\xE9 ne peut pas d\xE9passer 1 000 000.",
   positiveQuantityRequired: "Au moins une forme doit \xEAtre initialis\xE9e avec une quantit\xE9 sup\xE9rieure \xE0 0.",
   alreadyInitialized: "Le stock de ce produit est d\xE9j\xE0 initialis\xE9.",
@@ -26381,14 +26381,14 @@ var SUPPLY_ERRORS = {
   formTooLong: `La forme ne peut pas d\xE9passer ${PRODUCT_FORM_MAX_LENGTH} caract\xE8res.`,
   formInvalid: "Forme invalide pour ce produit.",
   quantityRequired: "La quantit\xE9 est obligatoire.",
-  quantityInvalid: "La quantit\xE9 doit \xEAtre un entier sup\xE9rieur \xE0 0.",
+  quantityInvalid: "La quantit\xE9 doit \xEAtre un nombre sup\xE9rieur \xE0 0.",
   quantityTooHigh: "La quantit\xE9 ne peut pas d\xE9passer 1 000 000.",
   unitPriceRequired: "Le prix d'achat unitaire est obligatoire.",
   unitPriceInvalid: "Le prix d'achat unitaire doit \xEAtre un entier sup\xE9rieur ou \xE9gal \xE0 0.",
   unitPriceTooHigh: "Le prix d'achat unitaire ne peut pas d\xE9passer 1 000 000 000 FCFA.",
   duplicateLine: "Un m\xEAme produit ne peut pas appara\xEEtre deux fois avec la m\xEAme forme. Regroupez les quantit\xE9s sur une seule ligne.",
   notFound: "Approvisionnement introuvable.",
-  supplierNotFound: "Ce fournisseur n\u2019existe pas.",
+  supplierNotFound: "Ce fournisseur n'existe pas.",
   supplierInactive: "Fournisseur inactif : choisissez un fournisseur actif.",
   referenceConflict: "La r\xE9f\xE9rence de l'approvisionnement est d\xE9j\xE0 utilis\xE9e.",
   totalInvalid: "Le total de l'approvisionnement est invalide.",

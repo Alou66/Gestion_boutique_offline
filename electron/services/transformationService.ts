@@ -142,6 +142,7 @@ const formSchema = z
 /** The quantity is always a strictly positive number, never negative. */
 const quantitySchema = z
   .number({ error: TRANSFORMATION_ERRORS.quantityRequired })
+  .int(TRANSFORMATION_ERRORS.quantityInvalid)
   .positive(TRANSFORMATION_ERRORS.quantityInvalid)
   .max(TRANSFORMATION_QUANTITY_MAX, TRANSFORMATION_ERRORS.quantityTooHigh)
 

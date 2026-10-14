@@ -19757,7 +19757,7 @@ var INVOICE_MESSAGES = {
   formRequired: "La forme est obligatoire.",
   formInvalid: "Forme invalide pour ce produit.",
   quantityRequired: "La quantit\xE9 est obligatoire.",
-  quantityInvalid: "La quantit\xE9 doit \xEAtre un entier sup\xE9rieur \xE0 0.",
+  quantityInvalid: "La quantit\xE9 doit \xEAtre un nombre sup\xE9rieur \xE0 0.",
   quantityTooHigh: `La quantit\xE9 ne peut pas d\xE9passer ${INVOICE_QUANTITY_MAX}.`,
   unitPriceRequired: "Le prix de vente unitaire est obligatoire.",
   unitPriceInvalid: "Le prix de vente unitaire doit \xEAtre un entier sup\xE9rieur ou \xE9gal \xE0 0.",
@@ -19830,7 +19830,7 @@ function todayInputValue(now = /* @__PURE__ */ new Date()) {
   return `${year}-${month}-${day}`;
 }
 function computeLineTotal(quantity, unitPrice) {
-  if (!Number.isInteger(quantity) || !Number.isInteger(unitPrice) || quantity < 0 || unitPrice < 0) {
+  if (typeof quantity !== "number" || typeof unitPrice !== "number" || Number.isNaN(quantity) || Number.isNaN(unitPrice) || quantity < 0 || unitPrice < 0) {
     return 0;
   }
   return quantity * unitPrice;

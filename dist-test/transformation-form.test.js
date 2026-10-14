@@ -19763,7 +19763,7 @@ var TRANSFORMATION_MESSAGES = {
   formInvalid: "Forme invalide pour ce produit.",
   sameForm: "La forme de d\xE9part et la forme d'arriv\xE9e doivent \xEAtre diff\xE9rentes.",
   quantityRequired: "La quantit\xE9 est obligatoire.",
-  quantityInvalid: "La quantit\xE9 doit \xEAtre un entier sup\xE9rieur \xE0 0.",
+  quantityInvalid: "La quantit\xE9 doit \xEAtre un nombre sup\xE9rieur \xE0 0.",
   quantityTooHigh: `La quantit\xE9 ne peut pas d\xE9passer ${TRANSFORMATION_QUANTITY_MAX}.`,
   conversionInvalid: "Cette quantit\xE9 ne peut pas \xEAtre convertie exactement : aucune quantit\xE9 fractionnaire n'est accept\xE9e.",
   insufficientStock: "Stock insuffisant pour cette transformation.",

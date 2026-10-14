@@ -492,11 +492,6 @@ function generateInvoices(
   return invoices
 }
 
-function createTempDatabase(): string {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gestion-boutique-seed-'))
-  return path.join(tmpDir, 'seed-test.db')
-}
-
 function setupDatabase(dbPath: string): { sqlite: Database.Database; db: ReturnType<typeof drizzle> } {
   const sqlite = new Database(dbPath)
   sqlite.pragma('foreign_keys = ON')
@@ -681,7 +676,7 @@ async function bulkSeed(
           purchasePrice: product.purchasePrice,
           salePrice: product.salePrice,
           isTransformable: product.isTransformable,
-          primaryForm: product.primaryForm,
+          primaryForm: product.primaryForm ?? null,
           secondaryForm: product.secondaryForm,
           conversionQuantity: product.conversionQuantity,
           secondarySalePrice: product.secondarySalePrice,
@@ -693,13 +688,13 @@ async function bulkSeed(
         result.products++
 
         productFormMap.set(inserted.id, {
-          primaryForm: product.primaryForm,
+          primaryForm: product.primaryForm ?? '',
           secondaryForm: product.secondaryForm,
         })
 
         if (product.isTransformable && product.primaryForm && product.secondaryForm) {
           transformableProductMap.set(inserted.id, {
-            primaryForm: product.primaryForm,
+            primaryForm: product.primaryForm ?? '',
             secondaryForm: product.secondaryForm,
           })
         }

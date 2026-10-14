@@ -41,7 +41,7 @@ function Invoices() {
 
     try {
       const allInvoices = await invoiceService.list(
-        buildInvoiceFilters(search, clientSearch, dateFrom, dateTo, paymentStatusFilter),
+        buildInvoiceFilters(search, clientSearch, 'all', dateFrom, dateTo, paymentStatusFilter),
       )
       setInvoices(allInvoices)
     } catch {
