@@ -459,9 +459,8 @@ const PRINT_STYLES = `
   .amount-words .lead { margin: 0; font-size: 8px; color: #374151; }
   .amount-words .value {
     margin: 0.8mm 0 0;
-    font-size: 10px;
+    font-size: 7px;
     font-weight: 400;
-    letter-spacing: 0.5px;
     text-transform: uppercase;
   }
   .status {
@@ -803,7 +802,12 @@ function renderVisas(): string {
 function renderAmountInWords(invoice: SaleDetail): string {
   return `
     <div class="amount-words">
-      <p class="lead">Arrêtée la présente facture à la somme de :</p>
+      <p class="lead">
+        Arrêtée la présente facture à la somme de :
+        <span style="font-weight: bold; font-size: 11px;">
+          ${escapeHtml(formatAmount(invoice.totalAmount))} FCFA
+        </span>
+      </p>     
       <p class="value">${escapeHtml(formatAmountInLetters(invoice.totalAmount))}</p>
     </div>`
 }
