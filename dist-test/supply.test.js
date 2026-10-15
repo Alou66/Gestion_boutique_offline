@@ -25943,6 +25943,7 @@ var STOCK_ERRORS = {
   formsMismatch: "Les formes saisies ne correspondent pas aux formes du produit.",
   quantityRequired: "La quantit\xE9 est obligatoire.",
   quantityInvalid: "La quantit\xE9 doit \xEAtre un nombre sup\xE9rieur \xE0 0.",
+  quantityNotHalfUnit: "La quantit\xE9 doit \xEAtre un multiple de 0,5 (0,5, 1, 1,5, 2\u2026).",
   quantityTooHigh: "La quantit\xE9 ne peut pas d\xE9passer 1 000 000.",
   positiveQuantityRequired: "Au moins une forme doit \xEAtre initialis\xE9e avec une quantit\xE9 sup\xE9rieure \xE0 0.",
   alreadyInitialized: "Le stock de ce produit est d\xE9j\xE0 initialis\xE9.",
@@ -25973,8 +25974,8 @@ var productIdSchema2 = external_exports.number({ error: STOCK_ERRORS.productNotF
 var formSchema = external_exports.string({ error: STOCK_ERRORS.formRequired }).transform(normalizeFormName).pipe(
   external_exports.string().min(1, STOCK_ERRORS.formRequired).max(PRODUCT_FORM_MAX_LENGTH, STOCK_ERRORS.formTooLong)
 );
-var initialQuantitySchema = external_exports.number({ error: STOCK_ERRORS.quantityRequired }).int(STOCK_ERRORS.quantityInvalid).min(0, STOCK_ERRORS.quantityInvalid).max(STOCK_QUANTITY_MAX, STOCK_ERRORS.quantityTooHigh);
-var movementQuantitySchema = external_exports.number({ error: STOCK_ERRORS.quantityRequired }).int(STOCK_ERRORS.quantityInvalid).positive(STOCK_ERRORS.quantityInvalid).max(STOCK_QUANTITY_MAX, STOCK_ERRORS.quantityTooHigh);
+var initialQuantitySchema = external_exports.number({ error: STOCK_ERRORS.quantityRequired }).min(0, STOCK_ERRORS.quantityInvalid).max(STOCK_QUANTITY_MAX, STOCK_ERRORS.quantityTooHigh).refine((value) => Number.isInteger(value * 2), STOCK_ERRORS.quantityNotHalfUnit);
+var movementQuantitySchema = external_exports.number({ error: STOCK_ERRORS.quantityRequired }).positive(STOCK_ERRORS.quantityInvalid).max(STOCK_QUANTITY_MAX, STOCK_ERRORS.quantityTooHigh).refine((value) => Number.isInteger(value * 2), STOCK_ERRORS.quantityNotHalfUnit);
 var directionSchema = external_exports.enum(["IN", "OUT"], {
   error: STOCK_ERRORS.directionRequired
 });
@@ -26382,6 +26383,7 @@ var SUPPLY_ERRORS = {
   formInvalid: "Forme invalide pour ce produit.",
   quantityRequired: "La quantit\xE9 est obligatoire.",
   quantityInvalid: "La quantit\xE9 doit \xEAtre un nombre sup\xE9rieur \xE0 0.",
+  quantityNotHalfUnit: "La quantit\xE9 doit \xEAtre un multiple de 0,5 (0,5, 1, 1,5, 2\u2026).",
   quantityTooHigh: "La quantit\xE9 ne peut pas d\xE9passer 1 000 000.",
   unitPriceRequired: "Le prix d'achat unitaire est obligatoire.",
   unitPriceInvalid: "Le prix d'achat unitaire doit \xEAtre un entier sup\xE9rieur ou \xE9gal \xE0 0.",
@@ -26443,7 +26445,7 @@ var productIdSchema3 = external_exports.number({ error: SUPPLY_ERRORS.productNot
 var formSchema2 = external_exports.string({ error: SUPPLY_ERRORS.formRequired }).transform(normalizeFormName).pipe(
   external_exports.string().min(1, SUPPLY_ERRORS.formRequired).max(PRODUCT_FORM_MAX_LENGTH, SUPPLY_ERRORS.formTooLong)
 );
-var quantitySchema = external_exports.number({ error: SUPPLY_ERRORS.quantityRequired }).int(SUPPLY_ERRORS.quantityInvalid).positive(SUPPLY_ERRORS.quantityInvalid).max(SUPPLY_QUANTITY_MAX, SUPPLY_ERRORS.quantityTooHigh);
+var quantitySchema = external_exports.number({ error: SUPPLY_ERRORS.quantityRequired }).positive(SUPPLY_ERRORS.quantityInvalid).max(SUPPLY_QUANTITY_MAX, SUPPLY_ERRORS.quantityTooHigh).refine((value) => Number.isInteger(value * 2), SUPPLY_ERRORS.quantityNotHalfUnit);
 var unitPriceSchema = external_exports.number({ error: SUPPLY_ERRORS.unitPriceRequired }).int(SUPPLY_ERRORS.unitPriceInvalid).min(0, SUPPLY_ERRORS.unitPriceInvalid).max(SUPPLY_UNIT_PRICE_MAX, SUPPLY_ERRORS.unitPriceTooHigh);
 var supplyItemInputSchema = external_exports.object({
   productId: productIdSchema3,
@@ -27342,11 +27344,7 @@ describe3("module Approvisionnement", () => {
       );
       assert2.equal(supplyCount(), 0);
     });
-    it("refuse une quantit\xE9 non enti\xE8re ou absente", () => {
-      expectSupplyError(
-        "quantityInvalid",
-        () => createSupply({ date: "2026-10-04", items: [line(simpleProduct, "SAC", 1.5, 2500)] })
-      );
+    it("refuse une quantit\xE9 absente", () => {
       expectSupplyError(
         "quantityRequired",
         () => createSupply({
@@ -27362,6 +27360,19 @@ describe3("module Approvisionnement", () => {
         })
       );
       assert2.equal(supplyCount(), 0);
+    });
+    it("accepte une quantit\xE9 demi-unit\xE9 et refute les non-multiples de 0,5", () => {
+      createSupply({ date: "2026-10-04", items: [line(simpleProduct, "SAC", 1.5, 2500)] });
+      assert2.equal(supplyCount(), 1);
+      expectSupplyError(
+        "quantityNotHalfUnit",
+        () => createSupply({ date: "2026-10-04", items: [line(simpleProduct, "SAC", 1.25, 2500)] })
+      );
+      expectSupplyError(
+        "quantityNotHalfUnit",
+        () => createSupply({ date: "2026-10-04", items: [line(simpleProduct, "SAC", 0.75, 2500)] })
+      );
+      assert2.equal(supplyCount(), 1);
     });
     it("refuse un prix n\xE9gatif ou invalide et accepte 0", () => {
       expectSupplyError(

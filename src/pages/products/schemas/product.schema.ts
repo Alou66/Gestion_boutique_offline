@@ -162,7 +162,7 @@ export function parseNumberField(rawValue: string): number | undefined {
     return undefined
   }
 
-  return Number(trimmed)
+  return Number(trimmed.replace(',', '.'))
 }
 
 /** Shapes the validated form data into the payload expected by the main process. */

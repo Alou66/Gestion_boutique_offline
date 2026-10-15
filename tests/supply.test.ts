@@ -524,11 +524,7 @@ describe('module Approvisionnement', () => {
       assert.equal(supplyCount(), 0)
     })
 
-    it('refuse une quantité non entière ou absente', () => {
-      expectSupplyError('quantityInvalid', () =>
-        createSupply({ date: '2026-10-04', items: [line(simpleProduct, 'SAC', 1.5, 2_500)] }),
-      )
-
+    it('refuse une quantité absente', () => {
       expectSupplyError('quantityRequired', () =>
         createSupply({
           date: '2026-10-04',
@@ -544,6 +540,21 @@ describe('module Approvisionnement', () => {
       )
 
       assert.equal(supplyCount(), 0)
+    })
+
+    it('accepte une quantité demi-unité et refute les non-multiples de 0,5', () => {
+      createSupply({ date: '2026-10-04', items: [line(simpleProduct, 'SAC', 1.5, 2_500)] })
+
+      assert.equal(supplyCount(), 1)
+
+      expectSupplyError('quantityNotHalfUnit', () =>
+        createSupply({ date: '2026-10-04', items: [line(simpleProduct, 'SAC', 1.25, 2_500)] }),
+      )
+      expectSupplyError('quantityNotHalfUnit', () =>
+        createSupply({ date: '2026-10-04', items: [line(simpleProduct, 'SAC', 0.75, 2_500)] }),
+      )
+
+      assert.equal(supplyCount(), 1)
     })
 
     it('refuse un prix négatif ou invalide et accepte 0', () => {

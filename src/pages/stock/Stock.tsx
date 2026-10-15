@@ -7,6 +7,7 @@ import ConfirmDialog from '../categories/ConfirmDialog'
 import StockAdjustForm from './StockAdjustForm'
 import StockHistory from './StockHistory'
 import StockInitializeForm from './StockInitializeForm'
+import StockInitializeBatchForm from './StockInitializeBatchForm'
 import {
   formatQuantityForForm,
   formatRowForms,
@@ -57,6 +58,9 @@ function Stock() {
   } | null>(null)
   const [isHistoryLoading, setIsHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState<string | null>(null)
+  const [isBatchOpen, setIsBatchOpen] = useState(false)
+  const [isBatchSubmitting, setIsBatchSubmitting] = useState(false)
+  const [batchError, setBatchError] = useState<string | null>(null)
 
   const loadStocks = useCallback(async () => {
     setIsLoading(true)
@@ -87,55 +91,95 @@ function Stock() {
     setCurrentPage(1)
   }, [search, categorySearch])
 
-  /** Groups the rows by product: the page works product by product. */
-  const targets = useMemo<ProductTarget[]>(() => {
-    const byProduct = new Map<number, ProductTarget>()
+   /** Groups the rows by product: the page works product by product. */
+   const targets = useMemo<ProductTarget[]>(() => {
+     const byProduct = new Map<number, ProductTarget>()
 
-    for (const level of levels) {
-      const target = byProduct.get(level.productId) ?? {
-        productId: level.productId,
-        productName: level.productName,
-        forms: [],
-        levels: [],
-      }
+     for (const level of levels) {
+       const target = byProduct.get(level.productId) ?? {
+         productId: level.productId,
+         productName: level.productName,
+         forms: [],
+         levels: [],
+       }
 
-      target.levels.push(level)
+       target.levels.push(level)
 
-      if (!level.isLegacyForm) {
-        target.forms.push(level.form)
-      }
+       if (!level.isLegacyForm) {
+         target.forms.push(level.form)
+       }
 
-      byProduct.set(level.productId, target)
-    }
+       byProduct.set(level.productId, target)
+     }
 
-    return [...byProduct.values()]
-  }, [levels])
+     return [...byProduct.values()]
+   }, [levels])
+
+   const batchTargets = useMemo<ProductTarget[]>(() => {
+     return targets.filter((target) => {
+       // Product must be active (all forms active)
+       const isActive = target.levels.every((level) => level.isProductActive)
+       // Product must have no movements (all forms have no movements)
+       const hasNoMovements = target.levels.every((level) => !level.hasMovements)
+       return isActive && hasNoMovements
+     })
+   }, [targets])
 
   const page = useMemo<Page<ProductTarget>>(() => paginate(targets, currentPage), [
     targets,
     currentPage,
   ])
 
-  const closeForms = () => {
-    setInitializing(null)
-    setAdjusting(null)
-    setPendingInitialize(null)
-    setFormError(null)
-  }
+   const closeForms = () => {
+     setInitializing(null)
+     setAdjusting(null)
+     setPendingInitialize(null)
+     setFormError(null)
+   }
 
-  const openInitializeForm = (target: ProductTarget) => {
-    setActionError(null)
-    setAdjusting(null)
-    setFormError(null)
-    setInitializing(target)
-  }
+   const closeBatchForm = () => {
+     setIsBatchOpen(false)
+     setBatchError(null)
+   }
 
-  const openAdjustForm = (target: ProductTarget) => {
-    setActionError(null)
-    setInitializing(null)
-    setFormError(null)
-    setAdjusting(target)
-  }
+   const openBatchForm = () => {
+     setActionError(null)
+     setBatchError(null)
+     setIsBatchOpen(true)
+   }
+
+   const handleBatchSubmit = async (batches: { productId: number; quantities: StockFormInput[] }[]) => {
+     setIsBatchSubmitting(true)
+     setBatchError(null)
+
+     try {
+       await stockService.initializeBatch(batches)
+       closeBatchForm()
+       await loadStocks()
+     } catch (error) {
+       setBatchError(error instanceof Error ? error.message : STOCK_MESSAGES.unexpected)
+     } finally {
+       setIsBatchSubmitting(false)
+     }
+   }
+
+   const openInitializeForm = (target: ProductTarget) => {
+     setActionError(null)
+     setAdjusting(null)
+     setPendingInitialize(null)
+     setFormError(null)
+     setInitializing(target)
+     setIsBatchOpen(false)
+   }
+
+   const openAdjustForm = (target: ProductTarget) => {
+     setActionError(null)
+     setPendingInitialize(null)
+     setInitializing(null)
+     setFormError(null)
+     setAdjusting(target)
+     setIsBatchOpen(false)
+   }
 
   const loadHistory = async (target: { productId: number; productName: string }) => {
     setHistoryError(null)
@@ -219,11 +263,19 @@ function Stock() {
     setIsHistoryLoading(false)
   }
 
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold">Stock</h1>
-      </div>
+   return (
+     <div className="space-y-6">
+       <div className="flex flex-wrap items-center justify-between gap-4">
+           <h1 className="text-2xl font-bold">Stock</h1>
+           <button
+             type="button"
+             onClick={openBatchForm}
+             disabled={isSubmitting || isBatchOpen}
+             className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+           >
+             Initialisation groupée
+           </button>
+       </div>
 
       {actionError && (
         <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">{actionError}</p>
@@ -288,18 +340,27 @@ function Stock() {
         />
       )}
 
-      {history && (
-        <StockHistory
-          productName={history.productName}
-          movements={history.movements}
-          isLoading={isHistoryLoading}
-          error={historyError}
-          onClose={() => {
-            setHistory(null)
-            setHistoryError(null)
-          }}
-        />
-      )}
+       {history && (
+         <StockHistory
+           productName={history.productName}
+           movements={history.movements}
+           isLoading={isHistoryLoading}
+           error={historyError}
+           onClose={() => {
+             setHistory(null)
+             setHistoryError(null)
+           }}
+         />
+       )}
+       {isBatchOpen && (
+         <StockInitializeBatchForm
+           targets={batchTargets}
+           isSubmitting={isBatchSubmitting}
+           error={batchError}
+           onSubmit={handleBatchSubmit}
+           onCancel={closeBatchForm}
+         />
+       )}
 
       <div className="overflow-hidden rounded-lg border bg-white shadow">
         <table className="min-w-full divide-y divide-gray-200">

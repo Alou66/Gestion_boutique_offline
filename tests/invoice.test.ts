@@ -518,15 +518,12 @@ describe('module Facturation', () => {
       assert.equal(balanceOf(transformableProduct.id, 'CARTON'), 8)
     })
 
-    it('refuse une quantité nulle, négative, décimale ou absente', () => {
+    it('refuse une quantité nulle, négative ou absente', () => {
       expectInvoiceError('quantityInvalid', () =>
         createInvoice({ items: [line(simpleProduct, 'SAC', 0, 100)] }),
       )
       expectInvoiceError('quantityInvalid', () =>
         createInvoice({ items: [line(simpleProduct, 'SAC', -5, 100)] }),
-      )
-      expectInvoiceError('quantityInvalid', () =>
-        createInvoice({ items: [line(simpleProduct, 'SAC', 1.5, 100)] }),
       )
       expectInvoiceError('quantityRequired', () =>
         createInvoice({
@@ -546,6 +543,22 @@ describe('module Facturation', () => {
 
       assert.equal(invoiceCount(), 0)
       assert.equal(movementCount(), 3)
+    })
+
+    it('accepte une quantité demi-unité et refute les non-multiples de 0,5', () => {
+      createInvoice({ items: [line(simpleProduct, 'SAC', 1.5, 100)] })
+
+      assert.equal(balanceOf(simpleProduct.id, 'SAC'), 18.5)
+      assert.equal(invoiceCount(), 1)
+
+      expectInvoiceError('quantityNotHalfUnit', () =>
+        createInvoice({ items: [line(simpleProduct, 'SAC', 1.25, 100)] }),
+      )
+      expectInvoiceError('quantityNotHalfUnit', () =>
+        createInvoice({ items: [line(simpleProduct, 'SAC', 0.75, 100)] }),
+      )
+
+      assert.equal(invoiceCount(), 1)
     })
 
     it('refuse un prix négatif, décimal ou absent quand le produit n\'en a pas', () => {
@@ -2112,6 +2125,57 @@ describe('module Facturation', () => {
       const next = createInvoice({ items: [line(simpleProduct, 'SAC', 1, 2_500)] })
 
       assert.equal(next.reference, 'VTE-000002')
+    })
+  })
+
+  describe('horodatage de création', () => {
+    it('enregistre l’heure exacte de création dans createdAt', () => {
+      const before = Math.floor(Date.now() / 1000) * 1000
+      const invoice = createInvoice({ items: [line(simpleProduct, 'SAC', 1, 100)] })
+      const after = Math.floor(Date.now() / 1000) * 1000
+
+      const createdMs = Math.floor(invoice.createdAt.getTime() / 1000) * 1000
+
+      assert.equal(createdMs >= before, true, 'createdAt doit être >= à l’instant avant création')
+      assert.equal(createdMs <= after, true, 'createdAt doit être <= à l’instant après création')
+    })
+
+    it('conserve l’heure de création après réouverture de la base', () => {
+      const invoice = createInvoice({ items: [line(simpleProduct, 'SAC', 1, 100)] })
+      const savedCreatedAt = invoice.createdAt.getTime()
+
+      reopenTestDatabase()
+
+      const reread = getInvoiceById(invoice.id)
+
+      assert.equal(reread.createdAt.getTime(), savedCreatedAt)
+      // L’heure est identique, pas minuit.
+      assert.equal(reread.createdAt.getHours(), invoice.createdAt.getHours())
+      assert.equal(reread.createdAt.getMinutes(), invoice.createdAt.getMinutes())
+    })
+
+    it('conserve l’heure de création après modification de la facture', () => {
+      const invoice = createInvoice({ items: [line(simpleProduct, 'SAC', 1, 100)] })
+      const savedCreatedAt = invoice.createdAt.getTime()
+
+      const updated = updateInvoice(invoice.id, {
+        date: '2026-10-06',
+        items: [line(simpleProduct, 'SAC', 2, 100)],
+      })
+
+      assert.equal(updated.createdAt.getTime(), savedCreatedAt)
+    })
+
+    it('gère une ancienne facture dont createdAt pourrait être à minuit', () => {
+      const invoice = createInvoice({ items: [line(simpleProduct, 'SAC', 1, 100)] })
+      // Simule une facture ancienne où createdAt est à minuit (données héritées).
+      execSql(`UPDATE sales SET created_at = ${Math.floor(new Date(2026, 9, 5, 0, 0).getTime() / 1000)} WHERE id = ${invoice.id}`)
+      const reread = getInvoiceById(invoice.id)
+
+      assert.equal(reread.createdAt.getHours(), 0, 'createdAt peut être minuit pour les anciennes factures')
+      assert.equal(reread.createdAt.getMinutes(), 0)
+      // La saleDate (jour saisi) est intacte et non affectée par la modification de createdAt.
+      assert.equal(reread.saleDate.getDate(), invoice.saleDate.getDate())
     })
   })
 })

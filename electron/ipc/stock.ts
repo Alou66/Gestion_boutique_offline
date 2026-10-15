@@ -4,6 +4,7 @@ import {
   getProductFormStock,
   getProductStock,
   initializeStock,
+  initializeBatch,
   listProductMovements,
   listStocks,
   STOCK_ERRORS,
@@ -104,6 +105,20 @@ export function registerStockIpcHandlers(): void {
       } catch (error) {
         return toFailure(error, STOCK_ERRORS.unexpected)
       }
+    },
+  )
+
+  ipcMain.handle(
+    'stock:initialize-batch',
+    (
+      _event,
+      inputs: StockInitializeInput[],
+    ): StockResult<StockFormLevel[][]> => {
+       try {
+         return toSuccess(initializeBatch(inputs))
+       } catch (error) {
+         return toFailure(error, STOCK_ERRORS.unexpected)
+       }
     },
   )
 }

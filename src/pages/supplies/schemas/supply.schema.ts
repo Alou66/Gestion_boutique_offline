@@ -34,6 +34,7 @@ export const SUPPLY_MESSAGES = {
   formInvalid: 'Forme invalide pour ce produit.',
   quantityRequired: 'La quantité est obligatoire.',
   quantityInvalid: 'La quantité doit être un nombre supérieur à 0.',
+  quantityNotHalfUnit: 'La quantité doit être un multiple de 0,5 (0,5, 1, 1,5, 2…).',
   quantityTooHigh: `La quantité ne peut pas dépasser ${SUPPLY_QUANTITY_MAX}.`,
   unitPriceRequired: "Le prix d'achat unitaire est obligatoire.",
   unitPriceInvalid: "Le prix d'achat unitaire doit être un entier supérieur ou égal à 0.",
@@ -96,9 +97,9 @@ const supplierIdSchema = z
 
 const quantitySchema = z
   .number({ error: SUPPLY_MESSAGES.quantityRequired })
-  .int(SUPPLY_MESSAGES.quantityInvalid)
   .positive(SUPPLY_MESSAGES.quantityInvalid)
   .max(SUPPLY_QUANTITY_MAX, SUPPLY_MESSAGES.quantityTooHigh)
+  .refine((value) => Number.isInteger(value * 2), SUPPLY_MESSAGES.quantityNotHalfUnit)
 
 const unitPriceSchema = z
   .number({ error: SUPPLY_MESSAGES.unitPriceRequired })

@@ -146,11 +146,11 @@ function StockAdjustForm({
           <input
             id="stock-adjust-quantity"
             name="quantity"
-            type="number"
-            inputMode="numeric"
+            type="text"
+            inputMode="decimal"
             min={0.01}
             max={STOCK_QUANTITY_MAX}
-            step={0.01}
+            step={0.5}
             value={quantity}
             onChange={(event) => setQuantity(event.target.value)}
             disabled={isSubmitting}

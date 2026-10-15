@@ -19757,6 +19757,7 @@ var INVOICE_MESSAGES = {
   formInvalid: "Forme invalide pour ce produit.",
   quantityRequired: "La quantit\xE9 est obligatoire.",
   quantityInvalid: "La quantit\xE9 doit \xEAtre un nombre sup\xE9rieur \xE0 0.",
+  quantityNotHalfUnit: "La quantit\xE9 doit \xEAtre un multiple de 0,5 (0,5, 1, 1,5, 2\u2026).",
   quantityTooHigh: `La quantit\xE9 ne peut pas d\xE9passer ${INVOICE_QUANTITY_MAX}.`,
   unitPriceRequired: "Le prix de vente unitaire est obligatoire.",
   unitPriceInvalid: "Le prix de vente unitaire doit \xEAtre un entier sup\xE9rieur ou \xE9gal \xE0 0.",
@@ -19793,7 +19794,7 @@ var invoiceDateSchema = external_exports.string({ error: INVOICE_MESSAGES.dateRe
 var clientIdSchema = external_exports.number({ error: INVOICE_MESSAGES.clientRequired }).int(INVOICE_MESSAGES.clientRequired).positive(INVOICE_MESSAGES.clientRequired).nullable();
 var productIdSchema = external_exports.number({ error: INVOICE_MESSAGES.productRequired }).int(INVOICE_MESSAGES.productRequired).positive(INVOICE_MESSAGES.productRequired);
 var formSchema = external_exports.string({ error: INVOICE_MESSAGES.formRequired }).trim().min(1, INVOICE_MESSAGES.formRequired).transform(normalizeFormLabel);
-var quantitySchema = external_exports.number({ error: INVOICE_MESSAGES.quantityRequired }).int(INVOICE_MESSAGES.quantityInvalid).positive(INVOICE_MESSAGES.quantityInvalid).max(INVOICE_QUANTITY_MAX, INVOICE_MESSAGES.quantityTooHigh);
+var quantitySchema = external_exports.number({ error: INVOICE_MESSAGES.quantityRequired }).positive(INVOICE_MESSAGES.quantityInvalid).max(INVOICE_QUANTITY_MAX, INVOICE_MESSAGES.quantityTooHigh).refine((value) => Number.isInteger(value * 2), INVOICE_MESSAGES.quantityNotHalfUnit);
 var unitPriceSchema = external_exports.number({ error: INVOICE_MESSAGES.unitPriceRequired }).int(INVOICE_MESSAGES.unitPriceInvalid).min(0, INVOICE_MESSAGES.unitPriceInvalid).max(INVOICE_UNIT_PRICE_MAX, INVOICE_MESSAGES.unitPriceTooHigh);
 var invoiceItemFormSchema = external_exports.object({
   productId: productIdSchema,
@@ -19840,6 +19841,114 @@ var INVOICE_COPY_LABELS = {
   client: "\xC0 remettre au client",
   boutique: "\xC0 conserver par la boutique"
 };
+var MM_TO_PX = 96 / 25.4;
+var LINE_HEIGHT = 1.35;
+var PAGE_MARGIN_MM = 10;
+var PRINTABLE_WIDTH_MM = 297 - 2 * PAGE_MARGIN_MM;
+var PRINTABLE_HEIGHT_MM = 210 - 2 * PAGE_MARGIN_MM;
+var PRINTABLE_WIDTH_PX = PRINTABLE_WIDTH_MM * MM_TO_PX;
+var PRINTABLE_HEIGHT_PX = PRINTABLE_HEIGHT_MM * MM_TO_PX;
+var COPY_PADDING_MM = 5;
+var DIVIDER_MARGIN_MM = 3;
+var PARTIES_MARGIN_BOTTOM_MM = 2.5;
+var COPY_HEAD_MARGIN_BOTTOM_MM = 2.5;
+var COPY_HEAD_PADDING_BOTTOM_MM = 1.5;
+var COPY_LABEL_MARGIN_BOTTOM_MM = 1.5;
+var META_MARGIN_BOTTOM_MM = 2.5;
+var ITEMS_PADDING_MM = 1;
+var AMOUNTS_MARGIN_TOP_MM = 2.5;
+var VISAS_MARGIN_TOP_MM = 2.5;
+var AMOUNT_WORDS_MARGIN_TOP_MM = 2.5;
+var AMOUNT_WORDS_VALUE_MARGIN_TOP_MM = 0.8;
+var FONT_SIZE_COPY_LABEL = 7.5;
+var FONT_SIZE_COPY_HEAD = 14;
+var FONT_SIZE_PARTY_LABEL = 8;
+var FONT_SIZE_PARTY_VALUE = 12;
+var FONT_SIZE_PARTY_DETAIL = 10;
+var FONT_SIZE_META_TD = 8;
+var FONT_SIZE_ITEMS_HEADER = 8.5;
+var FONT_SIZE_ITEMS_CELL = 9.5;
+var FONT_SIZE_AMOUNTS_TH = 7;
+var FONT_SIZE_AMOUNTS_TD = 9;
+var FONT_SIZE_AMOUNT_WORDS_LEAD = 8;
+var FONT_SIZE_AMOUNT_WORDS_VALUE = 10;
+var BORDER_PX = 1;
+var SAFETY_ROWS = 1;
+function rowContentHeight(wrapFactor) {
+  return FONT_SIZE_ITEMS_CELL * LINE_HEIGHT * wrapFactor;
+}
+function rowPaddingPx() {
+  return 2 * ITEMS_PADDING_MM * MM_TO_PX;
+}
+function itemRowHeight(wrapFactor) {
+  return rowContentHeight(wrapFactor) + rowPaddingPx();
+}
+var ITEMS_HEADER_H = FONT_SIZE_ITEMS_HEADER * LINE_HEIGHT + 2 * ITEMS_PADDING_MM * MM_TO_PX;
+var COPY_HEAD_H = FONT_SIZE_COPY_HEAD * LINE_HEIGHT + COPY_HEAD_PADDING_BOTTOM_MM * MM_TO_PX + COPY_HEAD_MARGIN_BOTTOM_MM * MM_TO_PX + BORDER_PX * 1.5;
+var COPY_LABEL_H = FONT_SIZE_COPY_LABEL * LINE_HEIGHT + COPY_LABEL_MARGIN_BOTTOM_MM * MM_TO_PX;
+var META_H = FONT_SIZE_META_TD * LINE_HEIGHT + 2 * ITEMS_PADDING_MM * MM_TO_PX + META_MARGIN_BOTTOM_MM * MM_TO_PX;
+var AMOUNTS_H = AMOUNTS_MARGIN_TOP_MM * MM_TO_PX + (FONT_SIZE_AMOUNTS_TH * LINE_HEIGHT + 2 * ITEMS_PADDING_MM * MM_TO_PX) + (FONT_SIZE_AMOUNTS_TD * LINE_HEIGHT + 2 * ITEMS_PADDING_MM * MM_TO_PX);
+var VISAS_H = VISAS_MARGIN_TOP_MM * MM_TO_PX + (FONT_SIZE_AMOUNTS_TH * LINE_HEIGHT + 2 * ITEMS_PADDING_MM * MM_TO_PX) + 13 * MM_TO_PX;
+var AMOUNT_WORDS_H = AMOUNT_WORDS_MARGIN_TOP_MM * MM_TO_PX + FONT_SIZE_AMOUNT_WORDS_LEAD * LINE_HEIGHT + FONT_SIZE_AMOUNT_WORDS_VALUE * LINE_HEIGHT + AMOUNT_WORDS_VALUE_MARGIN_TOP_MM * MM_TO_PX;
+var LAST_PAGE_FOOTER_H = AMOUNTS_H + VISAS_H + AMOUNT_WORDS_H;
+var DESIGNATION_COL_WIDTH_PX = (() => {
+  const dividerW = BORDER_PX + 2 * DIVIDER_MARGIN_MM * MM_TO_PX;
+  const copyW = (PRINTABLE_WIDTH_PX - dividerW) / 2;
+  const contentW = copyW - 2 * COPY_PADDING_MM * MM_TO_PX;
+  return 0.52 * contentW;
+})();
+var CHARS_PER_LINE = Math.max(
+  10,
+  Math.floor(DESIGNATION_COL_WIDTH_PX / (FONT_SIZE_ITEMS_CELL * 0.55))
+);
+function calculatePartiesHeight(shop, client) {
+  const labelH = FONT_SIZE_PARTY_LABEL * LINE_HEIGHT;
+  const valueH = FONT_SIZE_PARTY_VALUE * LINE_HEIGHT;
+  const detailH = FONT_SIZE_PARTY_DETAIL * LINE_HEIGHT;
+  const partyPaddingV = 2 * 1.5 * MM_TO_PX;
+  const partyBorder = BORDER_PX * 2;
+  const shopDetails = (shop?.address ? 1 : 0) + (shop?.phone ? 1 : 0) + (shop?.phone2 ? 1 : 0) + (shop?.ninea ? 1 : 0);
+  const clientDetails = (client?.phone ? 1 : 0) + (client?.address ? 1 : 0);
+  const shopH = labelH + valueH + shopDetails * detailH + partyPaddingV + partyBorder;
+  const clientH = labelH + valueH + clientDetails * detailH + partyPaddingV + partyBorder;
+  return Math.max(shopH, clientH) + PARTIES_MARGIN_BOTTOM_MM * MM_TO_PX;
+}
+function calculateWrapFactor(items) {
+  if (items.length === 0) return 1;
+  let maxLines = 1;
+  for (const item of items) {
+    const text = `${item.form} ${item.productName}`;
+    const lines = Math.ceil(text.length / CHARS_PER_LINE);
+    if (lines > maxLines) maxLines = lines;
+  }
+  return maxLines;
+}
+function calculateItemsPerPage(context, isLast) {
+  const { shop, invoice, client } = context;
+  const partiesH = calculatePartiesHeight(shop, client);
+  const fixedOverhead = COPY_LABEL_H + COPY_HEAD_H + partiesH + META_H + ITEMS_HEADER_H;
+  const available = PRINTABLE_HEIGHT_PX - fixedOverhead - (isLast ? LAST_PAGE_FOOTER_H : 0);
+  const wrapFactor = calculateWrapFactor(invoice.items);
+  const rowH = itemRowHeight(wrapFactor);
+  return Math.max(1, Math.floor(available / rowH) - SAFETY_ROWS);
+}
+function paginateItems(items, capacityNonLast, capacityLast) {
+  if (items.length === 0) return [items];
+  if (items.length <= capacityLast) return [items];
+  const pages = [];
+  let pos = 0;
+  while (pos < items.length) {
+    const remaining = items.length - pos;
+    if (remaining <= capacityLast) {
+      pages.push(items.slice(pos));
+      break;
+    }
+    const take = Math.min(capacityNonLast, remaining - 1);
+    pages.push(items.slice(pos, pos + take));
+    pos += take;
+  }
+  return pages;
+}
 var PRINT_STYLES = `
   @page { size: A4 landscape; margin: 10mm; }
   * { box-sizing: border-box; }
@@ -19852,13 +19961,17 @@ var PRINT_STYLES = `
     background: #ffffff;
   }
   .sheet { width: 100%; }
+  .page {
+    width: 277mm;
+    break-after: page;
+    box-sizing: border-box;
+  }
+  .page:last-child { break-after: avoid; }
   .copies { display: flex; align-items: stretch; }
   .copy {
     flex: 1 1 0;
     min-width: 0;
     padding: 0 5mm;
-    page-break-inside: avoid;
-    break-inside: avoid;
   }
   .copy:first-child { padding-left: 0; }
   .copy:last-child { padding-right: 0; }
@@ -19908,22 +20021,30 @@ var PRINT_STYLES = `
   }
   .party-value { margin: 0; font-size: 12px; font-weight: 700; }
   .party-detail { margin: 0.8mm 0 0; font-size: 10px; color: #4b5563; }
-  .meta { margin-bottom: 2.5mm; }
-  .meta th, .meta td {
-    border: 1px solid #d1d5db;
-    padding: 1mm 1.5mm;
-    text-align: left;
-    font-size: 8px;
-  }
-  .meta th {
-    background: #f3f4f6;
-    font-size: 7px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: #374151;
-  }
-  .meta td { font-weight: 600; }
+   .meta {
+     display: flex;
+     justify-content: space-between;
+     align-items: center;
+     gap: 2mm;
+     margin-bottom: 2.5mm;
+     font-size: 8px;
+   }
+   .meta-item {
+     display: flex;
+     align-items: center;
+     gap: 0.5mm;
+   }
+   .meta-label {
+     font-size: 7px;
+     font-weight: 700;
+     text-transform: uppercase;
+     letter-spacing: 0.5px;
+     color: #374151;
+   }
+   .meta-value {
+     font-weight: 600;
+     color: #111827;
+   }
   table { width: 100%; border-collapse: collapse; }
   .items {
     table-layout: fixed;
@@ -19960,9 +20081,17 @@ var PRINT_STYLES = `
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  .items td.designation {
+    white-space: normal;
+    word-break: break-word;
+  }
   .items td.numeric {
     text-align: right;
     font-variant-numeric: tabular-nums;
+  }
+  .items tbody tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
   .designation { min-width: 0; }
   .designation .form { font-weight: 700; color: #374151; }
@@ -20011,6 +20140,12 @@ var PRINT_STYLES = `
     letter-spacing: 0.5px;
   }
   .status-cancelled { border-color: #b91c1c; color: #b91c1c; }
+  @media screen {
+    .page { padding-bottom: 5mm; }
+  }
+  @media print {
+    .page { padding: 0; }
+  }
 `;
 function escapeHtml(value) {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
@@ -20142,25 +20277,23 @@ function renderParties(context) {
 function renderMeta(context) {
   const { invoice } = context;
   return `
-    <table class="meta">
-      <thead>
-        <tr>
-          <th>N\xB0 facture</th>
-          <th>Date</th>
-          <th>Heure</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>${escapeHtml(invoice.reference)}</td>
-          <td>${escapeHtml(formatInvoiceDate(invoice.saleDate))}</td>
-          <td>${escapeHtml(formatInvoiceTime(invoice.saleDate))}</td>
-        </tr>
-      </tbody>
-    </table>`;
+    <div class="meta">
+      <span class="meta-item">
+        <span class="meta-label">N\xB0 facture :</span>
+        <span class="meta-value">${escapeHtml(invoice.reference)}</span>
+      </span>
+      <span class="meta-item">
+        <span class="meta-label">Date :</span>
+        <span class="meta-value">${escapeHtml(formatInvoiceDate(invoice.saleDate))}</span>
+      </span>
+      <span class="meta-item">
+        <span class="meta-label">Heure :</span>
+        <span class="meta-value">${escapeHtml(formatInvoiceTime(invoice.createdAt))}</span>
+      </span>
+    </div>`;
 }
-function renderLines(invoice) {
-  const rows = invoice.items.map(
+function renderItemRows(items) {
+  return items.map(
     (item) => `
         <tr>
           <td class="numeric">${item.quantity}</td>
@@ -20172,6 +20305,8 @@ function renderLines(invoice) {
           <td class="numeric">${escapeHtml(formatAmount(item.lineTotal))}</td>
         </tr>`
   ).join("");
+}
+function renderItemsTable(items) {
   return `
     <table class="items">
       <colgroup>
@@ -20188,7 +20323,7 @@ function renderLines(invoice) {
           <th class="numeric">Total</th>
         </tr>
       </thead>
-      <tbody>${rows}</tbody>
+      <tbody>${renderItemRows(items)}</tbody>
     </table>`;
 }
 function renderAmounts(invoice) {
@@ -20245,9 +20380,12 @@ function renderAmountInWords(invoice) {
       <p class="value">${escapeHtml(formatAmountInLetters(invoice.totalAmount))}</p>
     </div>`;
 }
-function renderInvoiceCopy(context, copyType) {
+function renderInvoiceCopy(context, copyType, items = context.invoice.items, isLastPage = true) {
   const { invoice } = context;
-  const cancelled = invoice.status === "ANNULEE" ? '<span class="status status-cancelled">ANNUL\xC9E</span>' : "";
+  const cancelled = invoice.status === "ANNULEE" ? `<span class="status status-cancelled">ANNUL\xC9E</span>` : "";
+  const footer = isLastPage ? `${renderAmounts(invoice)}
+       ${renderVisas()}
+       ${renderAmountInWords(invoice)}` : "";
   return `
     <section class="copy">
       <p class="copy-label">${INVOICE_COPY_LABELS[copyType]}</p>
@@ -20259,10 +20397,8 @@ function renderInvoiceCopy(context, copyType) {
       </div>
       ${renderParties(context)}
       ${renderMeta(context)}
-      ${renderLines(invoice)}
-      ${renderAmounts(invoice)}
-      ${renderVisas()}
-      ${renderAmountInWords(invoice)}
+      ${renderItemsTable(items)}
+      ${footer}
     </section>`;
 }
 function getInvoicePrintTitle(reference) {
@@ -20298,8 +20434,26 @@ var PREVIEW_CLOSE_BUTTON = `
   </style>
   <button class="preview-close" onclick="window.close()">Fermer l'aper\xE7u</button>
 `;
+function renderPage(context, pageItems, isLastPage) {
+  return `
+    <div class="page">
+      <div class="copies">
+        ${renderInvoiceCopy(context, "client", pageItems, isLastPage)}
+        <div class="copy-divider" aria-hidden="true"></div>
+        ${renderInvoiceCopy(context, "boutique", pageItems, isLastPage)}
+      </div>
+    </div>`;
+}
 function buildInvoicePrintHtml(context) {
   const { invoice } = context;
+  const itemsPerPageNonLast = calculateItemsPerPage(context, false);
+  const itemsPerPageLast = calculateItemsPerPage(context, true);
+  const pageItems = paginateItems(invoice.items, itemsPerPageNonLast, itemsPerPageLast);
+  const totalPages = pageItems.length;
+  const pages = pageItems.map((items, index) => {
+    const isLastPage = index === totalPages - 1;
+    return renderPage(context, items, isLastPage);
+  }).join("");
   return `<!DOCTYPE html>
 <html lang="fr">
   <head>
@@ -20310,11 +20464,7 @@ function buildInvoicePrintHtml(context) {
   <body>
     ${PREVIEW_CLOSE_BUTTON}
     <div class="sheet">
-      <div class="copies">
-        ${renderInvoiceCopy(context, "client")}
-        <div class="copy-divider" aria-hidden="true"></div>
-        ${renderInvoiceCopy(context, "boutique")}
-      </div>
+      ${pages}
     </div>
   </body>
 </html>`;
@@ -20327,13 +20477,13 @@ function buildInvoice(overrides = {}) {
     reference: "VTE-000001",
     clientId: 7,
     clientName: "AWA DIOP",
-    saleDate: new Date(2026, 9, 5, 16, 45),
+    saleDate: new Date(2026, 9, 5),
     status: "VALIDEE",
     totalAmount: 28e3,
     paidAmount: 1e4,
     remainingAmount: 18e3,
     paymentStatus: "PARTIELLEMENT_PAYEE",
-    createdAt: /* @__PURE__ */ new Date(),
+    createdAt: new Date(2026, 9, 5, 16, 45),
     updatedAt: /* @__PURE__ */ new Date(),
     items: [
       {
@@ -20471,12 +20621,25 @@ describe3("document imprimable de la facture", () => {
   });
   it("porte le num\xE9ro, la date et l\u2019heure de la facture", () => {
     const html = buildInvoicePrintHtml(buildContext());
-    assert2.equal(html.includes("N\xB0 facture"), true);
-    assert2.equal(html.includes(">Date<"), true);
-    assert2.equal(html.includes(">Heure<"), true);
+    assert2.equal(html.includes("N\xB0 facture :"), true);
+    assert2.equal(html.includes("Date :"), true);
+    assert2.equal(html.includes("Heure :"), true);
     assert2.equal(countOccurrences(html, "VTE-000001"), 3);
     assert2.equal(html.includes("05/10/2026"), true);
     assert2.equal(html.includes("16:45"), true);
+  });
+  it("affiche l\u2019heure de cr\xE9ation, pas l\u2019heure de la date de vente", () => {
+    const context = buildContext({
+      invoice: buildInvoice({
+        saleDate: new Date(2026, 9, 5),
+        createdAt: new Date(2026, 9, 5, 16, 45)
+      })
+    });
+    const html = buildInvoicePrintHtml(context);
+    assert2.equal(html.includes("05/10/2026"), true);
+    assert2.equal(html.includes("Heure :"), true);
+    assert2.equal(html.includes(">16:45<"), true);
+    assert2.equal(html.includes("00:00"), false);
   });
   it("liste les lignes avec exactement Qt\xE9, D\xE9signation, Prix U et Total", () => {
     const html = buildInvoicePrintHtml(buildContext());
@@ -20637,5 +20800,249 @@ describe3("document imprimable de la facture", () => {
   });
   it("\xE9chappe les caract\xE8res HTML", () => {
     assert2.equal(escapeHtml(`a & b < c > d " e ' f`), "a &amp; b &lt; c &gt; d &quot; e &#39; f");
+  });
+});
+describe3("pagination explicite des factures longues", () => {
+  function buildManyItems(count) {
+    return Array.from({ length: count }, (_, i) => ({
+      id: i + 1,
+      saleId: 1,
+      productId: i + 1,
+      productName: `PRODUIT ${i + 1}`,
+      form: "SAC",
+      quantity: 1,
+      unitPrice: 1e3,
+      lineTotal: 1e3
+    }));
+  }
+  function buildLargeInvoice(itemCount, overrides = {}) {
+    const items = buildManyItems(itemCount);
+    return buildInvoice({
+      items,
+      totalAmount: itemCount * 1e3,
+      paidAmount: 0,
+      remainingAmount: itemCount * 1e3,
+      paymentStatus: "NON_PAYEE",
+      ...overrides
+    });
+  }
+  function extractPageContents(html) {
+    return [...html.matchAll(/<div class="page">([\s\S]*?<\/section>)\s*<\/div>\s*<\/div>/g)].map((m) => m[1]).filter(Boolean);
+  }
+  function extractProductNames(html) {
+    return [...html.matchAll(/class="product">([^<]*)</g)].map((m) => m[1].trim());
+  }
+  function extractCopyContents(html) {
+    return [...html.matchAll(/<section class="copy">([\s\S]*?)<\/section>/g)].map(
+      (m) => m[1]
+    );
+  }
+  it("reste sur une seule page quand les articles tiennent", () => {
+    const context = buildContext({ invoice: buildLargeInvoice(10) });
+    const html = buildInvoicePrintHtml(context);
+    assert2.equal(countOccurrences(html, 'class="page"'), 1);
+    assert2.equal(countOccurrences(html, 'class="copy"'), 2);
+    assert2.equal(countOccurrences(html, 'class="copy-divider"'), 1);
+  });
+  it("d\xE9coupe en plusieurs pages quand l\u2019article justifie", () => {
+    const context = buildContext({ invoice: buildLargeInvoice(40) });
+    const html = buildInvoicePrintHtml(context);
+    const pageCount = countOccurrences(html, 'class="page"');
+    assert2.equal(pageCount > 1, true, "une facture longue produit plusieurs pages");
+    assert2.equal(countOccurrences(html, 'class="copy"'), pageCount * 2);
+    assert2.equal(countOccurrences(html, 'class="copy-divider"'), pageCount);
+  });
+  it("pr\xE9cise A4 paysage et break-after:page dans le CSS", () => {
+    const html = buildInvoicePrintHtml(buildContext({ invoice: buildLargeInvoice(40) }));
+    assert2.equal(html.includes("@page"), true);
+    assert2.equal(html.includes("A4 landscape"), true);
+    assert2.equal(html.includes("break-after: page"), true);
+    assert2.equal(html.includes(".page"), true);
+  });
+  it("ne perd ni ne duplique d\u2019article sur les pages", () => {
+    const itemCount = 40;
+    const context = buildContext({ invoice: buildLargeInvoice(itemCount) });
+    const html = buildInvoicePrintHtml(context);
+    const allProducts = extractProductNames(html);
+    assert2.equal(allProducts.length, itemCount * 2);
+    const uniqueProducts = new Set(allProducts);
+    assert2.equal(uniqueProducts.size, itemCount);
+    for (let i = 1; i <= itemCount; i++) {
+      assert2.equal(allProducts.filter((p) => p === `PRODUIT ${i}`).length, 2);
+    }
+  });
+  it("r\xE9p\xE8te les en-t\xEAtes de colonne et les infos sur chaque page", () => {
+    const context = buildContext({ invoice: buildLargeInvoice(40) });
+    const html = buildInvoicePrintHtml(context);
+    const pageCount = countOccurrences(html, 'class="page"');
+    for (const header of [">Qt\xE9<", ">D\xE9signation<", ">Prix U<", ">Total<"]) {
+      assert2.equal(
+        countOccurrences(html, header),
+        pageCount * 2,
+        `${header} doit appara\xEEtre ${pageCount * 2} fois (2 exemplaires \xD7 ${pageCount} pages)`
+      );
+    }
+    assert2.equal(countOccurrences(html, "BOUTIQUE SOKNA"), pageCount * 2);
+    assert2.equal(countOccurrences(html, "VTE-000001"), pageCount * 2 + 1);
+  });
+  it("ne place les totaux, visas et montant en lettres que sur la derni\xE8re page", () => {
+    const context = buildContext({ invoice: buildLargeInvoice(40) });
+    const html = buildInvoicePrintHtml(context);
+    assert2.equal(countOccurrences(html, ">Total facture<"), 2);
+    assert2.equal(countOccurrences(html, ">D\xE9j\xE0 pay\xE9<"), 2);
+    assert2.equal(countOccurrences(html, ">Reste \xE0 payer<"), 2);
+    assert2.equal(countOccurrences(html, "Visa responsable d\xE9p\xF4t"), 2);
+    assert2.equal(countOccurrences(html, "Arr\xEAt\xE9e la pr\xE9sente facture"), 2);
+  });
+  it("garde les deux exemplaires synchronis\xE9s sur chaque page", () => {
+    const context = buildContext({ invoice: buildLargeInvoice(40) });
+    const html = buildInvoicePrintHtml(context);
+    const pages = extractPageContents(html);
+    const pageCount = pages.length;
+    assert2.equal(pageCount > 1, true);
+    for (let i = 0; i < pageCount; i++) {
+      const copies = extractCopyContents(pages[i]);
+      assert2.equal(copies.length, 2, `page ${i + 1} : deux exemplaires attendus`);
+      const leftProducts = extractProductNames(copies[0]);
+      const rightProducts = extractProductNames(copies[1]);
+      assert2.deepEqual(leftProducts, rightProducts, `page ${i + 1} : les deux exemplaires doivent \xEAtre synchronis\xE9s`);
+    }
+  });
+  it("place le pointill\xE9 de d\xE9coupe au centre de chaque page", () => {
+    const context = buildContext({ invoice: buildLargeInvoice(40) });
+    const html = buildInvoicePrintHtml(context);
+    const pageCount = countOccurrences(html, 'class="page"');
+    for (const page of extractPageContents(html)) {
+      const labelClient = page.indexOf("\xC0 remettre au client");
+      const divider = page.indexOf('class="copy-divider"');
+      const labelBoutique = page.indexOf("\xC0 conserver par la boutique");
+      assert2.equal(
+        labelClient < divider && divider < labelBoutique,
+        true,
+        "le pointill\xE9 doit s\xE9parer les deux exemplaires sur chaque page"
+      );
+    }
+    assert2.equal(countOccurrences(html, 'class="copy-divider"'), pageCount);
+  });
+  it("g\xE8re une facture tr\xE8s longue (4 pages ou plus)", () => {
+    const itemCount = 100;
+    const context = buildContext({ invoice: buildLargeInvoice(itemCount) });
+    const html = buildInvoicePrintHtml(context);
+    const pageCount = countOccurrences(html, 'class="page"');
+    assert2.equal(pageCount >= 4, true, `attendu \u2265 4 pages, obtenu ${pageCount}`);
+    const allProducts = extractProductNames(html);
+    assert2.equal(allProducts.length, itemCount * 2);
+    assert2.equal(new Set(allProducts).size, itemCount);
+    for (const page of extractPageContents(html)) {
+      const copies = extractCopyContents(page);
+      assert2.equal(copies.length, 2);
+      assert2.deepEqual(
+        extractProductNames(copies[0]),
+        extractProductNames(copies[1])
+      );
+    }
+  });
+  it("g\xE8re des d\xE9signations longues sans perdre d\u2019articles", () => {
+    const longName = "PRODUIT AVEC UNE TR\xC8S LONGUE D\xC9SIGNATION QUI DOIT D\xC9PASSER LA LARGEUR DE LA COLONNE POUR PROVOQUER UN RETOUR \xC0 LA LIGNE";
+    const items = [];
+    for (let i = 0; i < 30; i++) {
+      items.push({
+        id: i + 1,
+        saleId: 1,
+        productId: i + 1,
+        productName: `${longName} ${i + 1}`,
+        form: "SAC",
+        quantity: 1,
+        unitPrice: 1e3,
+        lineTotal: 1e3
+      });
+    }
+    const context = buildContext({
+      invoice: buildInvoice({ items, totalAmount: 3e4 })
+    });
+    const html = buildInvoicePrintHtml(context);
+    assert2.equal(html.includes("white-space: normal"), true);
+    const allProducts = extractProductNames(html);
+    assert2.equal(allProducts.length, 30 * 2);
+    assert2.equal(new Set(allProducts).size, 30);
+  });
+  it("g\xE8re une facture annul\xE9e sur plusieurs pages", () => {
+    const context = buildContext({
+      invoice: buildLargeInvoice(40, { status: "ANNULEE" })
+    });
+    const html = buildInvoicePrintHtml(context);
+    const pageCount = countOccurrences(html, 'class="page"');
+    assert2.equal(pageCount > 1, true);
+    assert2.equal(countOccurrences(html, "ANNUL\xC9E"), pageCount * 2);
+    assert2.equal(countOccurrences(html, "status-cancelled"), pageCount * 2 + 1);
+    assert2.equal(countOccurrences(html, "Total facture"), 2);
+  });
+  it("g\xE8re une boutique sans informations facultatives sur plusieurs pages", () => {
+    const context = buildContext({
+      shop: buildShop({ phone: null, phone2: null, address: null, ninea: null }),
+      invoice: buildLargeInvoice(40)
+    });
+    const html = buildInvoicePrintHtml(context);
+    const pageCount = countOccurrences(html, 'class="page"');
+    assert2.equal(pageCount > 1, true);
+    assert2.equal(countOccurrences(html, "BOUTIQUE SOKNA"), pageCount * 2);
+    assert2.equal(html.includes("Rue 10, Dakar"), false);
+    assert2.equal(html.includes("77 123 45 67"), false);
+    assert2.equal(html.includes("12345678901"), false);
+    assert2.equal(html.includes("Pikine, Dakar"), true);
+    assert2.equal(html.includes("771234567"), true);
+    const allProducts = extractProductNames(html);
+    assert2.equal(allProducts.length, 40 * 2);
+  });
+  it("produit une page de dernier rang contenant les totaux et signatures", () => {
+    const context = buildContext({ invoice: buildLargeInvoice(40) });
+    const html = buildInvoicePrintHtml(context);
+    const pages = extractPageContents(html);
+    const lastPage = pages[pages.length - 1];
+    assert2.equal(lastPage.includes("Total facture"), true);
+    assert2.equal(lastPage.includes("D\xE9j\xE0 pay\xE9"), true);
+    assert2.equal(lastPage.includes("Reste \xE0 payer"), true);
+    assert2.equal(lastPage.includes("Responsable d\xE9p\xF4t"), true);
+    assert2.equal(lastPage.includes("Visa caissier"), true);
+    assert2.equal(lastPage.includes("Arr\xEAt\xE9e la pr\xE9sente facture"), true);
+    if (pages.length > 1) {
+      const prevPage = pages[pages.length - 2];
+      assert2.equal(prevPage.includes("Total facture"), false);
+      assert2.equal(prevPage.includes("Arr\xEAt\xE9e la pr\xE9sente facture"), false);
+    }
+  });
+  it("remplit la premi\xE8re feuille au maximum pour une facture de deux feuilles", () => {
+    const context = buildContext({ invoice: buildLargeInvoice(22) });
+    const html = buildInvoicePrintHtml(context);
+    const pages = html.split('<div class="page">').slice(1);
+    assert2.equal(pages.length, 2, "22 articles n\xE9cessitent exactement 2 feuilles");
+    const itemsPerPage = pages.map((p) => (p.match(/class="product">/g) || []).length / 2);
+    assert2.equal(
+      itemsPerPage[0] > itemsPerPage[1],
+      true,
+      `premi\xE8re feuille (${itemsPerPage[0]}) doit contenir plus que la derni\xE8re (${itemsPerPage[1]})`
+    );
+    const allProducts = extractProductNames(html);
+    assert2.equal(allProducts.length, 22 * 2);
+    assert2.equal(new Set(allProducts).size, 22);
+  });
+  it("remplit les premi\xE8res feuilles au maximum pour une facture de trois feuilles ou plus", () => {
+    const context = buildContext({ invoice: buildLargeInvoice(50) });
+    const html = buildInvoicePrintHtml(context);
+    const pages = html.split('<div class="page">').slice(1);
+    assert2.equal(pages.length >= 3, true, `50 articles n\xE9cessitent \u2265 3 feuilles, obtenu ${pages.length}`);
+    const itemsPerPage = pages.map((p) => (p.match(/class="product">/g) || []).length / 2);
+    for (let i = 0; i + 1 < pages.length; i++) {
+      assert2.equal(
+        itemsPerPage[i] >= itemsPerPage[itemsPerPage.length - 1],
+        true,
+        `feuille ${i + 1} (${itemsPerPage[i]}) doit contenir au moins autant que la derni\xE8re (${itemsPerPage[itemsPerPage.length - 1]})`
+      );
+    }
+    const lastPage = pages[pages.length - 1];
+    assert2.equal(lastPage.includes("Total facture"), true);
+    const allProducts = extractProductNames(html);
+    assert2.equal(allProducts.length, 50 * 2);
+    assert2.equal(new Set(allProducts).size, 50);
   });
 });

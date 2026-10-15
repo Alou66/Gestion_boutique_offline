@@ -131,8 +131,8 @@ describe('formulaire d\'approvisionnement', () => {
     }
   })
 
-  it('refuse une quantité nulle, négative ou non entière', () => {
-    for (const quantity of [0, -1, 1.5]) {
+  it('refuse une quantité nulle ou négative', () => {
+    for (const quantity of [0, -1]) {
       const parsed = supplyFormSchema.safeParse({
         date: '2026-10-04',
         supplierId: null,
@@ -143,6 +143,34 @@ describe('formulaire d\'approvisionnement', () => {
       assert.equal(
         parsed.success ? '' : parsed.error.issues[0].message,
         SUPPLY_MESSAGES.quantityInvalid,
+      )
+    }
+  })
+
+  it('accepte une quantité demi-unité', () => {
+    for (const quantity of [1.5, 0.5, 10.5, 2]) {
+      const parsed = supplyFormSchema.safeParse({
+        date: '2026-10-04',
+        supplierId: null,
+        items: [{ productId: 1, form: 'SAC', quantity, purchaseUnitPrice: 100 }],
+      })
+
+      assert.equal(parsed.success, true, `${quantity} must be accepted`)
+    }
+  })
+
+  it('refuse une quantité non multiple de 0,5', () => {
+    for (const quantity of [0.25, 0.75, 1.25, 10.25]) {
+      const parsed = supplyFormSchema.safeParse({
+        date: '2026-10-04',
+        supplierId: null,
+        items: [{ productId: 1, form: 'SAC', quantity, purchaseUnitPrice: 100 }],
+      })
+
+      assert.equal(parsed.success, false, `${quantity} must be refused`)
+      assert.equal(
+        parsed.success ? '' : parsed.error.issues[0].message,
+        SUPPLY_MESSAGES.quantityNotHalfUnit,
       )
     }
   })
@@ -265,6 +293,7 @@ describe('formulaire d\'approvisionnement', () => {
     assert.equal(draft.purchaseUnitPrice, '')
     assert.equal(parseNumberField(''), undefined)
     assert.equal(parseNumberField(' 12 '), 12)
+    assert.equal(parseNumberField(' 1,50 '), 1.5)
   })
 })
 

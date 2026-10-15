@@ -19757,6 +19757,7 @@ var INVOICE_MESSAGES = {
   formInvalid: "Forme invalide pour ce produit.",
   quantityRequired: "La quantit\xE9 est obligatoire.",
   quantityInvalid: "La quantit\xE9 doit \xEAtre un nombre sup\xE9rieur \xE0 0.",
+  quantityNotHalfUnit: "La quantit\xE9 doit \xEAtre un multiple de 0,5 (0,5, 1, 1,5, 2\u2026).",
   quantityTooHigh: `La quantit\xE9 ne peut pas d\xE9passer ${INVOICE_QUANTITY_MAX}.`,
   unitPriceRequired: "Le prix de vente unitaire est obligatoire.",
   unitPriceInvalid: "Le prix de vente unitaire doit \xEAtre un entier sup\xE9rieur ou \xE9gal \xE0 0.",
@@ -19793,7 +19794,7 @@ var invoiceDateSchema = external_exports.string({ error: INVOICE_MESSAGES.dateRe
 var clientIdSchema = external_exports.number({ error: INVOICE_MESSAGES.clientRequired }).int(INVOICE_MESSAGES.clientRequired).positive(INVOICE_MESSAGES.clientRequired).nullable();
 var productIdSchema = external_exports.number({ error: INVOICE_MESSAGES.productRequired }).int(INVOICE_MESSAGES.productRequired).positive(INVOICE_MESSAGES.productRequired);
 var formSchema = external_exports.string({ error: INVOICE_MESSAGES.formRequired }).trim().min(1, INVOICE_MESSAGES.formRequired).transform(normalizeFormLabel);
-var quantitySchema = external_exports.number({ error: INVOICE_MESSAGES.quantityRequired }).int(INVOICE_MESSAGES.quantityInvalid).positive(INVOICE_MESSAGES.quantityInvalid).max(INVOICE_QUANTITY_MAX, INVOICE_MESSAGES.quantityTooHigh);
+var quantitySchema = external_exports.number({ error: INVOICE_MESSAGES.quantityRequired }).positive(INVOICE_MESSAGES.quantityInvalid).max(INVOICE_QUANTITY_MAX, INVOICE_MESSAGES.quantityTooHigh).refine((value) => Number.isInteger(value * 2), INVOICE_MESSAGES.quantityNotHalfUnit);
 var unitPriceSchema = external_exports.number({ error: INVOICE_MESSAGES.unitPriceRequired }).int(INVOICE_MESSAGES.unitPriceInvalid).min(0, INVOICE_MESSAGES.unitPriceInvalid).max(INVOICE_UNIT_PRICE_MAX, INVOICE_MESSAGES.unitPriceTooHigh);
 var invoiceItemFormSchema = external_exports.object({
   productId: productIdSchema,

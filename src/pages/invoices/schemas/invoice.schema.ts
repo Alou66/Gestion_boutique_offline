@@ -55,6 +55,7 @@ export const INVOICE_MESSAGES = {
   formInvalid: 'Forme invalide pour ce produit.',
   quantityRequired: 'La quantité est obligatoire.',
   quantityInvalid: 'La quantité doit être un nombre supérieur à 0.',
+  quantityNotHalfUnit: 'La quantité doit être un multiple de 0,5 (0,5, 1, 1,5, 2…).',
   quantityTooHigh: `La quantité ne peut pas dépasser ${INVOICE_QUANTITY_MAX}.`,
   unitPriceRequired: "Le prix de vente unitaire est obligatoire.",
   unitPriceInvalid: "Le prix de vente unitaire doit être un entier supérieur ou égal à 0.",
@@ -131,9 +132,9 @@ const formSchema = z
 
 const quantitySchema = z
   .number({ error: INVOICE_MESSAGES.quantityRequired })
-  .int(INVOICE_MESSAGES.quantityInvalid)
   .positive(INVOICE_MESSAGES.quantityInvalid)
   .max(INVOICE_QUANTITY_MAX, INVOICE_MESSAGES.quantityTooHigh)
+  .refine((value) => Number.isInteger(value * 2), INVOICE_MESSAGES.quantityNotHalfUnit)
 
 const unitPriceSchema = z
   .number({ error: INVOICE_MESSAGES.unitPriceRequired })
@@ -410,7 +411,7 @@ export function validateDraftLine(
     return INVOICE_MESSAGES.formInvalid
   }
 
-  if (Number.isInteger(quantity) && quantity > readAvailableStock(available, productId, form)) {
+  if (quantity > readAvailableStock(available, productId, form)) {
     return INVOICE_MESSAGES.insufficientStock
   }
 

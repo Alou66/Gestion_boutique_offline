@@ -34,6 +34,7 @@ export const STOCK_ERRORS = {
   formsMismatch: "Les formes saisies ne correspondent pas aux formes du produit.",
   quantityRequired: 'La quantité est obligatoire.',
   quantityInvalid: 'La quantité doit être un nombre supérieur à 0.',
+  quantityNotHalfUnit: 'La quantité doit être un multiple de 0,5 (0,5, 1, 1,5, 2…).',
   quantityTooHigh: 'La quantité ne peut pas dépasser 1 000 000.',
   positiveQuantityRequired:
     'Au moins une forme doit être initialisée avec une quantité supérieure à 0.',
@@ -106,16 +107,16 @@ const formSchema = z
 /** An initialization accepts 0 on a form, but never on every form. */
 const initialQuantitySchema = z
   .number({ error: STOCK_ERRORS.quantityRequired })
-  .int(STOCK_ERRORS.quantityInvalid)
   .min(0, STOCK_ERRORS.quantityInvalid)
   .max(STOCK_QUANTITY_MAX, STOCK_ERRORS.quantityTooHigh)
+  .refine((value) => Number.isInteger(value * 2), STOCK_ERRORS.quantityNotHalfUnit)
 
 /** A movement quantity is always strictly positive, the direction carries OUT. */
 const movementQuantitySchema = z
   .number({ error: STOCK_ERRORS.quantityRequired })
-  .int(STOCK_ERRORS.quantityInvalid)
   .positive(STOCK_ERRORS.quantityInvalid)
   .max(STOCK_QUANTITY_MAX, STOCK_ERRORS.quantityTooHigh)
+  .refine((value) => Number.isInteger(value * 2), STOCK_ERRORS.quantityNotHalfUnit)
 
 const directionSchema = z.enum(['IN', 'OUT'], {
   error: STOCK_ERRORS.directionRequired,
@@ -519,13 +520,14 @@ function assertNotInMaintenance(): void {
 export function initializeStock(
   productId: number,
   input: StockInitializeInput,
+  tx?: StockDatabase,
 ): StockFormLevel[] {
   assertNotInMaintenance()
   const parsedId = parseProductId(productId)
-  const db = getDb()
 
-  return withMappedErrors(() =>
-    db.transaction((tx) => {
+  return withMappedErrors(() => {
+    if (tx) {
+      // Use the provided transaction
       const product = readProductForWrite(parsedId)
       const quantities = parseInitialQuantities(input, product)
 
@@ -572,6 +574,110 @@ export function initializeStock(
       // The new stock is always read back from the movements, never returned
       // from the submitted quantities.
       return buildStockLines(product, loadStockTotals(tx))
+    } else {
+      // Create a new transaction
+      const db = getDb()
+      return db.transaction((tx) => {
+        const product = readProductForWrite(parsedId)
+        const quantities = parseInitialQuantities(input, product)
+
+        if (isInitializedIn(tx, parsedId)) {
+          throw new StockError('alreadyInitialized')
+        }
+
+        // A supply or an adjustment already opened the history of the product: its
+        // stock is no longer a declared initial stock.
+        if (hasAnyMovementIn(tx, parsedId)) {
+          throw new StockError('alreadyHasMovements')
+        }
+
+        const now = new Date()
+
+        for (const { form, quantity } of quantities) {
+          // A form initialized to 0 carries no movement: 0 is already the balance
+          // of a form without any movement.
+          if (quantity <= 0) {
+            continue
+          }
+
+          tx.insert(stockMovements)
+            .values({
+              productId: parsedId,
+              form,
+              movementType: 'STOCK_INITIAL',
+              direction: 'IN',
+              quantity,
+              reason: null,
+              createdAt: now,
+            })
+            .run()
+        }
+
+        // Coherence check inside the transaction: the recomputed stock must be the
+        // requested one, otherwise the transaction is rolled back.
+        for (const { form, quantity } of quantities) {
+          if (computeFormQuantity(tx, parsedId, form) !== quantity) {
+            throw new StockError('unexpected')
+          }
+        }
+
+        // The new stock is always read back from the movements, never returned
+        // from the submitted quantities.
+        return buildStockLines(product, loadStockTotals(tx))
+      })
+    }
+  })
+}
+export function initializeBatch(
+  inputs: StockInitializeInput[],
+): StockFormLevel[][] {
+  assertNotInMaintenance()
+  const db = getDb()
+  return withMappedErrors(() =>
+    db.transaction((tx) => {
+      const results: StockFormLevel[][] = []
+      for (const input of inputs) {
+        const parsedId = parseProductId(input.productId)
+        const product = readProductForWrite(parsedId)
+        const quantities = parseInitialQuantities(input, product)
+
+        if (isInitializedIn(tx, parsedId)) {
+          throw new StockError('alreadyInitialized')
+        }
+
+        if (hasAnyMovementIn(tx, parsedId)) {
+          throw new StockError('alreadyHasMovements')
+        }
+
+        const now = new Date()
+
+        for (const { form, quantity } of quantities) {
+          if (quantity <= 0) {
+            continue
+          }
+
+          tx.insert(stockMovements)
+            .values({
+              productId: parsedId,
+              form,
+              movementType: 'STOCK_INITIAL',
+              direction: 'IN',
+              quantity,
+              reason: null,
+              createdAt: now,
+            })
+            .run()
+        }
+
+        for (const { form, quantity } of quantities) {
+          if (computeFormQuantity(tx, parsedId, form) !== quantity) {
+            throw new StockError('unexpected')
+          }
+        }
+
+        results.push(buildStockLines(product, loadStockTotals(tx)))
+      }
+      return results
     }),
   )
 }

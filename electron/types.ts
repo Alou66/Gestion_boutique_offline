@@ -260,6 +260,9 @@ export interface StockAPI {
     productId: number,
     input: StockInitializeInput,
   ) => Promise<StockResult<StockFormLevel[]>>
+  initializeBatch: (
+    inputs: StockInitializeInput[],
+  ) => Promise<StockResult<StockFormLevel[][]>>
   adjust: (
     productId: number,
     input: StockAdjustInput,

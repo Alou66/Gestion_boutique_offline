@@ -19760,6 +19760,7 @@ var SUPPLY_MESSAGES = {
   formInvalid: "Forme invalide pour ce produit.",
   quantityRequired: "La quantit\xE9 est obligatoire.",
   quantityInvalid: "La quantit\xE9 doit \xEAtre un nombre sup\xE9rieur \xE0 0.",
+  quantityNotHalfUnit: "La quantit\xE9 doit \xEAtre un multiple de 0,5 (0,5, 1, 1,5, 2\u2026).",
   quantityTooHigh: `La quantit\xE9 ne peut pas d\xE9passer ${SUPPLY_QUANTITY_MAX}.`,
   unitPriceRequired: "Le prix d'achat unitaire est obligatoire.",
   unitPriceInvalid: "Le prix d'achat unitaire doit \xEAtre un entier sup\xE9rieur ou \xE9gal \xE0 0.",
@@ -19783,7 +19784,7 @@ var supplyDateSchema = external_exports.string({ error: SUPPLY_MESSAGES.dateRequ
 var productIdSchema = external_exports.number({ error: SUPPLY_MESSAGES.productRequired }).int(SUPPLY_MESSAGES.productRequired).positive(SUPPLY_MESSAGES.productRequired);
 var formSchema = external_exports.string({ error: SUPPLY_MESSAGES.formRequired }).trim().min(1, SUPPLY_MESSAGES.formRequired).transform(normalizeFormLabel);
 var supplierIdSchema = external_exports.number({ error: SUPPLY_MESSAGES.supplierRequired }).int(SUPPLY_MESSAGES.supplierRequired).positive(SUPPLY_MESSAGES.supplierRequired).nullable();
-var quantitySchema = external_exports.number({ error: SUPPLY_MESSAGES.quantityRequired }).int(SUPPLY_MESSAGES.quantityInvalid).positive(SUPPLY_MESSAGES.quantityInvalid).max(SUPPLY_QUANTITY_MAX, SUPPLY_MESSAGES.quantityTooHigh);
+var quantitySchema = external_exports.number({ error: SUPPLY_MESSAGES.quantityRequired }).positive(SUPPLY_MESSAGES.quantityInvalid).max(SUPPLY_QUANTITY_MAX, SUPPLY_MESSAGES.quantityTooHigh).refine((value) => Number.isInteger(value * 2), SUPPLY_MESSAGES.quantityNotHalfUnit);
 var unitPriceSchema = external_exports.number({ error: SUPPLY_MESSAGES.unitPriceRequired }).int(SUPPLY_MESSAGES.unitPriceInvalid).min(0, SUPPLY_MESSAGES.unitPriceInvalid).max(SUPPLY_UNIT_PRICE_MAX, SUPPLY_MESSAGES.unitPriceTooHigh);
 var supplyItemFormSchema = external_exports.object({
   productId: productIdSchema,
@@ -20083,8 +20084,9 @@ describe3("brouillon d\u2019approvisionnement en cours", () => {
       )
     });
     const restored = readSupplyDraft();
-    assert2.equal(restored?.lines.length, 1);
-    assert2.equal(restored?.lines[0].key, "ok");
+    assert2.equal(restored?.lines.length, 2);
+    assert2.equal(restored?.lines[0].key, "decimal");
+    assert2.equal(restored?.lines[1].key, "ok");
   });
   it("plafonne les lignes restaur\xE9es au maximum autoris\xE9", () => {
     const lines = Array.from(

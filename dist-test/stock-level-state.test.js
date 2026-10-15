@@ -19750,6 +19750,7 @@ var STOCK_MESSAGES = {
   formsMismatch: "Les formes saisies ne correspondent pas aux formes du produit.",
   quantityRequired: "La quantit\xE9 est obligatoire.",
   quantityInvalid: "La quantit\xE9 doit \xEAtre un nombre sup\xE9rieur \xE0 0.",
+  quantityNotHalfUnit: "La quantit\xE9 doit \xEAtre un multiple de 0,5 (0,5, 1, 1,5, 2\u2026).",
   quantityTooHigh: "La quantit\xE9 ne peut pas d\xE9passer 1 000 000.",
   positiveQuantityRequired: "Au moins une forme doit \xEAtre initialis\xE9e avec une quantit\xE9 sup\xE9rieure \xE0 0.",
   alreadyInitialized: "Le stock de ce produit est d\xE9j\xE0 initialis\xE9.",
@@ -19764,7 +19765,7 @@ var STOCK_MESSAGES = {
 var formFieldSchema = external_exports.string({ error: STOCK_MESSAGES.formRequired }).trim().min(1, STOCK_MESSAGES.formRequired).max(40, STOCK_MESSAGES.formTooLong).transform(normalizeFormLabel);
 var stockQuantityEntrySchema = external_exports.object({
   form: formFieldSchema,
-  quantity: external_exports.number({ error: STOCK_MESSAGES.quantityRequired }).int(STOCK_MESSAGES.quantityInvalid).min(0, STOCK_MESSAGES.quantityInvalid).max(STOCK_QUANTITY_MAX, STOCK_MESSAGES.quantityTooHigh)
+  quantity: external_exports.number({ error: STOCK_MESSAGES.quantityRequired }).min(0, STOCK_MESSAGES.quantityInvalid).max(STOCK_QUANTITY_MAX, STOCK_MESSAGES.quantityTooHigh).refine((value) => Number.isInteger(value * 2), STOCK_MESSAGES.quantityNotHalfUnit)
 });
 var stockInitializeFormSchema = external_exports.object({
   quantities: external_exports.array(stockQuantityEntrySchema).min(1, STOCK_MESSAGES.formsRequired)
@@ -19775,7 +19776,7 @@ var stockInitializeFormSchema = external_exports.object({
 var stockAdjustFormSchema = external_exports.object({
   form: formFieldSchema,
   direction: external_exports.enum(["IN", "OUT"], { error: STOCK_MESSAGES.directionRequired }),
-  quantity: external_exports.number({ error: STOCK_MESSAGES.quantityRequired }).int(STOCK_MESSAGES.quantityInvalid).positive(STOCK_MESSAGES.quantityInvalid).max(STOCK_QUANTITY_MAX, STOCK_MESSAGES.quantityTooHigh),
+  quantity: external_exports.number({ error: STOCK_MESSAGES.quantityRequired }).positive(STOCK_MESSAGES.quantityInvalid).max(STOCK_QUANTITY_MAX, STOCK_MESSAGES.quantityTooHigh).refine((value) => Number.isInteger(value * 2), STOCK_MESSAGES.quantityNotHalfUnit),
   reason: external_exports.string({ error: STOCK_MESSAGES.reasonRequired }).trim().min(1, STOCK_MESSAGES.reasonRequired).max(STOCK_REASON_MAX_LENGTH, STOCK_MESSAGES.reasonTooLong)
 });
 function getStockLevelState(row) {

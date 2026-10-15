@@ -26147,6 +26147,7 @@ var STOCK_ERRORS = {
   formsMismatch: "Les formes saisies ne correspondent pas aux formes du produit.",
   quantityRequired: "La quantit\xE9 est obligatoire.",
   quantityInvalid: "La quantit\xE9 doit \xEAtre un nombre sup\xE9rieur \xE0 0.",
+  quantityNotHalfUnit: "La quantit\xE9 doit \xEAtre un multiple de 0,5 (0,5, 1, 1,5, 2\u2026).",
   quantityTooHigh: "La quantit\xE9 ne peut pas d\xE9passer 1 000 000.",
   positiveQuantityRequired: "Au moins une forme doit \xEAtre initialis\xE9e avec une quantit\xE9 sup\xE9rieure \xE0 0.",
   alreadyInitialized: "Le stock de ce produit est d\xE9j\xE0 initialis\xE9.",
@@ -26177,8 +26178,8 @@ var productIdSchema2 = external_exports.number({ error: STOCK_ERRORS.productNotF
 var formSchema = external_exports.string({ error: STOCK_ERRORS.formRequired }).transform(normalizeFormName).pipe(
   external_exports.string().min(1, STOCK_ERRORS.formRequired).max(PRODUCT_FORM_MAX_LENGTH, STOCK_ERRORS.formTooLong)
 );
-var initialQuantitySchema = external_exports.number({ error: STOCK_ERRORS.quantityRequired }).int(STOCK_ERRORS.quantityInvalid).min(0, STOCK_ERRORS.quantityInvalid).max(STOCK_QUANTITY_MAX, STOCK_ERRORS.quantityTooHigh);
-var movementQuantitySchema = external_exports.number({ error: STOCK_ERRORS.quantityRequired }).int(STOCK_ERRORS.quantityInvalid).positive(STOCK_ERRORS.quantityInvalid).max(STOCK_QUANTITY_MAX, STOCK_ERRORS.quantityTooHigh);
+var initialQuantitySchema = external_exports.number({ error: STOCK_ERRORS.quantityRequired }).min(0, STOCK_ERRORS.quantityInvalid).max(STOCK_QUANTITY_MAX, STOCK_ERRORS.quantityTooHigh).refine((value) => Number.isInteger(value * 2), STOCK_ERRORS.quantityNotHalfUnit);
+var movementQuantitySchema = external_exports.number({ error: STOCK_ERRORS.quantityRequired }).positive(STOCK_ERRORS.quantityInvalid).max(STOCK_QUANTITY_MAX, STOCK_ERRORS.quantityTooHigh).refine((value) => Number.isInteger(value * 2), STOCK_ERRORS.quantityNotHalfUnit);
 var directionSchema = external_exports.enum(["IN", "OUT"], {
   error: STOCK_ERRORS.directionRequired
 });
@@ -26422,6 +26423,7 @@ var INVOICE_ERRORS = {
   formInvalid: "Forme invalide pour ce produit.",
   quantityRequired: "La quantit\xE9 est obligatoire.",
   quantityInvalid: "La quantit\xE9 doit \xEAtre un nombre sup\xE9rieur \xE0 0.",
+  quantityNotHalfUnit: "La quantit\xE9 doit \xEAtre un multiple de 0,5 (0,5, 1, 1,5, 2\u2026).",
   quantityTooHigh: "La quantit\xE9 ne peut pas d\xE9passer 1 000 000.",
   unitPriceRequired: "Le prix de vente unitaire est obligatoire.",
   unitPriceInvalid: "Le prix de vente unitaire doit \xEAtre un entier sup\xE9rieur ou \xE9gal \xE0 0.",
@@ -26501,7 +26503,7 @@ var productIdSchema3 = external_exports.number({ error: INVOICE_ERRORS.productNo
 var formSchema2 = external_exports.string({ error: INVOICE_ERRORS.formRequired }).transform(normalizeFormName).pipe(
   external_exports.string().min(1, INVOICE_ERRORS.formRequired).max(PRODUCT_FORM_MAX_LENGTH, INVOICE_ERRORS.formTooLong)
 );
-var quantitySchema = external_exports.number({ error: INVOICE_ERRORS.quantityRequired }).int(INVOICE_ERRORS.quantityInvalid).positive(INVOICE_ERRORS.quantityInvalid).max(INVOICE_QUANTITY_MAX, INVOICE_ERRORS.quantityTooHigh);
+var quantitySchema = external_exports.number({ error: INVOICE_ERRORS.quantityRequired }).positive(INVOICE_ERRORS.quantityInvalid).max(INVOICE_QUANTITY_MAX, INVOICE_ERRORS.quantityTooHigh).refine((value) => Number.isInteger(value * 2), INVOICE_ERRORS.quantityNotHalfUnit);
 var unitPriceSchema = external_exports.number({ error: INVOICE_ERRORS.unitPriceRequired }).int(INVOICE_ERRORS.unitPriceInvalid).min(0, INVOICE_ERRORS.unitPriceInvalid).max(INVOICE_UNIT_PRICE_MAX, INVOICE_ERRORS.unitPriceTooHigh);
 var optionalUnitPriceSchema = unitPriceSchema.nullable().optional();
 var itemsSchema = external_exports.array(
@@ -27833,7 +27835,7 @@ describe3("module Facturation", () => {
       assert2.equal(balanceOf(transformableProduct.id, "SEAU"), 1);
       assert2.equal(balanceOf(transformableProduct.id, "CARTON"), 8);
     });
-    it("refuse une quantit\xE9 nulle, n\xE9gative, d\xE9cimale ou absente", () => {
+    it("refuse une quantit\xE9 nulle, n\xE9gative ou absente", () => {
       expectInvoiceError(
         "quantityInvalid",
         () => createInvoice({ items: [line(simpleProduct, "SAC", 0, 100)] })
@@ -27841,10 +27843,6 @@ describe3("module Facturation", () => {
       expectInvoiceError(
         "quantityInvalid",
         () => createInvoice({ items: [line(simpleProduct, "SAC", -5, 100)] })
-      );
-      expectInvoiceError(
-        "quantityInvalid",
-        () => createInvoice({ items: [line(simpleProduct, "SAC", 1.5, 100)] })
       );
       expectInvoiceError(
         "quantityRequired",
@@ -27865,6 +27863,20 @@ describe3("module Facturation", () => {
       );
       assert2.equal(invoiceCount(), 0);
       assert2.equal(movementCount(), 3);
+    });
+    it("accepte une quantit\xE9 demi-unit\xE9 et refute les non-multiples de 0,5", () => {
+      createInvoice({ items: [line(simpleProduct, "SAC", 1.5, 100)] });
+      assert2.equal(balanceOf(simpleProduct.id, "SAC"), 18.5);
+      assert2.equal(invoiceCount(), 1);
+      expectInvoiceError(
+        "quantityNotHalfUnit",
+        () => createInvoice({ items: [line(simpleProduct, "SAC", 1.25, 100)] })
+      );
+      expectInvoiceError(
+        "quantityNotHalfUnit",
+        () => createInvoice({ items: [line(simpleProduct, "SAC", 0.75, 100)] })
+      );
+      assert2.equal(invoiceCount(), 1);
     });
     it("refuse un prix n\xE9gatif, d\xE9cimal ou absent quand le produit n'en a pas", () => {
       expectInvoiceError(
@@ -29070,6 +29082,42 @@ describe3("module Facturation", () => {
       assert2.equal(balanceOf(simpleProduct.id, "SAC"), 16);
       const next = createInvoice({ items: [line(simpleProduct, "SAC", 1, 2500)] });
       assert2.equal(next.reference, "VTE-000002");
+    });
+  });
+  describe3("horodatage de cr\xE9ation", () => {
+    it("enregistre l\u2019heure exacte de cr\xE9ation dans createdAt", () => {
+      const before = Math.floor(Date.now() / 1e3) * 1e3;
+      const invoice = createInvoice({ items: [line(simpleProduct, "SAC", 1, 100)] });
+      const after2 = Math.floor(Date.now() / 1e3) * 1e3;
+      const createdMs = Math.floor(invoice.createdAt.getTime() / 1e3) * 1e3;
+      assert2.equal(createdMs >= before, true, "createdAt doit \xEAtre >= \xE0 l\u2019instant avant cr\xE9ation");
+      assert2.equal(createdMs <= after2, true, "createdAt doit \xEAtre <= \xE0 l\u2019instant apr\xE8s cr\xE9ation");
+    });
+    it("conserve l\u2019heure de cr\xE9ation apr\xE8s r\xE9ouverture de la base", () => {
+      const invoice = createInvoice({ items: [line(simpleProduct, "SAC", 1, 100)] });
+      const savedCreatedAt = invoice.createdAt.getTime();
+      reopenTestDatabase();
+      const reread = getInvoiceById(invoice.id);
+      assert2.equal(reread.createdAt.getTime(), savedCreatedAt);
+      assert2.equal(reread.createdAt.getHours(), invoice.createdAt.getHours());
+      assert2.equal(reread.createdAt.getMinutes(), invoice.createdAt.getMinutes());
+    });
+    it("conserve l\u2019heure de cr\xE9ation apr\xE8s modification de la facture", () => {
+      const invoice = createInvoice({ items: [line(simpleProduct, "SAC", 1, 100)] });
+      const savedCreatedAt = invoice.createdAt.getTime();
+      const updated = updateInvoice(invoice.id, {
+        date: "2026-10-06",
+        items: [line(simpleProduct, "SAC", 2, 100)]
+      });
+      assert2.equal(updated.createdAt.getTime(), savedCreatedAt);
+    });
+    it("g\xE8re une ancienne facture dont createdAt pourrait \xEAtre \xE0 minuit", () => {
+      const invoice = createInvoice({ items: [line(simpleProduct, "SAC", 1, 100)] });
+      execSql(`UPDATE sales SET created_at = ${Math.floor(new Date(2026, 9, 5, 0, 0).getTime() / 1e3)} WHERE id = ${invoice.id}`);
+      const reread = getInvoiceById(invoice.id);
+      assert2.equal(reread.createdAt.getHours(), 0, "createdAt peut \xEAtre minuit pour les anciennes factures");
+      assert2.equal(reread.createdAt.getMinutes(), 0);
+      assert2.equal(reread.saleDate.getDate(), invoice.saleDate.getDate());
     });
   });
 });

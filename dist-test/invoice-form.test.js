@@ -19741,7 +19741,7 @@ function parseNumberField(rawValue) {
   if (trimmed === "") {
     return void 0;
   }
-  return Number(trimmed);
+  return Number(trimmed.replace(",", "."));
 }
 
 // src/pages/invoices/schemas/invoice.schema.ts
@@ -19765,6 +19765,7 @@ var INVOICE_MESSAGES = {
   formInvalid: "Forme invalide pour ce produit.",
   quantityRequired: "La quantit\xE9 est obligatoire.",
   quantityInvalid: "La quantit\xE9 doit \xEAtre un nombre sup\xE9rieur \xE0 0.",
+  quantityNotHalfUnit: "La quantit\xE9 doit \xEAtre un multiple de 0,5 (0,5, 1, 1,5, 2\u2026).",
   quantityTooHigh: `La quantit\xE9 ne peut pas d\xE9passer ${INVOICE_QUANTITY_MAX}.`,
   unitPriceRequired: "Le prix de vente unitaire est obligatoire.",
   unitPriceInvalid: "Le prix de vente unitaire doit \xEAtre un entier sup\xE9rieur ou \xE9gal \xE0 0.",
@@ -19801,7 +19802,7 @@ var invoiceDateSchema = external_exports.string({ error: INVOICE_MESSAGES.dateRe
 var clientIdSchema = external_exports.number({ error: INVOICE_MESSAGES.clientRequired }).int(INVOICE_MESSAGES.clientRequired).positive(INVOICE_MESSAGES.clientRequired).nullable();
 var productIdSchema = external_exports.number({ error: INVOICE_MESSAGES.productRequired }).int(INVOICE_MESSAGES.productRequired).positive(INVOICE_MESSAGES.productRequired);
 var formSchema = external_exports.string({ error: INVOICE_MESSAGES.formRequired }).trim().min(1, INVOICE_MESSAGES.formRequired).transform(normalizeFormLabel);
-var quantitySchema = external_exports.number({ error: INVOICE_MESSAGES.quantityRequired }).int(INVOICE_MESSAGES.quantityInvalid).positive(INVOICE_MESSAGES.quantityInvalid).max(INVOICE_QUANTITY_MAX, INVOICE_MESSAGES.quantityTooHigh);
+var quantitySchema = external_exports.number({ error: INVOICE_MESSAGES.quantityRequired }).positive(INVOICE_MESSAGES.quantityInvalid).max(INVOICE_QUANTITY_MAX, INVOICE_MESSAGES.quantityTooHigh).refine((value) => Number.isInteger(value * 2), INVOICE_MESSAGES.quantityNotHalfUnit);
 var unitPriceSchema = external_exports.number({ error: INVOICE_MESSAGES.unitPriceRequired }).int(INVOICE_MESSAGES.unitPriceInvalid).min(0, INVOICE_MESSAGES.unitPriceInvalid).max(INVOICE_UNIT_PRICE_MAX, INVOICE_MESSAGES.unitPriceTooHigh);
 var invoiceItemFormSchema = external_exports.object({
   productId: productIdSchema,
@@ -19923,7 +19924,7 @@ function validateDraftLine(productId, form, quantity, products, available) {
   if (!getProductForms(product).includes(normalizeFormLabel(form))) {
     return INVOICE_MESSAGES.formInvalid;
   }
-  if (Number.isInteger(quantity) && quantity > readAvailableStock(available, productId, form)) {
+  if (quantity > readAvailableStock(available, productId, form)) {
     return INVOICE_MESSAGES.insufficientStock;
   }
   return null;
@@ -20126,8 +20127,8 @@ describe3("formulaire de facture", () => {
       assert2.equal(parsed.success ? "" : parsed.error.issues[0].message, expected);
     }
   });
-  it("refuse une quantit\xE9 nulle, n\xE9gative ou d\xE9cimale", () => {
-    for (const quantity of [0, -1, 1.5]) {
+  it("refuse une quantit\xE9 nulle ou n\xE9gative", () => {
+    for (const quantity of [0, -1]) {
       const parsed = invoiceFormSchema.safeParse({
         date: "2026-10-05",
         clientId: 7,
@@ -20137,6 +20138,30 @@ describe3("formulaire de facture", () => {
       assert2.equal(
         parsed.success ? "" : parsed.error.issues[0].message,
         INVOICE_MESSAGES.quantityInvalid
+      );
+    }
+  });
+  it("accepte une quantit\xE9 demi-unit\xE9", () => {
+    for (const quantity of [1.5, 0.5, 10.5, 2]) {
+      const parsed = invoiceFormSchema.safeParse({
+        date: "2026-10-05",
+        clientId: 7,
+        items: [{ productId: 1, form: "SAC", quantity, unitPrice: 2500 }]
+      });
+      assert2.equal(parsed.success, true, `${quantity} must be accepted`);
+    }
+  });
+  it("refuse une quantit\xE9 non multiple de 0,5", () => {
+    for (const quantity of [0.25, 0.75, 1.25, 10.25]) {
+      const parsed = invoiceFormSchema.safeParse({
+        date: "2026-10-05",
+        clientId: 7,
+        items: [{ productId: 1, form: "SAC", quantity, unitPrice: 2500 }]
+      });
+      assert2.equal(parsed.success, false, `${quantity} must be refused`);
+      assert2.equal(
+        parsed.success ? "" : parsed.error.issues[0].message,
+        INVOICE_MESSAGES.quantityNotHalfUnit
       );
     }
   });
@@ -20401,6 +20426,7 @@ describe3("saisie des lignes de facture", () => {
     assert2.equal(draft.unitPrice, "");
     assert2.equal(parseNumberField(""), void 0);
     assert2.equal(parseNumberField(" 12 "), 12);
+    assert2.equal(parseNumberField(" 1,50 "), 1.5);
   });
   it("reprend les lignes existantes avec le prix factur\xE9 \xE0 la cr\xE9ation", () => {
     const lines = toLineDrafts([

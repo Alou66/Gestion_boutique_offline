@@ -25995,6 +25995,7 @@ var STOCK_ERRORS = {
   formsMismatch: "Les formes saisies ne correspondent pas aux formes du produit.",
   quantityRequired: "La quantit\xE9 est obligatoire.",
   quantityInvalid: "La quantit\xE9 doit \xEAtre un nombre sup\xE9rieur \xE0 0.",
+  quantityNotHalfUnit: "La quantit\xE9 doit \xEAtre un multiple de 0,5 (0,5, 1, 1,5, 2\u2026).",
   quantityTooHigh: "La quantit\xE9 ne peut pas d\xE9passer 1 000 000.",
   positiveQuantityRequired: "Au moins une forme doit \xEAtre initialis\xE9e avec une quantit\xE9 sup\xE9rieure \xE0 0.",
   alreadyInitialized: "Le stock de ce produit est d\xE9j\xE0 initialis\xE9.",
@@ -26025,8 +26026,8 @@ var productIdSchema2 = external_exports.number({ error: STOCK_ERRORS.productNotF
 var formSchema = external_exports.string({ error: STOCK_ERRORS.formRequired }).transform(normalizeFormName).pipe(
   external_exports.string().min(1, STOCK_ERRORS.formRequired).max(PRODUCT_FORM_MAX_LENGTH, STOCK_ERRORS.formTooLong)
 );
-var initialQuantitySchema = external_exports.number({ error: STOCK_ERRORS.quantityRequired }).int(STOCK_ERRORS.quantityInvalid).min(0, STOCK_ERRORS.quantityInvalid).max(STOCK_QUANTITY_MAX, STOCK_ERRORS.quantityTooHigh);
-var movementQuantitySchema = external_exports.number({ error: STOCK_ERRORS.quantityRequired }).int(STOCK_ERRORS.quantityInvalid).positive(STOCK_ERRORS.quantityInvalid).max(STOCK_QUANTITY_MAX, STOCK_ERRORS.quantityTooHigh);
+var initialQuantitySchema = external_exports.number({ error: STOCK_ERRORS.quantityRequired }).min(0, STOCK_ERRORS.quantityInvalid).max(STOCK_QUANTITY_MAX, STOCK_ERRORS.quantityTooHigh).refine((value) => Number.isInteger(value * 2), STOCK_ERRORS.quantityNotHalfUnit);
+var movementQuantitySchema = external_exports.number({ error: STOCK_ERRORS.quantityRequired }).positive(STOCK_ERRORS.quantityInvalid).max(STOCK_QUANTITY_MAX, STOCK_ERRORS.quantityTooHigh).refine((value) => Number.isInteger(value * 2), STOCK_ERRORS.quantityNotHalfUnit);
 var directionSchema = external_exports.enum(["IN", "OUT"], {
   error: STOCK_ERRORS.directionRequired
 });
@@ -26654,7 +26655,7 @@ describe3("module Stock", () => {
       assert2.equal(movementCount(), 0);
       assert2.equal(isStockInitialized(transformableProduct.id), false);
     });
-    it("refuse une quantit\xE9 n\xE9gative ou non enti\xE8re", () => {
+    it("refuse une quantit\xE9 n\xE9gative", () => {
       expectStockError(
         "quantityInvalid",
         () => initializeStock(simpleProduct.id, {
@@ -26662,14 +26663,30 @@ describe3("module Stock", () => {
           quantities: [{ form: "SAC", quantity: -5 }]
         })
       );
+      assert2.equal(movementCount(), 0);
+    });
+    it("accepte une quantit\xE9 demi-unit\xE9 et refute les non-multiples de 0,5", () => {
+      initializeStock(simpleProduct.id, {
+        productId: simpleProduct.id,
+        quantities: [{ form: "SAC", quantity: 1.5 }]
+      });
+      assert2.equal(balanceOf(simpleProduct.id, "SAC"), 1.5);
+      assert2.equal(movementCount(), 1);
       expectStockError(
-        "quantityInvalid",
+        "quantityNotHalfUnit",
         () => initializeStock(simpleProduct.id, {
           productId: simpleProduct.id,
-          quantities: [{ form: "SAC", quantity: 1.5 }]
+          quantities: [{ form: "SAC", quantity: 0.25 }]
         })
       );
-      assert2.equal(movementCount(), 0);
+      expectStockError(
+        "quantityNotHalfUnit",
+        () => initializeStock(simpleProduct.id, {
+          productId: simpleProduct.id,
+          quantities: [{ form: "SAC", quantity: 0.75 }]
+        })
+      );
+      assert2.equal(movementCount(), 1);
     });
     it("refuse une deuxi\xE8me initialisation", () => {
       initializeStock(transformableProduct.id, {
@@ -26972,6 +26989,28 @@ describe3("module Stock", () => {
         })
       );
       assert2.equal(movementCount(), 2);
+    });
+    it("accepte une quantit\xE9 demi-unit\xE9 et refute les non-multiples de 0,5", () => {
+      adjustStock(transformableProduct.id, {
+        productId: transformableProduct.id,
+        form: "CARTON",
+        direction: "IN",
+        quantity: 1.5,
+        reason: "Entr\xE9e demi-unit\xE9"
+      });
+      assert2.equal(balanceOf(transformableProduct.id, "CARTON"), 11.5);
+      assert2.equal(movementCount(), 3);
+      expectStockError(
+        "quantityNotHalfUnit",
+        () => adjustStock(transformableProduct.id, {
+          productId: transformableProduct.id,
+          form: "CARTON",
+          direction: "IN",
+          quantity: 0.25,
+          reason: "Refus"
+        })
+      );
+      assert2.equal(movementCount(), 3);
     });
     it("refuse une sortie sup\xE9rieure au stock disponible", () => {
       expectStockError(

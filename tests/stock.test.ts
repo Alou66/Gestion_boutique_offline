@@ -133,7 +133,7 @@ describe('module Stock', () => {
       assert.equal(isStockInitialized(transformableProduct.id), false)
     })
 
-    it('refuse une quantité négative ou non entière', () => {
+    it('refuse une quantité négative', () => {
       expectStockError('quantityInvalid', () =>
         initializeStock(simpleProduct.id, {
           productId: simpleProduct.id,
@@ -141,14 +141,33 @@ describe('module Stock', () => {
         }),
       )
 
-      expectStockError('quantityInvalid', () =>
+      assert.equal(movementCount(), 0)
+    })
+
+    it('accepte une quantité demi-unité et refute les non-multiples de 0,5', () => {
+      initializeStock(simpleProduct.id, {
+        productId: simpleProduct.id,
+        quantities: [{ form: 'SAC', quantity: 1.5 }],
+      })
+
+      assert.equal(balanceOf(simpleProduct.id, 'SAC'), 1.5)
+      assert.equal(movementCount(), 1)
+
+      expectStockError('quantityNotHalfUnit', () =>
         initializeStock(simpleProduct.id, {
           productId: simpleProduct.id,
-          quantities: [{ form: 'SAC', quantity: 1.5 }],
+          quantities: [{ form: 'SAC', quantity: 0.25 }],
         }),
       )
 
-      assert.equal(movementCount(), 0)
+      expectStockError('quantityNotHalfUnit', () =>
+        initializeStock(simpleProduct.id, {
+          productId: simpleProduct.id,
+          quantities: [{ form: 'SAC', quantity: 0.75 }],
+        }),
+      )
+
+      assert.equal(movementCount(), 1)
     })
 
     it('refuse une deuxième initialisation', () => {
@@ -496,6 +515,31 @@ describe('module Stock', () => {
       )
 
       assert.equal(movementCount(), 2)
+    })
+
+    it('accepte une quantité demi-unité et refute les non-multiples de 0,5', () => {
+      adjustStock(transformableProduct.id, {
+        productId: transformableProduct.id,
+        form: 'CARTON',
+        direction: 'IN',
+        quantity: 1.5,
+        reason: 'Entrée demi-unité',
+      })
+
+      assert.equal(balanceOf(transformableProduct.id, 'CARTON'), 11.5)
+      assert.equal(movementCount(), 3)
+
+      expectStockError('quantityNotHalfUnit', () =>
+        adjustStock(transformableProduct.id, {
+          productId: transformableProduct.id,
+          form: 'CARTON',
+          direction: 'IN',
+          quantity: 0.25,
+          reason: 'Refus',
+        }),
+      )
+
+      assert.equal(movementCount(), 3)
     })
 
     it('refuse une sortie supérieure au stock disponible', () => {

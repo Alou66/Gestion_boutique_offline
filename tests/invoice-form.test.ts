@@ -203,8 +203,8 @@ describe('formulaire de facture', () => {
     }
   })
 
-  it('refuse une quantité nulle, négative ou décimale', () => {
-    for (const quantity of [0, -1, 1.5]) {
+  it('refuse une quantité nulle ou négative', () => {
+    for (const quantity of [0, -1]) {
       const parsed = invoiceFormSchema.safeParse({
         date: '2026-10-05',
         clientId: 7,
@@ -215,6 +215,34 @@ describe('formulaire de facture', () => {
       assert.equal(
         parsed.success ? '' : parsed.error.issues[0].message,
         INVOICE_MESSAGES.quantityInvalid,
+      )
+    }
+  })
+
+  it('accepte une quantité demi-unité', () => {
+    for (const quantity of [1.5, 0.5, 10.5, 2]) {
+      const parsed = invoiceFormSchema.safeParse({
+        date: '2026-10-05',
+        clientId: 7,
+        items: [{ productId: 1, form: 'SAC', quantity, unitPrice: 2_500 }],
+      })
+
+      assert.equal(parsed.success, true, `${quantity} must be accepted`)
+    }
+  })
+
+  it('refuse une quantité non multiple de 0,5', () => {
+    for (const quantity of [0.25, 0.75, 1.25, 10.25]) {
+      const parsed = invoiceFormSchema.safeParse({
+        date: '2026-10-05',
+        clientId: 7,
+        items: [{ productId: 1, form: 'SAC', quantity, unitPrice: 2_500 }],
+      })
+
+      assert.equal(parsed.success, false, `${quantity} must be refused`)
+      assert.equal(
+        parsed.success ? '' : parsed.error.issues[0].message,
+        INVOICE_MESSAGES.quantityNotHalfUnit,
       )
     }
   })
@@ -522,6 +550,7 @@ describe('saisie des lignes de facture', () => {
     assert.equal(draft.unitPrice, '')
     assert.equal(parseNumberField(''), undefined)
     assert.equal(parseNumberField(' 12 '), 12)
+    assert.equal(parseNumberField(' 1,50 '), 1.5)
   })
 
   it('reprend les lignes existantes avec le prix facturé à la création', () => {

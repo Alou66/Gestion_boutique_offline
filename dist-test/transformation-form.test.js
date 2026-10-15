@@ -19748,7 +19748,7 @@ function parseNumberField(rawValue) {
   if (trimmed === "") {
     return void 0;
   }
-  return Number(trimmed);
+  return Number(trimmed.replace(",", "."));
 }
 
 // src/pages/transformations/schemas/transformation.schema.ts

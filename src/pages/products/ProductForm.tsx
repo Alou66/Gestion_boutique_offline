@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { productService } from '@/services'
 import type { Category, Product, ProductInput } from '@/types'
+import SearchableSelect from '@/components/SearchableSelect'
+import type { SearchableSelectOption } from '@/components/searchable-select'
 import {
   hasIdenticalForms,
   normalizeFormLabel,
@@ -170,6 +172,10 @@ function ProductForm({
   }
 
   const displayedError = formError ?? (error !== SERVER_DUPLICATE_NAME ? error : null)
+  const categoryOptions: SearchableSelectOption[] = categories.map((category) => ({
+    value: String(category.id),
+    label: category.name,
+  }))
   const primaryFormLabel = primaryForm.trim() ? normalizeFormLabel(primaryForm) : ''
   const secondaryFormLabel = secondaryForm.trim() ? normalizeFormLabel(secondaryForm) : ''
 
@@ -256,21 +262,16 @@ function ProductForm({
         >
           Catégorie
         </label>
-        <select
+        <SearchableSelect
           id="product-category"
           name="categoryId"
           value={categoryId}
-          onChange={(event) => setCategoryId(event.target.value)}
+          options={categoryOptions}
+          placeholder="Rechercher une catégorie..."
           disabled={isSubmitting}
-          className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
-        >
-          <option value="">Choisir une catégorie</option>
-          {categories.map((category) => (
-            <option key={category.id} value={category.id}>
-              {category.name}
-            </option>
-          ))}
-        </select>
+          className="border-gray-500"
+          onChange={setCategoryId}
+        />
         {fieldErrors.categoryId && (
           <p className="mt-1 text-sm text-red-600">{fieldErrors.categoryId}</p>
         )}

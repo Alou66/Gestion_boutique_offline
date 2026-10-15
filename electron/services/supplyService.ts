@@ -40,6 +40,7 @@ export const SUPPLY_ERRORS = {
   formInvalid: 'Forme invalide pour ce produit.',
   quantityRequired: 'La quantité est obligatoire.',
   quantityInvalid: 'La quantité doit être un nombre supérieur à 0.',
+  quantityNotHalfUnit: 'La quantité doit être un multiple de 0,5 (0,5, 1, 1,5, 2…).',
   quantityTooHigh: 'La quantité ne peut pas dépasser 1 000 000.',
   unitPriceRequired: "Le prix d'achat unitaire est obligatoire.",
   unitPriceInvalid: "Le prix d'achat unitaire doit être un entier supérieur ou égal à 0.",
@@ -151,9 +152,9 @@ const formSchema = z
 
 const quantitySchema = z
   .number({ error: SUPPLY_ERRORS.quantityRequired })
-  .int(SUPPLY_ERRORS.quantityInvalid)
   .positive(SUPPLY_ERRORS.quantityInvalid)
   .max(SUPPLY_QUANTITY_MAX, SUPPLY_ERRORS.quantityTooHigh)
+  .refine((value) => Number.isInteger(value * 2), SUPPLY_ERRORS.quantityNotHalfUnit)
 
 const unitPriceSchema = z
   .number({ error: SUPPLY_ERRORS.unitPriceRequired })

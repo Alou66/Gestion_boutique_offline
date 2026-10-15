@@ -31,14 +31,19 @@ export const stockService = {
     input: StockInitializeInput,
   ): Promise<StockFormLevel[]> => {
     return unwrap(await window.api.stock.initialize(productId, input))
-  },
-  adjust: async (
-    productId: number,
-    input: StockAdjustInput,
-  ): Promise<StockAdjustResult> => {
-    return unwrap(await window.api.stock.adjust(productId, input))
-  },
-  movements: async (productId: number): Promise<StockMovement[]> => {
-    return unwrap(await window.api.stock.movements(productId))
-  },
+   },
+   initializeBatch: async (
+     inputs: StockInitializeInput[],
+   ): Promise<StockFormLevel[][]> => {
+     return unwrap(await window.api.stock.initializeBatch(inputs))
+   },
+   adjust: async (
+     productId: number,
+     input: StockAdjustInput,
+   ): Promise<StockAdjustResult> => {
+     return unwrap(await window.api.stock.adjust(productId, input))
+   },
+   movements: async (productId: number): Promise<StockMovement[]> => {
+     return unwrap(await window.api.stock.movements(productId))
+   },
 }

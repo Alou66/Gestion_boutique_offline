@@ -92,11 +92,11 @@ function StockInitializeForm({
             <input
               id={`stock-initial-${form}`}
               name={form}
-              type="number"
-              inputMode="numeric"
+              type="text"
+              inputMode="decimal"
               min={0}
               max={STOCK_QUANTITY_MAX}
-              step={1}
+              step={0.5}
               placeholder="0"
               value={values[form] ?? ''}
               onChange={(event) => handleChange(form, event.target.value)}

@@ -169,8 +169,9 @@ describe('brouillon d’approvisionnement en cours', () => {
 
     const restored = readSupplyDraft()
 
-    assert.equal(restored?.lines.length, 1)
-    assert.equal(restored?.lines[0].key, 'ok')
+    assert.equal(restored?.lines.length, 2)
+    assert.equal(restored?.lines[0].key, 'decimal')
+    assert.equal(restored?.lines[1].key, 'ok')
   })
 
   it('plafonne les lignes restaurées au maximum autorisé', () => {

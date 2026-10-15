@@ -39,14 +39,15 @@ const api: ElectronAPI = {
     isNameAvailable: (name, excludeId) =>
       ipcRenderer.invoke('products:is-name-available', name, excludeId),
   },
-  stock: {
-    list: (filters) => ipcRenderer.invoke('stock:list', filters),
-    get: (productId) => ipcRenderer.invoke('stock:get', productId),
-    getForm: (productId, form) => ipcRenderer.invoke('stock:get-form', productId, form),
-    initialize: (productId, input) => ipcRenderer.invoke('stock:initialize', productId, input),
-    adjust: (productId, input) => ipcRenderer.invoke('stock:adjust', productId, input),
-    movements: (productId) => ipcRenderer.invoke('stock:movements', productId),
-  },
+   stock: {
+     list: (filters) => ipcRenderer.invoke('stock:list', filters),
+     get: (productId) => ipcRenderer.invoke('stock:get', productId),
+     getForm: (productId, form) => ipcRenderer.invoke('stock:get-form', productId, form),
+     initialize: (productId, input) => ipcRenderer.invoke('stock:initialize', productId, input),
+     initializeBatch: (inputs) => ipcRenderer.invoke('stock:initialize-batch', inputs),
+     adjust: (productId, input) => ipcRenderer.invoke('stock:adjust', productId, input),
+     movements: (productId) => ipcRenderer.invoke('stock:movements', productId),
+   },
   supplies: {
     list: (filters) => ipcRenderer.invoke('supplies:list', filters),
     get: (id) => ipcRenderer.invoke('supplies:get', id),
