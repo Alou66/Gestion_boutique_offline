@@ -28989,12 +28989,11 @@ function assertNotInMaintenance5() {
     throw new StockError("unexpected");
   }
 }
-function initializeStock(productId, input2) {
+function initializeStock(productId, input2, tx) {
   assertNotInMaintenance5();
   const parsedId = parseProductId2(productId);
-  const db2 = getDb();
-  return withMappedErrors3(
-    () => db2.transaction((tx) => {
+  return withMappedErrors3(() => {
+    if (tx) {
       const product = readProductForWrite(parsedId);
       const quantities = parseInitialQuantities(input2, product);
       if (isInitializedIn(tx, parsedId)) {
@@ -29024,6 +29023,81 @@ function initializeStock(productId, input2) {
         }
       }
       return buildStockLines(product, loadStockTotals(tx));
+    } else {
+      const db2 = getDb();
+      return db2.transaction((tx2) => {
+        const product = readProductForWrite(parsedId);
+        const quantities = parseInitialQuantities(input2, product);
+        if (isInitializedIn(tx2, parsedId)) {
+          throw new StockError("alreadyInitialized");
+        }
+        if (hasAnyMovementIn(tx2, parsedId)) {
+          throw new StockError("alreadyHasMovements");
+        }
+        const now = /* @__PURE__ */ new Date();
+        for (const { form, quantity } of quantities) {
+          if (quantity <= 0) {
+            continue;
+          }
+          tx2.insert(stockMovements).values({
+            productId: parsedId,
+            form,
+            movementType: "STOCK_INITIAL",
+            direction: "IN",
+            quantity,
+            reason: null,
+            createdAt: now
+          }).run();
+        }
+        for (const { form, quantity } of quantities) {
+          if (computeFormQuantity2(tx2, parsedId, form) !== quantity) {
+            throw new StockError("unexpected");
+          }
+        }
+        return buildStockLines(product, loadStockTotals(tx2));
+      });
+    }
+  });
+}
+function initializeBatch(inputs) {
+  assertNotInMaintenance5();
+  const db2 = getDb();
+  return withMappedErrors3(
+    () => db2.transaction((tx) => {
+      const results = [];
+      for (const input2 of inputs) {
+        const parsedId = parseProductId2(input2.productId);
+        const product = readProductForWrite(parsedId);
+        const quantities = parseInitialQuantities(input2, product);
+        if (isInitializedIn(tx, parsedId)) {
+          throw new StockError("alreadyInitialized");
+        }
+        if (hasAnyMovementIn(tx, parsedId)) {
+          throw new StockError("alreadyHasMovements");
+        }
+        const now = /* @__PURE__ */ new Date();
+        for (const { form, quantity } of quantities) {
+          if (quantity <= 0) {
+            continue;
+          }
+          tx.insert(stockMovements).values({
+            productId: parsedId,
+            form,
+            movementType: "STOCK_INITIAL",
+            direction: "IN",
+            quantity,
+            reason: null,
+            createdAt: now
+          }).run();
+        }
+        for (const { form, quantity } of quantities) {
+          if (computeFormQuantity2(tx, parsedId, form) !== quantity) {
+            throw new StockError("unexpected");
+          }
+        }
+        results.push(buildStockLines(product, loadStockTotals(tx)));
+      }
+      return results;
     })
   );
 }
@@ -29148,6 +29222,16 @@ function registerStockIpcHandlers() {
     (_event, productId) => {
       try {
         return toSuccess6(listProductMovements(productId));
+      } catch (error62) {
+        return toFailure8(error62, STOCK_ERRORS.unexpected);
+      }
+    }
+  );
+  ipcMain.handle(
+    "stock:initialize-batch",
+    (_event, inputs) => {
+      try {
+        return toSuccess6(initializeBatch(inputs));
       } catch (error62) {
         return toFailure8(error62, STOCK_ERRORS.unexpected);
       }

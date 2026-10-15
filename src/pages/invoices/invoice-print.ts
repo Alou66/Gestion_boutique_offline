@@ -428,7 +428,7 @@ const PRINT_STYLES = `
     page-break-inside: avoid;
   }
   .designation { min-width: 0; }
-  .designation .form { font-weight: 700; color: #374151; }
+  .designation .form { font-weight: 500; color: #374151; }
   .designation .product { margin-left: 0.8mm; }
   .amounts, .visas { margin-top: 2.5mm; }
   .amounts th, .amounts td, .visas th, .visas td {

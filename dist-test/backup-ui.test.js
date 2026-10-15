@@ -110,6 +110,7 @@ var api = {
     get: (productId) => ipcRenderer.invoke("stock:get", productId),
     getForm: (productId, form) => ipcRenderer.invoke("stock:get-form", productId, form),
     initialize: (productId, input) => ipcRenderer.invoke("stock:initialize", productId, input),
+    initializeBatch: (inputs) => ipcRenderer.invoke("stock:initialize-batch", inputs),
     adjust: (productId, input) => ipcRenderer.invoke("stock:adjust", productId, input),
     movements: (productId) => ipcRenderer.invoke("stock:movements", productId)
   },
