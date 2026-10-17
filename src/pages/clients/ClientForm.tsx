@@ -8,7 +8,6 @@ import {
   CLIENT_PHONE_MAX_LENGTH,
   CLIENT_ADDRESS_MAX_LENGTH,
   CLIENT_NAME_MIN_LENGTH,
-  CLIENT_PHONE_MIN_DIGITS,
   clientSchema,
   isValidSenegalesePhone,
 } from './schemas/client.schema'
@@ -68,7 +67,11 @@ function ClientForm({
   }, [])
 
   const checkPhoneAvailability = useCallback(async (value: string, excludeId?: number) => {
-    if (!value || value.trim().length < CLIENT_PHONE_MIN_DIGITS) {
+    if (value.trim() === '') {
+      setPhoneAvailability('idle')
+      return
+    }
+    if (!isValidSenegalesePhone(value)) {
       setPhoneAvailability('idle')
       return
     }
@@ -271,7 +274,7 @@ function ClientForm({
 
       <div>
         <label htmlFor="client-phone" className="block text-sm font-medium text-gray-700">
-          Téléphone <span className="text-red-500">*</span>
+          Téléphone
         </label>
         <div className="mt-1 flex items-center gap-2">
           <input

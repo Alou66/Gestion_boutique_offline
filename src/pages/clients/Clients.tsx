@@ -9,7 +9,8 @@ import { CLIENT_MESSAGES } from './schemas/client.schema'
 
 type StatusFilter = 'all' | 'active' | 'inactive'
 
-function formatPhone(phone: string): string {
+function formatPhone(phone: string | null): string {
+  if (!phone) return '—'
   if (phone.startsWith('+221')) {
     const num = phone.slice(4)
     return `${num.slice(0, 2)} ${num.slice(2, 5)} ${num.slice(5, 7)} ${num.slice(7, 9)}`

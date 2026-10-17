@@ -5711,7 +5711,7 @@ var clients = sqliteTable(
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     name: text("name").notNull(),
-    phone: text("phone").notNull(),
+    phone: text("phone"),
     address: text("address"),
     isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
     isSystem: integer("is_system", { mode: "boolean" }).notNull().default(false),
@@ -6136,7 +6136,9 @@ function buildSettingsRow(input2, now) {
 }
 function initDatabase(migrationsFolder2) {
   const db2 = initializeDatabase();
+  db2.$client.pragma("foreign_keys = OFF");
   runMigrationsWithRecovery(db2, migrationsFolder2);
+  db2.$client.pragma("foreign_keys = ON");
 }
 function runMigrationsWithRecovery(db2, migrationsFolder2) {
   let done = false;
@@ -27163,10 +27165,13 @@ function parseClientName(input2) {
   return normalizeClientName(parsed.data);
 }
 function parseClientPhone(input2) {
-  const phoneSchema = external_exports.string({ error: CLIENT_ERRORS.phoneRequired }).trim().min(1, CLIENT_ERRORS.phoneRequired).max(CLIENT_PHONE_MAX_LENGTH, CLIENT_ERRORS.phoneTooLong);
+  if (input2.phone === void 0 || input2.phone === null || input2.phone.trim() === "") {
+    return null;
+  }
+  const phoneSchema = external_exports.string().trim().max(CLIENT_PHONE_MAX_LENGTH, CLIENT_ERRORS.phoneTooLong);
   const parsed = phoneSchema.safeParse(input2.phone);
   if (!parsed.success) {
-    throw new ClientError(toErrorCode3(parsed.error, "phoneRequired"));
+    throw new ClientError(toErrorCode3(parsed.error, "phoneTooLong"));
   }
   const normalized = normalizePhone(parsed.data);
   if (!isValidSenegalesePhone(normalized)) {
@@ -27218,6 +27223,7 @@ function assertNameIsAvailable3(name, excludeId) {
   }
 }
 function assertPhoneIsAvailable(phone, excludeId) {
+  if (phone === null) return;
   const conditions = [eq(clients.phone, phone)];
   if (excludeId) {
     conditions.push(ne(clients.id, excludeId));

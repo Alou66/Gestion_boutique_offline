@@ -23,7 +23,9 @@ export function buildSettingsRow(input: SettingsInput, now: Date) {
 
 export function initDatabase(migrationsFolder: string): void {
   const db = initializeDatabase()
+  db.$client.pragma('foreign_keys = OFF')
   runMigrationsWithRecovery(db, migrationsFolder)
+  db.$client.pragma('foreign_keys = ON')
 }
 
 /**

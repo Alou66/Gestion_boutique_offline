@@ -444,7 +444,7 @@ export interface TransformationAPI {
 export interface Client {
   id: number
   name: string
-  phone: string
+  phone: string | null
   address: string | null
   isActive: boolean
   isSystem: boolean
@@ -454,7 +454,7 @@ export interface Client {
 
 export interface ClientInput {
   name: string
-  phone: string
+  phone?: string | null
   address?: string | null
 }
 

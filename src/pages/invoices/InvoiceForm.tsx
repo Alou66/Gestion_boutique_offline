@@ -281,7 +281,9 @@ function InvoiceForm({
     () =>
       products.map((product) => ({
         value: String(product.id),
-        label: product.name,
+        label: product.primaryForm
+          ? `${product.primaryForm} ${product.name}`
+          : product.name,
         hint: product.categoryName || undefined,
       })),
     [products],

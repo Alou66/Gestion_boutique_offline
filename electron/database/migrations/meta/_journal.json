@@ -78,6 +78,13 @@
       "when": 1791896880611,
       "tag": "0010_conscious_cyclops",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1792242432151,
+      "tag": "0011_flaky_jigsaw",
+      "breakpoints": true
     }
   ]
 }

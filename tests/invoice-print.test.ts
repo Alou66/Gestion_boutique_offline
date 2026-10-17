@@ -272,10 +272,10 @@ describe('document imprimable de la facture', () => {
     assert.equal(html.includes('>Total facture<'), true)
     assert.equal(html.includes('>Déjà payé<'), true)
     assert.equal(html.includes('>Reste à payer<'), true)
-    // Les montants sont portés tels que le service les renvoie, une
-    // fois par exemplaire : la devise est écrite en lettres sous les
-    // visas, jamais répétée à côté des chiffres.
-    assert.equal(countOccurrences(html, grouped.format(28_000)), 2)
+    // Les montants figurent dans le tableau des montants (une fois par
+    // exemplaire) et le total est aussi repris dans la phrase d'arrêtée
+    // « à la somme de : 28 000 FCFA » (une fois par exemplaire).
+    assert.equal(countOccurrences(html, grouped.format(28_000)), 4)
     assert.equal(countOccurrences(html, grouped.format(10_000)), 2)
     assert.equal(countOccurrences(html, grouped.format(18_000)), 2)
   })

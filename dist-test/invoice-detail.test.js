@@ -19857,7 +19857,7 @@ function paymentStatusTone(status) {
   if (status === "PARTIELLEMENT_PAYEE") {
     return "bg-amber-100 text-amber-700";
   }
-  return "bg-gray-100 text-gray-600";
+  return "bg-red-100 text-red-600";
 }
 function saleStatusTone(status) {
   return status === "VALIDEE" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700";

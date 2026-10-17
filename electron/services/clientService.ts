@@ -117,17 +117,20 @@ function parseClientName(input: ClientInput | ClientUpdateInput): string {
   return normalizeClientName(parsed.data)
 }
 
-function parseClientPhone(input: ClientInput | ClientUpdateInput): string {
+function parseClientPhone(input: ClientInput | ClientUpdateInput): string | null {
+  if (input.phone === undefined || input.phone === null || input.phone.trim() === '') {
+    return null
+  }
+
   const phoneSchema = z
-    .string({ error: CLIENT_ERRORS.phoneRequired })
+    .string()
     .trim()
-    .min(1, CLIENT_ERRORS.phoneRequired)
     .max(CLIENT_PHONE_MAX_LENGTH, CLIENT_ERRORS.phoneTooLong)
 
   const parsed = phoneSchema.safeParse(input.phone)
 
   if (!parsed.success) {
-    throw new ClientError(toErrorCode(parsed.error, 'phoneRequired'))
+    throw new ClientError(toErrorCode(parsed.error, 'phoneTooLong'))
   }
 
   const normalized = normalizePhone(parsed.data)
@@ -203,7 +206,8 @@ function assertNameIsAvailable(name: string, excludeId?: number): void {
   }
 }
 
-function assertPhoneIsAvailable(phone: string, excludeId?: number): void {
+function assertPhoneIsAvailable(phone: string | null, excludeId?: number): void {
+  if (phone === null) return
   const conditions = [eq(clients.phone, phone)]
 
   if (excludeId) {

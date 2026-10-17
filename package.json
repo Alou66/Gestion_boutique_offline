@@ -1,12 +1,12 @@
 {
   "name": "gestion-boutique",
   "private": true,
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Application desktop de gestion de boutique",
   "author": "Alassane",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/copy-migrations.cjs && vite",
     "build": "tsc && vite build && node scripts/copy-migrations.cjs && electron-builder",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "typecheck": "tsc --noEmit",

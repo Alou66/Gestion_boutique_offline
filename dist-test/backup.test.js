@@ -5810,7 +5810,7 @@ var clients = sqliteTable(
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     name: text("name").notNull(),
-    phone: text("phone").notNull(),
+    phone: text("phone"),
     address: text("address"),
     isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
     isSystem: integer("is_system", { mode: "boolean" }).notNull().default(false),
@@ -6108,7 +6108,9 @@ async function waitForTransactionEnd(db2, timeoutMs) {
 // electron/services/databaseService.ts
 function initDatabase(migrationsFolder2) {
   const db2 = initializeDatabase();
+  db2.$client.pragma("foreign_keys = OFF");
   runMigrationsWithRecovery(db2, migrationsFolder2);
+  db2.$client.pragma("foreign_keys = ON");
 }
 function runMigrationsWithRecovery(db2, migrationsFolder2) {
   let done = false;

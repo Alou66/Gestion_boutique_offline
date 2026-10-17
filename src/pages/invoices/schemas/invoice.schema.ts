@@ -514,7 +514,7 @@ export function paymentStatusTone(status: PaymentStatus): string {
     return 'bg-amber-100 text-amber-700'
   }
 
-  return 'bg-gray-100 text-gray-600'
+  return 'bg-red-100 text-red-600'
 }
 
 export function saleStatusTone(status: SaleStatus): string {

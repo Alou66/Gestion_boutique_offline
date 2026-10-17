@@ -20094,7 +20094,7 @@ var PRINT_STYLES = `
     page-break-inside: avoid;
   }
   .designation { min-width: 0; }
-  .designation .form { font-weight: 700; color: #374151; }
+  .designation .form { font-weight: 500; color: #374151; }
   .designation .product { margin-left: 0.8mm; }
   .amounts, .visas { margin-top: 2.5mm; }
   .amounts th, .amounts td, .visas th, .visas td {
@@ -20677,7 +20677,7 @@ describe3("document imprimable de la facture", () => {
     assert2.equal(html.includes(">Total facture<"), true);
     assert2.equal(html.includes(">D\xE9j\xE0 pay\xE9<"), true);
     assert2.equal(html.includes(">Reste \xE0 payer<"), true);
-    assert2.equal(countOccurrences(html, grouped.format(28e3)), 2);
+    assert2.equal(countOccurrences(html, grouped.format(28e3)), 4);
     assert2.equal(countOccurrences(html, grouped.format(1e4)), 2);
     assert2.equal(countOccurrences(html, grouped.format(18e3)), 2);
   });

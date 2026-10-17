@@ -5755,7 +5755,7 @@ var clients = sqliteTable(
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     name: text("name").notNull(),
-    phone: text("phone").notNull(),
+    phone: text("phone"),
     address: text("address"),
     isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
     isSystem: integer("is_system", { mode: "boolean" }).notNull().default(false),

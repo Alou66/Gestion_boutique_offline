@@ -63,11 +63,13 @@ const nameSchema = z
   .refine((name) => name.length >= CLIENT_NAME_MIN_LENGTH, CLIENT_MESSAGES.nameTooShort)
 
 const phoneSchema = z
-  .string({ error: CLIENT_MESSAGES.phoneRequired })
+  .string()
   .trim()
-  .min(1, CLIENT_MESSAGES.phoneRequired)
   .max(CLIENT_PHONE_MAX_LENGTH, CLIENT_MESSAGES.phoneTooLong)
-  .refine((phone) => isValidSenegalesePhone(phone), CLIENT_MESSAGES.phoneInvalid)
+  .refine((phone) => phone === '' || isValidSenegalesePhone(phone), CLIENT_MESSAGES.phoneInvalid)
+  .transform((phone) => (phone === '' ? null : normalizePhone(phone)))
+  .nullable()
+  .optional()
 
 const addressSchema = z
   .string()
