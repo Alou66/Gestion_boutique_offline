@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { Payment, Sale, SaleFilters } from '@/types'
+import type { Payment, Sale } from '@/types'
 import { invoiceService } from '@/services'
 import {
   formatAmount,
@@ -19,6 +19,11 @@ interface CashJournalSummary {
   totalRemaining: number
 }
 
+interface GlobalSummary {
+  totalReceivables: number
+  totalCollectedToday: number
+}
+
 interface PaymentRow {
   date: string
   invoiceRef: string
@@ -26,10 +31,23 @@ interface PaymentRow {
   amount: number
 }
 
-/** Default period of the journal: the current day. */
 function defaultFilters(): CashJournalFilters {
   const today = todayInputValue()
   return { dateFrom: today, dateTo: today }
+}
+
+function toDateKey(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function inRange(date: Date, from: string, to: string): boolean {
+  const key = toDateKey(date)
+  if (from && key < from) return false
+  if (to && key > to) return false
+  return true
 }
 
 function CashJournal() {
@@ -44,54 +62,61 @@ function CashJournal() {
     setLoadError(null)
 
     try {
-      const saleFilters: SaleFilters = {
-        status: 'VALIDEE',
-        dateFrom: filters.dateFrom || undefined,
-        dateTo: filters.dateTo || undefined,
-      }
-
-      const loadedInvoices = await invoiceService.list(saleFilters)
+      const loadedInvoices = await invoiceService.list({ status: 'VALIDEE' })
       setInvoices(loadedInvoices)
 
-      const paidInvoices = loadedInvoices.filter((inv) => inv.paidAmount > 0)
       const allPayments: Payment[] = []
-
-      for (const invoice of paidInvoices) {
+      for (const invoice of loadedInvoices) {
         const invoicePayments = await invoiceService.listPayments(invoice.id)
         allPayments.push(...invoicePayments)
       }
-
       setPayments(allPayments)
     } catch {
       setLoadError('Une erreur est survenue lors du chargement du journal de caisse.')
     } finally {
       setIsLoading(false)
     }
-  }, [filters.dateFrom, filters.dateTo])
+  }, [])
 
   useEffect(() => {
     const timer = setTimeout(loadData, 200)
     return () => clearTimeout(timer)
   }, [loadData])
 
+  const periodInvoices = useMemo(() => {
+    return invoices.filter((inv) => inRange(inv.saleDate, filters.dateFrom, filters.dateTo))
+  }, [invoices, filters.dateFrom, filters.dateTo])
+
   const summary = useMemo((): CashJournalSummary => {
-    const totalInvoiced = invoices.reduce((sum, inv) => sum + inv.totalAmount, 0)
-    const totalCollected = invoices.reduce((sum, inv) => sum + inv.paidAmount, 0)
-    const totalRemaining = invoices.reduce((sum, inv) => sum + inv.remainingAmount, 0)
+    const totalInvoiced = periodInvoices.reduce((sum, inv) => sum + inv.totalAmount, 0)
+    const periodPayments = payments.filter((p) => inRange(p.paymentDate, filters.dateFrom, filters.dateTo))
+    const totalCollected = periodPayments.reduce((sum, p) => sum + p.amount, 0)
+    const totalRemaining = periodInvoices.reduce((sum, inv) => sum + inv.remainingAmount, 0)
 
     return {
-      validInvoiceCount: invoices.length,
+      validInvoiceCount: periodInvoices.length,
       totalInvoiced,
       totalCollected,
       totalRemaining,
     }
-  }, [invoices])
+  }, [periodInvoices, payments, filters.dateFrom, filters.dateTo])
+
+  const global = useMemo((): GlobalSummary => {
+    const today = todayInputValue()
+    const totalReceivables = invoices.reduce((sum, inv) => sum + inv.remainingAmount, 0)
+    const totalCollectedToday = payments
+      .filter((p) => toDateKey(p.paymentDate) === today)
+      .reduce((sum, p) => sum + p.amount, 0)
+    return { totalReceivables, totalCollectedToday }
+  }, [invoices, payments])
 
   const allPayments = useMemo((): PaymentRow[] => {
+    const invoiceMap = new Map(invoices.map((inv) => [inv.id, inv]))
     return payments
+      .filter((p) => inRange(p.paymentDate, filters.dateFrom, filters.dateTo))
       .sort((a, b) => new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime())
       .map((payment) => {
-        const invoice = invoices.find((inv) => inv.id === payment.saleId)
+        const invoice = invoiceMap.get(payment.saleId)
         return {
           date: formatInvoiceDate(payment.paymentDate),
           invoiceRef: invoice?.reference ?? '—',
@@ -99,7 +124,7 @@ function CashJournal() {
           amount: payment.amount,
         }
       })
-  }, [payments, invoices])
+  }, [payments, invoices, filters.dateFrom, filters.dateTo])
 
   const handleDateChange = (field: keyof CashJournalFilters, value: string) => {
     setFilters((prev) => ({ ...prev, [field]: value }))
@@ -142,20 +167,34 @@ function CashJournal() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="bg-white rounded-lg border shadow p-6">
-          <p className="text-sm font-medium text-gray-500">Factures validées</p>
+          <p className="text-sm font-medium text-gray-500">Factures validées (période)</p>
           <p className="mt-2 text-3xl font-bold text-gray-900">{summary.validInvoiceCount}</p>
         </div>
         <div className="bg-white rounded-lg border shadow p-6">
-          <p className="text-sm font-medium text-gray-500">Total facturé</p>
+          <p className="text-sm font-medium text-gray-500">Total facturé (période)</p>
           <p className="mt-2 text-3xl font-bold text-gray-900">{formatAmount(summary.totalInvoiced)} FCFA</p>
         </div>
         <div className="bg-white rounded-lg border shadow p-6">
-          <p className="text-sm font-medium text-gray-500">Total encaissé</p>
+          <p className="text-sm font-medium text-gray-500">Total encaissé (période)</p>
           <p className="mt-2 text-3xl font-bold text-green-600">{formatAmount(summary.totalCollected)} FCFA</p>
         </div>
         <div className="bg-white rounded-lg border shadow p-6">
-          <p className="text-sm font-medium text-gray-500">Reste à encaisser</p>
+          <p className="text-sm font-medium text-gray-500">Reste à encaisser (période)</p>
           <p className="mt-2 text-3xl font-bold text-red-600">{formatAmount(summary.totalRemaining)} FCFA</p>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg border shadow p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Situation globale</h2>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <p className="text-sm font-medium text-gray-500">Total des créances clients</p>
+            <p className="mt-2 text-2xl font-bold text-red-600">{formatAmount(global.totalReceivables)} FCFA</p>
+          </div>
+          <div>
+            <p className="text-sm font-medium text-gray-500">Total encaissé aujourd'hui</p>
+            <p className="mt-2 text-2xl font-bold text-green-600">{formatAmount(global.totalCollectedToday)} FCFA</p>
+          </div>
         </div>
       </div>
 

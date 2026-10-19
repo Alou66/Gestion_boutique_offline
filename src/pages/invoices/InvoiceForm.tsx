@@ -276,16 +276,25 @@ function InvoiceForm({
     return options
   }, [clients, systemClient])
 
-  /** Options du champ produit : la catégorie sert d'indice de recherche. */
   const productOptions = useMemo<SearchableSelectOption[]>(
     () =>
-      products.map((product) => ({
-        value: String(product.id),
-        label: product.primaryForm
-          ? `${product.primaryForm} ${product.name}`
-          : product.name,
-        hint: product.categoryName || undefined,
-      })),
+      products.flatMap((product) => {
+        const forms = getProductForms(product)
+        if (forms.length === 0) {
+          return [
+            {
+              value: String(product.id),
+              label: product.name,
+              hint: product.categoryName || undefined,
+            },
+          ]
+        }
+        return forms.map((form) => ({
+          value: `${product.id}::${form}`,
+          label: `${form} ${product.name}`,
+          hint: product.categoryName || undefined,
+        }))
+      }),
     [products],
   )
 
@@ -299,7 +308,8 @@ function InvoiceForm({
   )
 
   const editorProduct = productsById.get(Number(editor.productId)) ?? null
-  const editorForms = getProductForms(editorProduct)
+  const editorProductValue =
+    editor.productId && editor.form ? `${editor.productId}::${editor.form}` : editor.productId
   const editorAvailableStock = editorProduct && editor.form
     ? availableStock.get(getLineKey(editorProduct.id, editor.form)) ?? 0
     : 0
@@ -324,10 +334,11 @@ function InvoiceForm({
    * configuré pour la forme retenue. Un produit simple n'affiche qu'une seule
    * forme : aucune conversion automatique n'est proposée.
    */
-  const handleProductChange = (rawProductId: string) => {
+  const handleProductChange = (rawValue: string) => {
+    const [rawProductId, rawForm] = rawValue.split('::')
     const product = productsById.get(Number(rawProductId)) ?? null
     const forms = getProductForms(product)
-    const form = forms[0] ?? ''
+    const form = rawForm && forms.includes(rawForm) ? rawForm : (forms[0] ?? '')
     const price = getConfiguredSalePrice(product, form)
 
     setDraftErrors({})
@@ -338,12 +349,6 @@ function InvoiceForm({
       quantity: '',
       unitPrice: price === null ? '' : String(price),
     }))
-  }
-
-  const handleFormChange = (form: string) => {
-    const price = getConfiguredSalePrice(editorProduct, form)
-
-    updateEditor({ form, unitPrice: price === null ? editor.unitPrice : String(price) })
   }
 
   const handleEditLine = (line: InvoiceLineDraft) => {
@@ -571,7 +576,7 @@ function InvoiceForm({
             <SearchableSelect
               id="invoice-product"
               name="productId"
-              value={editor.productId}
+              value={editorProductValue}
               options={productOptions}
               placeholder="Choisir un produit"
               disabled={isSubmitting}
@@ -583,44 +588,11 @@ function InvoiceForm({
           </div>
 
           <div>
-            <label htmlFor="invoice-form" className="block text-sm font-medium text-gray-700">
-              Forme
-            </label>
-            {editorForms.length > 1 ? (
-              <select
-                id="invoice-form"
-                name="form"
-                value={editor.form}
-                onChange={(event) => handleFormChange(event.target.value)}
-                disabled={isSubmitting}
-                className="mt-1 block w-full rounded-md border border-gray-500 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-60"
-              >
-                {editorForms.map((availableForm) => (
-                  <option key={availableForm} value={availableForm}>
-                    {availableForm}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <input
-                id="invoice-form"
-                name="form"
-                type="text"
-                readOnly
-                value={editorForms[0] ?? ''}
-                placeholder="—"
-                disabled={isSubmitting}
-                className="mt-1 block w-full rounded-md border-gray-200 bg-gray-100 text-gray-600 shadow-sm"
-              />
-            )}
-            {draftErrors.form && (
-              <p className="mt-1 text-sm text-red-600">{draftErrors.form}</p>
-            )}
-             {editorProduct && (
+            {editorProduct && (
               <p className="mt-1 text-xs text-gray-500">
                 Stock disponible : {editorAvailableStock}
               </p>
-            )} 
+            )}
           </div>
 
           <div>
